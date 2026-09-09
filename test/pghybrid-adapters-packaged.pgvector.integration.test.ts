@@ -11,6 +11,8 @@ import { testDatabaseUrl } from './helpers/postgres.js';
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
 const pins = { pg: '8.23.0', postgres: '3.4.9', 'drizzle-orm': '0.45.2', kysely: '0.29.5' };
+const timeoutMs = 30_000;
+const budget = ['--timeout-ms', String(timeoutMs)];
 
 test('all four public adapters and the supplemental pg Client replay from a clean source-bound package installation', async () => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'interleave installed pghybrid adapters '));
@@ -53,9 +55,10 @@ export default { ...original, async setup(context) {
       const protocol = adapter === 'postgresjs' ? 'describe-flush-v1' : 'sync-cycle-v1';
       execute(process.execPath, [cli, 'run', entry, '--project-root', app, '--include', 'vendor',
         '--fixture-profile', 'postgresql17-pgvector0.8.6-v1', '--protocol-profile', protocol,
-        '--max-runs', '1', '--timeout-ms', '30000', '--out', artifact, '--json'], app, 4);
+        '--max-runs', '1', ...budget, '--out', artifact, '--json'], app, 4);
       const first = parseRunArtifact(JSON.parse(await readFile(artifact, 'utf8')));
       expect(first.outcome, first.reason).toBe('passed'); expect(first.cleanup.complete).toBe(true);
+      expect(first.limits.timeoutMs).toBe(timeoutMs);
       expect(first.environment.source?.components.runtime.mode).toBe('build');
       expect(first.environment.source?.components.source.files.some(file => file.path === 'vendor/LICENSE')).toBe(true);
       const packages = first.environment.source!.components.dependencies.packages;
@@ -63,8 +66,9 @@ export default { ...original, async setup(context) {
       expect(first.trace.filter(step => step.sql.includes('websearch_to_tsquery') && step.completion?.kind !== 'metadata')).toHaveLength(4);
       expect(first.actors.map(actor => actor.value)).toEqual(Array.from({ length: 2 }, () => Array.from({ length: 2 }, () =>
         ['Termination for convenience', 'Renewal pricing', 'Renewal terms'])));
-      const repeated = parseRunArtifact(JSON.parse(execute(process.execPath, [cli, 'replay', entry, artifact, '--json'], app)));
+      const repeated = parseRunArtifact(JSON.parse(execute(process.execPath, [cli, 'replay', entry, artifact, ...budget, '--json'], app)));
       expect(repeated.outcome, repeated.reason).toBe('passed'); expect(repeated.cleanup.complete).toBe(true);
+      expect(repeated.limits.timeoutMs).toBe(timeoutMs);
       expect(repeated.environment.source).toEqual(first.environment.source);
       expect(repeated.environment.fixture).toEqual(first.environment.fixture);
       expect(repeated.connections).toEqual(first.connections);
@@ -75,8 +79,9 @@ export default { ...original, async setup(context) {
         const driver = join(app, 'node_modules/pg/lib/client.js'), bytes = await readFile(driver);
         try {
           await writeFile(driver, Buffer.concat([bytes, Buffer.from('\n// qualification: changed installed driver bytes\n')]));
-          const drift = parseRunArtifact(JSON.parse(execute(process.execPath, [cli, 'replay', entry, artifact, '--json'], app, 3)));
+          const drift = parseRunArtifact(JSON.parse(execute(process.execPath, [cli, 'replay', entry, artifact, ...budget, '--json'], app, 3)));
           expect(drift.outcome).toBe('incompatible'); expect(drift.reason).toMatch(/source|dependency|runtime/i);
+          expect(drift.limits.timeoutMs).toBe(timeoutMs);
           expect(drift.trace).toEqual([]); expect(drift.cleanup.complete).toBe(true);
           expect(await readFile(imports)).toEqual(loaded);
           expect(await readFile(journal)).toEqual(owned);

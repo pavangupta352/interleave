@@ -33,7 +33,8 @@ INTERLEAVE_TEST_POSTGRES_IMAGE=pgvector/pgvector:0.8.6-pg17-bookworm \
 The test harness creates an owned container on a random loopback port and removes
 the exact container and its anonymous volumes after the run. To use a dedicated
 administrator endpoint instead, set `TEST_DATABASE_URL` and retain the exact
-`INTERLEAVE_TEST_POSTGRES_IMAGE` value so the vector-only tests are selected.
+`INTERLEAVE_TEST_POSTGRES_IMAGE` value to enable the vector profile. The
+`pghybrid` argument selects this workload's tests.
 
 The reusable scenario is in [`scenario.ts`](scenario.ts). Every actor creates a
 real `pg.Pool` with `max: 1`, calls `forPg(pool, config).search(...)`, and closes
@@ -84,8 +85,8 @@ cat > adapter.mjs <<'JS'
 import { createPghybridAdapterScenario } from './adapters.js';
 export default createPghybridAdapterScenario('postgresjs');
 JS
-npx interleave run adapter.mjs --fixture-profile postgresql17-pgvector0.8.6-v1 --protocol-profile describe-flush-v1 --include vendor --max-runs 1 --out record.json
-npx interleave replay adapter.mjs record.json --out replay.json
+npx interleave run adapter.mjs --fixture-profile postgresql17-pgvector0.8.6-v1 --protocol-profile describe-flush-v1 --include vendor --max-runs 1 --timeout-ms 30000 --out record.json
+npx interleave replay adapter.mjs record.json --timeout-ms 30000 --out replay.json
 ```
 
 Use the same dedicated `TEST_DATABASE_URL` described above. The other adapter
@@ -93,6 +94,11 @@ names are `pg-pool`, `pg-client`, `drizzle` and `kysely`; those use the default
 `sync-cycle-v1` protocol. The one-run passing search exits 4 and exact replay
 exits 0. These passing records use the installed CLI workflow; regression
 export intentionally requires a completed invariant violation.
+
+The 30-second budget includes source and dependency verification before and after
+execution. This aggregate example binds the complete installed ORM dependency
+set. Supply the budget on both commands: replay does not inherit a recorded
+timeout, and the default ten seconds was insufficient in the Node 22 CI run.
 
 The caller helper owns shutdown. It observes public Pool `connect` and Client
 `end` events because `Pool.end()` and a rejected `Pool.query()` can return before

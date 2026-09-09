@@ -17,6 +17,9 @@ test.each(['cancel', 'deadline'] as const)('contains the real Postgres.js defaul
   const databaseUrl = testDatabaseUrl();
   const admin = new Client({ connectionString: databaseUrl }); await admin.connect();
   let names: string[] = [], settled = false;
+  const readNames = () => readFile(journal, 'utf8').then(value => value.trim().split('\n').filter(Boolean), error => {
+    if (error.code === 'ENOENT') return []; throw error;
+  });
   const running = runScenarioFile(fileURLToPath(new URL('./fixtures/pghybrid/discovery-abort.mjs', import.meta.url)), {
     databaseUrl, fixtureProfile: 'postgresql17-pgvector0.8.6-v1', protocolProfile: 'describe-flush-v1',
     timeoutMs: 8000, signal: controller.signal,
@@ -26,13 +29,12 @@ test.each(['cancel', 'deadline'] as const)('contains the real Postgres.js defaul
     let connected = false;
     const until = Date.now() + 7000;
     while (!settled && Date.now() < until) {
-      names = await readFile(journal, 'utf8').then(value => value.trim().split('\n'), error => {
-        if (error.code === 'ENOENT') return []; throw error;
-      });
+      names = await readNames();
       connected = (await admin.query("SELECT 1 FROM pg_stat_activity WHERE datname = ANY($1::text[]) AND application_name = 'pghybrid-adapter-qualification'", [names])).rowCount! > 0;
       if (connected) break;
       await new Promise(resolve => setTimeout(resolve, 10));
     }
+    expect(connected, 'The actual caller must connect before the intended interruption').toBe(true);
     if (interruption === 'cancel') controller.abort();
     const run = await running;
     console.log(JSON.stringify({ pghybridDiscoveryAbort: { interruption, outcome: run.outcome, reason: run.reason,
@@ -47,6 +49,7 @@ test.each(['cancel', 'deadline'] as const)('contains the real Postgres.js defaul
     expect(parseRunArtifact(run)).toEqual(run);
   } finally {
     controller.abort(); await running;
+    names = [...new Set([...names, ...await readNames()])];
     const remaining = (await admin.query('SELECT datname FROM pg_database WHERE datname = ANY($1::text[])', [names])).rows;
     console.log(JSON.stringify({ pghybridDiscoveryCleanup: { names, remaining } }));
     await admin.end(); await rm(root, { recursive: true, force: true });
