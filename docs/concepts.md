@@ -7,8 +7,9 @@ and PostgreSQL executes them.
 
 ## A scenario describes a business rule
 
-A **scenario** is a module exporting `defineScenario({ name, setup, actors,
-invariant })`. **Setup** creates the schema and starting rows in a fresh database.
+A **scenario** is an object with `name`, `setup`, `actors` and `invariant`.
+For the CLI, default-export it from a module; `defineScenario(...)` is an optional
+helper that provides type checking. **Setup** creates the schema and starting rows in a fresh database.
 An **actor** is one named concurrent operation, such as Alice buying the last item.
 The **invariant** is an assertion about the application's required behavior after
 the operations finish, such as "accepted purchases never exceed capacity."
