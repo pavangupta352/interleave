@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "project": "neveroversell",
+  "repository": "https://github.com/pavangupta352/neveroversell.git",
+  "commit": "d8309cb55176db7e1079d31a061d76f4f21c604a",
+  "license": "MIT",
+  "files": {
+    "LICENSE": "sha256:c06bb21b60c2a60673b2509a7cec4a939f1df41b1daecfbdfb784045550f5c5d",
+    "sql/001_schema.sql": "sha256:330184fd099421d426af667a94a30974119b55e95e080e7ad166fee9851623c9",
+    "sql/002_functions.sql": "sha256:909cdbbe0d660b37d5808affbb684588bd834f069ee65a41f773799bb828a442",
+    "sql/003_views.sql": "sha256:f798d843d6a5a2dcb8bcce8f9749aa15741d275aef48135922dd9b2b7638d6d3",
+    "src/index.ts": "sha256:57646a74b08a2fe1dfb43c0053b1ed91958ae559a82a7fdea32aa4f1120f3678",
+    "src/migrate.ts": "sha256:371b20639a3d4d23e429893d1d59e125e6afd5f9d4eb2f5ba439c51ba3096cb7",
+    "src/naive.ts": "sha256:1d6561e4cdae107def7e947b839baa9736f95fe0581d372fb744686b0afe452a",
+    "src/types.ts": "sha256:c37d3774a7a3f7ab81b820871ba50ea2d4c0024a8f3aa8713aeb34319a5adb8e"
+  }
+}

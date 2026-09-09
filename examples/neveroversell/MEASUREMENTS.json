@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "classification": "owned constructed demonstration; not a historical production defect",
+  "measuredAt": "2026-09-08T18:13:43.159Z",
+  "environment": {
+    "node": "24.7.0",
+    "postgresql": "16.13",
+    "databaseEndpoint": "127.0.0.1:65064"
+  },
+  "unsafeRecordedRun": {
+    "outcome": "violation",
+    "durationMs": 1595.339,
+    "traceSteps": 10,
+    "actorValues": ["sold", "sold"],
+    "observedState": { "total": 1, "sold": 2, "acceptedOrderQuantity": 2 },
+    "cleanupComplete": true
+  },
+  "exactReplay": {
+    "attempts": 3,
+    "matchingViolations": 3,
+    "matchingFailureFingerprints": 3,
+    "matchingTraceIdentities": 3,
+    "durationsMs": [899.312, 753.922, 768.909],
+    "cleanupComplete": 3
+  },
+  "safeRun": {
+    "outcome": "passed",
+    "durationMs": 747.766,
+    "traceSteps": 2,
+    "actorValues": ["held", "insufficient"],
+    "observedState": { "total": 1, "held": 1, "sold": 0 },
+    "cleanupComplete": true
+  }
+}

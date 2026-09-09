@@ -1,0 +1,71 @@
+{
+  "name": "@pavangupta352/interleave",
+  "version": "0.1.0-dev.0",
+  "description": "Find, explain and replay database races in real Postgres application code.",
+  "type": "module",
+  "author": "Pavan Gupta <pavan.gupta.352@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pavangupta352/interleave.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pavangupta352/interleave/issues"
+  },
+  "homepage": "https://github.com/pavangupta352/interleave#readme",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "interleave": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "docs",
+    "examples"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs all",
+    "test:unit": "node scripts/test.mjs unit",
+    "test:integration": "node scripts/test.mjs integration",
+    "check": "npm run typecheck && npm test",
+    "test:browser": "npm run build && node scripts/test.mjs browser",
+    "pretest": "npm run build",
+    "pretest:unit": "npm run build",
+    "pretest:integration": "npm run build"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.15.0",
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vitest": "5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "postgresql",
+    "race-condition",
+    "concurrency",
+    "testing",
+    "replay",
+    "database",
+    "regression"
+  ]
+}
