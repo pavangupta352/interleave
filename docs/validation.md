@@ -1,5 +1,14 @@
 # Development validation
 
+The latest local integrated search and CLI qualification passed **654 native
+tests in 50 files**, plus **ten pgvector checks**, build and type checks. See the
+[seeded-search record](qualification/seeded-search-2026-09-09.md) for that scope.
+The [compatibility page](compatibility.md) links completed CI matrices and exact
+driver, server and extension profiles. The earlier snapshots below retain their
+original dates and results; their then-open limits are historical.
+
+## Initial snapshot
+
 This records the executed initial development snapshot, commit `9e71b06`, on
 9 September 2026. It does not qualify a stable release or every PostgreSQL driver.
 
@@ -55,10 +64,13 @@ for lifecycle and connection details.
 
 ## Open qualification gates
 
-The later [native PostgreSQL matrix](qualification/postgresql-native-matrix-2026-09-09.md)
-records PostgreSQL 16/17/18 results separately. Shared-dependency export layouts,
-additional drivers and extensions, three independent historical bug/fix pairs,
-comparative measurements and release/download verification remain in progress. Local passing tests do not
-establish those results. The initial Linux checks passed on Node.js 22.18.0 and 24.7.0 with PostgreSQL 16,
-along with all six browser configurations in [CI run 34303888866](https://github.com/pavangupta352/interleave/actions/runs/34303888866).
-The expanded PostgreSQL matrix will be recorded after it runs.
+The [native PostgreSQL matrix](qualification/postgresql-native-matrix-2026-09-09.md),
+[Postgres.js profile](qualification/postgresjs-describe-flush-2026-09-09.md),
+[pgvector/pghybrid workload](qualification/postgresql17-pgvector-pghybrid-2026-09-09.md)
+and supported [shared regression installation](regressions.md) now have executed
+qualification. Their documented boundaries still apply.
+
+Three independent historical bug/fix pairs, comparative measurements and final
+release/download verification remain unfinished. Other drivers, extensions and
+platforms need their own evidence before support claims expand. The
+[implementation checklist](plans/implementation.md) tracks the remaining work.

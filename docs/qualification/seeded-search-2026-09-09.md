@@ -52,6 +52,13 @@ files** (4.73 seconds), including the installed pghybrid CLI and exact replay.
 The vector checks used PostgreSQL 17.11 with pgvector 0.8.6 and removed their
 exact owned container. Timings describe these runs, not comparative performance.
 
+At commit `8f273e5b4b55e99d57cb7d557a18b9d40e471499`, the
+[CI run](https://github.com/pavangupta352/interleave/actions/runs/34318463204)
+passed all nine jobs: PostgreSQL 16/17/18 on Node.js 22.18.0 and 24.7.0,
+two PostgreSQL 17 / pgvector 0.8.6 jobs, and desktop/mobile report checks in
+Chromium, Firefox and WebKit. This qualifies that development commit, not a
+published stable package.
+
 ## Boundaries
 
 A seed controls which pending prefix is selected when observations match. It
