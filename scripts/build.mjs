@@ -32,6 +32,7 @@ try {
     ...['scenario.ts', 'demo-naive.ts', 'demo-safe.ts'].map(file => join(repository, 'examples/neveroversell', file)),
     join(repository, 'examples/pghybrid/scenario.ts'),
     join(repository, 'examples/pghybrid/adapters.ts'),
+    join(repository, 'examples/orm/scenario.ts'),
   ], {
     ...parsed.options, rootDir: repository, outDir: temporary, declaration: false, declarationMap: false, sourceMap: false,
   });
@@ -41,10 +42,12 @@ try {
     await cp(join(repository, 'examples/neveroversell', file), join(dist, 'examples/neveroversell', file), { recursive: true });
   }
   await cp(join(temporary, 'examples/pghybrid'), join(dist, 'examples/pghybrid'), { recursive: true });
+  await cp(join(temporary, 'examples/orm'), join(dist, 'examples/orm'), { recursive: true });
+  await cp(join(repository, 'examples/orm/README.md'), join(dist, 'examples/orm/README.md'));
   for (const file of ['vendor', 'README.md']) {
     await cp(join(repository, 'examples/pghybrid', file), join(dist, 'examples/pghybrid', file), { recursive: true });
   }
   await chmod(join(dist, 'cli.js'), 0o755);
 } finally { await rm(temporary, { recursive: true, force: true }); }
 const metadata = JSON.parse(await readFile(join(repository, 'package.json'), 'utf8'));
-console.log(`Built Interleave ${metadata.version} and the pinned neveroversell and pghybrid examples.`);
+console.log(`Built Interleave ${metadata.version} and the neveroversell, pghybrid and ordinary ORM examples.`);
