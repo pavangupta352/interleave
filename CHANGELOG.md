@@ -53,6 +53,12 @@ Completed legacy records missing fixture or connection identities are rejected
 before exact execution or export. Interrupted runs preserve application failures
 observed before cancellation or cleanup began.
 
+Pool reconnection now waits for the proxy to retire both sides of the previous
+connection before admitting its replacement. The pghybrid caller helper owns
+checked-out Client errors and interruption without destroying Kysely during
+acquisition. Installed adapter recording and replay use the same explicit
+verification budget.
+
 Historical application cases and comparative measurements, final distribution
 verification and the remaining [release checklist](docs/plans/implementation.md)
 are still open. Registry installation and stable release artifacts will be

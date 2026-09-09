@@ -103,7 +103,16 @@ timeout, and the default ten seconds was insufficient in the Node 22 CI run.
 The caller helper owns shutdown. It observes public Pool `connect` and Client
 `end` events because `Pool.end()` and a rejected `Pool.query()` can return before
 the retired physical connection has closed. Reconnect and handled SQL-error
-tests wait for that closure before reusing the actor endpoint.
+tests wait for that closure before reusing the actor endpoint. The proxy also
+waits for both sides of the old connection to close before admitting a pending
+replacement; see the [connection profile](../../docs/api.md#define-a-scenario).
+
+For pool-based callers, the helper owns each checked-out Client's `error` event
+and ends clients promptly on interruption, including late connections. It lets
+the operation unwind before destroying the Pool or Kysely instance, so an
+acquisition in progress can still release its client. The
+[qualification record](../../docs/qualification/pghybrid-adapters-2026-09-09.md)
+covers both acquisition and queued-search interruption.
 
 Postgres.js keeps its default type discovery enabled. Queued search interruption
 after discovery completes is qualified. Closing it while the initial catalog
