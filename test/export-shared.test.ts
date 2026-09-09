@@ -22,28 +22,55 @@ const inert: RunResult = {
 async function npm(args: string[], cwd: string) {
   return execute('npm', [...args, '--ignore-scripts', '--no-audit', '--no-fund'], { cwd, timeout: 30000, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, NODE_OPTIONS: '', npm_config_update_notifier: 'false' } });
 }
-async function fixture() {
+async function fixture(importPath = 'driver', importRuntime = true) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'interleave-shared-export-')); roots.push(root);
   const projectRoot = join(root, 'app'), build = join(root, 'runtime'), driver = join(root, 'driver');
   await mkdir(join(projectRoot, 'archives'), { recursive: true }); await mkdir(join(build, 'dist'), { recursive: true }); await mkdir(driver);
-  await json(join(driver, 'package.json'), { name: 'driver', version: '1.0.0', main: 'index.js' });
+  const driverName = importPath.startsWith('@') ? '@fixture/driver' : 'driver';
+  const driverArchive = `${driverName === 'driver' ? '' : 'fixture-'}driver-1.0.0.tgz`;
+  await json(join(driver, 'package.json'), { name: driverName, version: '1.0.0', main: 'index.js', exports: { '.': './index.js', './subpath': './index.js' } });
   await writeFile(join(driver, 'index.js'), 'module.exports=42;');
   await npm(['pack', '--pack-destination', join(projectRoot, 'archives')], driver);
-  await json(join(build, 'package.json'), { name: '@pavangupta352/interleave', version: '0.1.0-test', type: 'module', main: 'dist/index.js', files: ['dist', 'README.md'], dependencies: { driver: '1.0.0' } });
+  await json(join(build, 'package.json'), { name: '@pavangupta352/interleave', version: '0.1.0-test', type: 'module', main: 'dist/index.js', files: ['dist', 'README.md'], dependencies: { [driverName]: '1.0.0' } });
   for (const file of ['source-identity.js', 'index.js', 'cli.js']) await writeFile(join(build, 'dist', file), 'throw Error("inert format fixture must not execute");');
   await writeFile(join(build, 'README.md'), 'original documentation');
   await npm(['pack', '--pack-destination', join(projectRoot, 'archives')], build);
   const runtimeArchive = join(projectRoot, 'archives/pavangupta352-interleave-0.1.0-test.tgz');
-  await json(join(projectRoot, 'package.json'), { name: 'shared-format', version: '1.0.0', type: 'module', dependencies: { '@pavangupta352/interleave': 'file:archives/pavangupta352-interleave-0.1.0-test.tgz', driver: 'file:archives/driver-1.0.0.tgz' } });
+  await json(join(projectRoot, 'package.json'), { name: 'shared-format', version: '1.0.0', type: 'module', dependencies: { '@pavangupta352/interleave': 'file:archives/pavangupta352-interleave-0.1.0-test.tgz', [driverName]: `file:archives/${driverArchive}` } });
   await npm(['install'], projectRoot);
   const runtimeRoot = join(projectRoot, 'node_modules/@pavangupta352/interleave');
-  const scenarioFile = join(projectRoot, 'scenario.mjs'); await writeFile(scenarioFile, "import '@pavangupta352/interleave';import 'driver';");
+  const scenarioFile = join(projectRoot, 'scenario.mjs'); await writeFile(scenarioFile, `${importRuntime ? "import '@pavangupta352/interleave';" : ''}import '${importPath}';`);
   const options = { projectRoot, runtimeRoot, scenarioFile, destination: join(root, 'export'), runtimeArchive };
   const run = await bindExportFixture(inert, options);
   expect(run.environment.source!.sharedPackages).toHaveLength(1);
   return { root, build, run, options };
 }
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+
+test.each(['driver/subpath', '@fixture/driver/subpath'])('preserves %s root imports in an unchanged shared installation', async specifier => {
+  const { run, options } = await fixture(specifier);
+  expect(run.environment.source!.components.dependencies.roots.some(edge => edge.name === specifier)).toBe(true);
+  const result = await exportRegression(run, options);
+  const manifest = await verifyRegressionExport(result.destination);
+  expect(manifest.installation?.layout).toBe('shared-app');
+  expect(JSON.parse(await readFile(join(result.destination, 'run.json'), 'utf8')).environment.source).toEqual(run.environment.source);
+  expect(await readFile(join(result.destination, 'app/scenario.mjs'))).toEqual(await readFile(options.scenarioFile));
+});
+
+test('exports a plain-object scenario without adding an otherwise unused runtime API import', async () => {
+  const { run, options } = await fixture('driver', false);
+  expect(run.environment.source!.components.dependencies.packages.some(node => node.name === '@pavangupta352/interleave')).toBe(false);
+  const result = await exportRegression(run, options);
+  await expect(verifyRegressionExport(result.destination)).resolves.toHaveProperty('installation.layout', 'shared-app');
+  expect(JSON.parse(await readFile(join(result.destination, 'run.json'), 'utf8')).environment.source).toEqual(run.environment.source);
+});
+
+test('still rejects changed runtime implementation bytes without an application runtime API import', async () => {
+  const { options } = await fixture('driver', false);
+  await writeFile(join(options.runtimeRoot, 'dist/cli.js'), 'throw Error("changed runtime implementation");');
+  const run = await bindExportFixture(inert, options);
+  await expect(exportRegression(run, options)).rejects.toThrow(/runtime.*(match|byte)|archive.*runtime/i);
+});
 
 test('exports an unchanged original shared npm installation with durable offline archives', async () => {
   const { run, options } = await fixture();

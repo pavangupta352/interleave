@@ -67,8 +67,13 @@ function lockedPackages(lockBytes: Buffer): Map<string, LockedPackage> {
 
 function graphMapping(source: SourceIdentity, locked: Map<string, LockedPackage>): Map<string, SourceIdentityPackage[]> {
   const byPath = new Map<string, SourceIdentityPackage[]>();
-  const locate = (name: string, from: string): string | undefined => {
-    if (!NAME.test(name)) throw new Error('Unsupported dependency name in shared graph');
+  const locate = (specifier: string, from: string): string | undefined => {
+    // Source roots retain the full import, such as drizzle-orm/node-postgres.
+    // npm lock paths identify the owning package; keep the recorded edge intact.
+    const parts = specifier.split('/');
+    const name = specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]!;
+    if (!NAME.test(name) || Buffer.byteLength(specifier) > 4096 || /[:\\\u0000-\u001f\u007f]/.test(specifier)
+      || specifier.startsWith('.') || parts.some(part => !part || part === '.' || part === '..')) throw new Error('Unsupported dependency name in shared graph');
     let current = from;
     while (true) {
       const candidate = posix.join(current, 'node_modules', name);
@@ -99,7 +104,9 @@ function graphMapping(source: SourceIdentity, locked: Map<string, LockedPackage>
   const app = map(source.components.dependencies, '.', true);
   const runtime = map(source.components.runtime.dependencies, SHARED_RUNTIME, false);
   const candidates = source.components.dependencies.packages.filter(node => node.name === '@pavangupta352/interleave');
-  if (candidates.length !== 1 || app.get(candidates[0]!.id) !== SHARED_RUNTIME) throw new Error('Shared export requires one unambiguous top-level Interleave package in the recorded app graph');
+  // A plain-object scenario need not import the runtime API. Its installed CLI
+  // is still bound by the top-level lock, runtime files and original archive.
+  if (candidates.length > 1 || (candidates.length === 1 && app.get(candidates[0]!.id) !== SHARED_RUNTIME)) throw new Error('Shared export requires any application runtime import to resolve to the top-level Interleave package');
   const shared = [...app].flatMap(([dependencyPackageId, path]) => [...runtime].filter(([, other]) => other === path).map(([runtimePackageId]) => ({ dependencyPackageId, runtimePackageId })))
     .sort((a, b) => a.dependencyPackageId < b.dependencyPackageId ? -1 : a.dependencyPackageId > b.dependencyPackageId ? 1 : a.runtimePackageId < b.runtimePackageId ? -1 : a.runtimePackageId > b.runtimePackageId ? 1 : 0);
   if (stable(shared) !== stable(source.sharedPackages)) throw new Error('Original lock does not preserve the recorded shared package topology');
