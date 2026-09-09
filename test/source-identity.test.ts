@@ -4,7 +4,7 @@ import fs, { cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFi
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { captureSourceIdentity, SourceIdentityError } from '../src/source-identity.js';
 
@@ -311,8 +311,8 @@ test('rejects a dependency entry point that escapes its package directory', asyn
 });
 
 test('records shared application/runtime package instances without physical paths', async () => {
-  const repository = dirname(new URL('../package.json', import.meta.url).pathname);
-  const root = await realpath(await mkdtemp(join(repository, '.local/source-sharing-test-'))); roots.push(root);
+  const testDirectory = dirname(fileURLToPath(import.meta.url));
+  const root = await realpath(await mkdtemp(join(testDirectory, 'source-sharing-test-'))); roots.push(root);
   await json(join(root, 'package.json'), { name: 'shared-driver-source', version: '1.0.0', type: 'module' });
   await writeFile(join(root, 'scenario.mjs'), "import 'pg';");
   const identity = await captureSourceIdentity(join(root, 'scenario.mjs'));

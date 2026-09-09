@@ -38,8 +38,18 @@ describe('CLI real PostgreSQL integration', () => {
     expect((await execute(['replay', scenario, out])).code).toBe(1);
     const minimized = await execute(['minimize', scenario, out]);
     expect(minimized.code).toBe(1); expect(JSON.parse(minimized.stdout).locallyMinimal).toBe(true);
+  });
+  test('reports minimization attempt and whole-operation budgets', async () => {
+    const out = join(await directory(), 'failed run.json');
+    const scenario = fixture('counter');
+    expect((await execute(['run', scenario, '--out', out])).code).toBe(1);
     expect((await execute(['minimize', scenario, out, '--max-attempts', '1'])).code).toBe(4);
     expect((await execute(['minimize', scenario, out, '--total-timeout-ms', '1'])).code).toBe(4);
+  });
+  test('preserves existing evidence unless an overwrite is explicitly requested', async () => {
+    const out = join(await directory(), 'failed run.json');
+    const scenario = fixture('counter');
+    expect((await execute(['run', scenario, '--out', out])).code).toBe(1);
     const before = await readFile(out, 'utf8');
     expect((await execute(['run', scenario, '--out', out])).code).toBe(2);
     expect(await readFile(out, 'utf8')).toBe(before);

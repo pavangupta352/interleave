@@ -66,11 +66,12 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     const connection = generation++; let ordinal = 0; let backendPid = 0; let startupFingerprint = '';
     let started = false; let ready = false; let negotiated = false; let terminated = false; let failed = false;
     let closed = false; let clientClosed = false; let upstreamClosed = false; let retainedBytes = 0;
+    let pendingTerminate: Buffer | undefined;
     const frontend = new FrameDecoder('startup', options); const backend = new FrameDecoder('typed', options); const assembler = new FrontendAssembler(options); const cycles = new FrontendCycleBuffer(options);
     const upstream = net.connect({ host: upstreamUrl.hostname, port: Number(upstreamUrl.port || 5432) }); track(upstream); upstream.setNoDelay(true);
     interface Queued { frames: Buffer[]; byteLength: number; ordinal: number; unit?: PendingUnit }
     const queue: Queued[] = [];
-    let inFlight: { original: FrontendUnit; summary: BackendSummary; resolve(value: UnitCompletion): void; reject(error: Error): void } | undefined;
+    let inFlight: { original: FrontendUnit; summary: BackendSummary; errorSeen: boolean; resolve(value: UnitCompletion): void; reject(error: Error): void } | undefined;
     function shutdown(): void {
       if (closed) return; closed = true;
       const outstanding = Boolean(inFlight || queue.length || cycles.bufferedBytes);
@@ -122,7 +123,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           if (!ready || inFlight || queue[0] !== entry) return Promise.reject(new Error('Scheduling units must release in connection order after prior completion'));
           released = true; queue.shift(); retainedBytes -= entry.byteLength;
           return new Promise<UnitCompletion>((resolve, reject) => {
-            inFlight = { original: retained, summary: new BackendSummary(), resolve, reject };
+            inFlight = { original: retained, summary: new BackendSummary(), errorSeen: false, resolve, reject };
             guard(() => write(upstream, retained.bytes, client));
           });
         },
@@ -157,11 +158,17 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           write(upstream, frame, client); continue;
         }
         const type = String.fromCharCode(frame[0]!);
+        if (terminated) throw new Error('Actor sent protocol data after Terminate');
         if (type === 'p' && !ready) { write(upstream, frame, client); continue; }
         if (type === 'X') {
           if (frame.length !== 5) throw new Error('Malformed Terminate message');
-          if (queue.length || inFlight || cycles.bufferedBytes) throw new Error('Actor disconnected with unfinished scheduled work');
-          terminated = true; upstream.end(frame); continue;
+          if (queue.length || cycles.bufferedBytes || (inFlight && !inFlight.errorSeen)) throw new Error('Actor disconnected with unfinished scheduled work');
+          terminated = true;
+          // Drivers may reject on ErrorResponse and close before ReadyForQuery.
+          // Drain that actual completion even after the frontend has gone away.
+          if (inFlight) { pendingTerminate = frame; upstream.resume(); }
+          else upstream.end(frame);
+          continue;
         }
         // Reserve on the first command frame, including an incomplete extended
         // cycle. Buffered commands before ReadyForQuery reserve ownership too,
@@ -182,6 +189,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           if (frame.length !== 13) throw new Error('Unsupported backend key format');
           backendPid = frame.readInt32BE(5); // Deliberately never retain or emit the secret key.
         }
+        if (type === 'E' && inFlight) inFlight.errorSeen = true;
         if (type === 'Z' && !ready) {
           if (!backendPid) throw new Error('Backend did not provide its process identity');
           ready = true; notifyEvent({ type: 'connected', actor: options.actor, connection, backendPid });
@@ -189,21 +197,26 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
         }
         if (inFlight) assembler.reconcile(inFlight.original, frame);
         const completion = inFlight?.summary.accept(frame);
-        write(client, frame, upstream);
-        if (completion && inFlight) { const current = inFlight; inFlight = undefined; current.resolve(completion); announce(); }
+        if (!terminated) write(client, frame, upstream);
+        if (completion && inFlight) {
+          const current = inFlight; inFlight = undefined; current.resolve(completion);
+          if (pendingTerminate) { const frame = pendingTerminate; pendingTerminate = undefined; upstream.end(frame); }
+          else announce();
+        }
       }
     }));
     client.on('error', () => { if (!closing && !terminated && !failed) fail(new Error('Actor client connection failed')); });
-    upstream.on('error', () => { if (!closing && !terminated && !failed) fail(new Error('PostgreSQL upstream connection failed')); });
+    upstream.on('error', () => { if (!closing && !failed && (!terminated || inFlight)) fail(new Error('PostgreSQL upstream connection failed')); });
     client.on('end', () => {
       if (closing || failed || closed) return;
       if (negotiated && !started) fail(new Error('Unsupported profile: TLS/GSS encryption required; configure this local actor connection with ssl:false'));
       else if (!terminated && (inFlight || queue.length || cycles.bufferedBytes || frontend.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
+      else if (pendingTerminate) return;
       else upstream.end();
     });
     upstream.on('end', () => {
       if (closed) return;
-      if (!closing && !failed && !terminated && (ready || inFlight || queue.length)) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
+      if (!closing && !failed && (inFlight || queue.length || (!terminated && ready))) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
       else client.end();
     });
     function finishClose(): void {
@@ -217,9 +230,15 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     client.on('close', () => {
       clientClosed = true;
       if (!closing && !failed && !terminated && !closed && (inFlight || queue.length || cycles.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
-      upstream.destroy(); finishClose();
+      if (!pendingTerminate) upstream.destroy();
+      finishClose();
     });
-    upstream.on('close', () => { upstreamClosed = true; if (!closed && !client.writableEnded && !failed) client.destroy(); finishClose(); });
+    upstream.on('close', () => {
+      upstreamClosed = true;
+      if (!closed && !closing && !failed && inFlight) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
+      if (!closed && !client.writableEnded && !failed) client.destroy();
+      finishClose();
+    });
   });
   await new Promise<void>((resolve, reject) => {
     const onError = () => reject(new Error('Unable to listen on loopback for actor proxy'));

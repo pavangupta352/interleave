@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { Client } from 'pg';
 import { createProxy } from '../src/proxy.js';
+import { FrameDecoder } from '../src/protocol/framing.js';
 import type { ActorProxy, PendingUnit, ProxyEvent, UnitCompletion } from '../src/types.js';
 
 const adminUrl = testDatabaseUrl();
@@ -25,6 +26,52 @@ async function harness(auto = false) {
   return { proxy, client, units, errors, events, completions };
 }
 function packet(type: string, payload = Buffer.alloc(0)) { const header = Buffer.alloc(5); header[0] = type.charCodeAt(0); header.writeInt32BE(payload.length + 4, 1); return Buffer.concat([header, payload]); }
+function errorPacket(code: string, message: string): Buffer {
+  return packet('E', Buffer.from(`SERROR\0VERROR\0C${code}\0M${message}\0\0`));
+}
+async function delayedErrorBackend(options: { messageBytes?: number } = {}): Promise<{
+  url: string;
+  finishQuery(result?: 'ready' | 'close'): void;
+  close(): Promise<void>;
+}> {
+  const sockets = new Set<net.Socket>();
+  let querySocket: net.Socket | undefined;
+  const server = net.createServer(socket => {
+    sockets.add(socket); socket.on('error', () => {}); socket.once('close', () => sockets.delete(socket));
+    const frames = new FrameDecoder('startup');
+    let startup = true;
+    socket.on('data', chunk => {
+      for (const frame of frames.push(chunk)) {
+        if (startup) {
+          startup = false;
+          const auth = Buffer.alloc(4); auth.writeUInt32BE(0);
+          const key = Buffer.alloc(8); key.writeInt32BE(4242, 0); key.writeInt32BE(31337, 4);
+          socket.write(Buffer.concat([packet('R', auth), packet('K', key), packet('Z', Buffer.from('I'))]));
+        } else if (String.fromCharCode(frame[0]!) === 'Q') {
+          querySocket = socket;
+          socket.write(errorPacket('42P01', 'x'.repeat(options.messageBytes ?? 'missing relation'.length)));
+        }
+      }
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject); server.listen(0, '127.0.0.1', () => { server.removeListener('error', reject); resolve(); });
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Fake PostgreSQL backend did not bind');
+  return {
+    url: `postgresql://actor@127.0.0.1:${address.port}/fixture`,
+    finishQuery(result = 'ready') {
+      if (!querySocket) throw new Error('Fake PostgreSQL backend has not received a query');
+      if (result === 'close') querySocket.end();
+      else querySocket.write(packet('Z', Buffer.from('I')));
+    },
+    async close() {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    },
+  };
+}
 async function rawSocket(url: string) {
   const address = new URL(url); const socket = net.connect({ host: address.hostname, port: Number(address.port) });
   socket.on('error', () => {}); await new Promise<void>(resolve => socket.once('connect', resolve)); return socket;
@@ -260,6 +307,84 @@ integration('proxy integration with real PostgreSQL', () => {
     const failed = actor.catch((error: Error) => error.message);
     await until(() => h.units[0]); await h.proxy.close();
     expect(await failed).toMatch(/proxy closed before command completion/);
+  });
+  test('lets a driver terminate after ErrorResponse while retaining the final ReadyForQuery completion', async () => {
+    const backend = await delayedErrorBackend();
+    const proxyErrors: Error[] = []; const clientErrors: Error[] = []; const completions: UnitCompletion[] = []; const releaseErrors: Error[] = [];
+    const proxy = await createProxy({
+      upstreamUrl: backend.url, actor: 'error', onError(error) { proxyErrors.push(error); },
+      onUnit(unit) { void unit.release().then(value => completions.push(value), error => releaseErrors.push(error)); },
+    });
+    const client = new Client({ connectionString: proxy.connectionString });
+    client.on('error', error => clientErrors.push(error));
+    try {
+      await client.connect();
+      await expect(client.query('SELECT * FROM missing_relation')).rejects.toMatchObject({ code: '42P01' });
+      await client.end();
+      expect(completions).toEqual([]);
+      backend.finishQuery();
+      await until(() => completions[0] ?? releaseErrors[0]);
+      expect(completions).toEqual([{ transactionStatus: 'I', commandTags: [], rowCount: 0, error: { code: '42P01', message: 'x'.repeat('missing relation'.length) } }]);
+      expect({ proxyErrors, clientErrors, releaseErrors }).toEqual({ proxyErrors: [], clientErrors: [], releaseErrors: [] });
+    } finally {
+      await proxy.close(); await client.end().catch(() => {}); await backend.close();
+    }
+  });
+  test('resumes a paused backend while draining ReadyForQuery after an error-side Terminate', async () => {
+    const backend = await delayedErrorBackend();
+    const completions: UnitCompletion[] = [];
+    const proxy = await createProxy({
+      upstreamUrl: backend.url, actor: 'backpressure', onError() {},
+      onUnit(unit) { void unit.release().then(value => completions.push(value), () => {}); },
+    });
+    const client = new Client({ connectionString: proxy.connectionString }); client.on('error', () => {});
+    const originalWrite = net.Socket.prototype.write;
+    const proxyPort = Number(new URL(proxy.connectionString).port);
+    net.Socket.prototype.write = function (this: net.Socket, chunk: unknown, ...args: unknown[]) {
+      const wrote = Reflect.apply(originalWrite, this, [chunk, ...args]) as boolean;
+      if (this.localPort === proxyPort && Buffer.isBuffer(chunk) && chunk[0] === 'E'.charCodeAt(0)) return false;
+      return wrote;
+    } as typeof net.Socket.prototype.write;
+    try {
+      await client.connect();
+      await expect(client.query('SELECT * FROM missing_relation')).rejects.toMatchObject({ code: '42P01' });
+      await client.end();
+      expect(completions).toEqual([]);
+      backend.finishQuery();
+      await until(() => completions[0]);
+      expect(completions[0]).toMatchObject({ transactionStatus: 'I', error: { code: '42P01' } });
+    } finally {
+      net.Socket.prototype.write = originalWrite;
+      await proxy.close(); await client.end().catch(() => {}); await backend.close();
+    }
+  });
+  test('rejects a released error cycle if the backend closes before ReadyForQuery', async () => {
+    const backend = await delayedErrorBackend();
+    const proxyErrors: Error[] = []; const releaseErrors: Error[] = [];
+    const proxy = await createProxy({
+      upstreamUrl: backend.url, actor: 'truncated-error', onError(error) { proxyErrors.push(error); },
+      onUnit(unit) { void unit.release().catch(error => releaseErrors.push(error)); },
+    });
+    const client = new Client({ connectionString: proxy.connectionString }); client.on('error', () => {});
+    try {
+      await client.connect();
+      await expect(client.query('SELECT * FROM missing_relation')).rejects.toMatchObject({ code: '42P01' });
+      await client.end();
+      backend.finishQuery('close');
+      await until(() => releaseErrors[0]);
+      expect(releaseErrors[0]!.message).toMatch(/upstream.*disconnect/i);
+      expect(proxyErrors.map(error => error.message)).toEqual([releaseErrors[0]!.message]);
+    } finally {
+      await proxy.close(); await client.end().catch(() => {}); await backend.close();
+    }
+  });
+  test('rejects frontend protocol data sent after Terminate', async () => {
+    const h = await harness();
+    const stream = (h.client as unknown as { connection: { stream: net.Socket } }).connection.stream;
+    stream.write(Buffer.concat([packet('X'), packet('Q', Buffer.from('SELECT 1\0'))]));
+    const error = await until(() => h.errors[0]);
+    expect(error.message).toBe('Actor sent protocol data after Terminate');
+    expect(h.units).toEqual([]);
   });
   test('announces every cycle queued before startup ReadyForQuery even when callbacks release synchronously', async () => {
     const units: PendingUnit[] = []; const errors: Error[] = [];

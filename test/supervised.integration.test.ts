@@ -54,7 +54,7 @@ describe('supervised scenario integration', () => {
 
   test('records actual PostgreSQL query rejection as actor error', async () => {
     const result = await runScenarioFile(fixture('query-error'), { databaseUrl });
-    expect(result.outcome).toBe('actor-error');
+    expect(result.outcome, JSON.stringify({ reason: result.reason, durationMs: result.durationMs, actors: result.actors, trace: result.trace, cleanup: result.cleanup })).toBe('actor-error');
     expect(result.actors.every(actor => actor.status === 'rejected')).toBe(true);
     expect(result.trace.every(step => step.completion?.error?.code === '42P01')).toBe(true);
     expect(parseRunArtifact(result)).toEqual(result);
