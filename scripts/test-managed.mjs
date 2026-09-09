@@ -24,7 +24,9 @@ process.on('SIGINT', onInterrupt); process.on('SIGTERM', onTerminate);
 const env = { ...process.env, INTERLEAVE_TEST_MANAGED_POSTGRES: '1', INTERLEAVE_TEST_SUITE: 'integration', INTERLEAVE_MANAGED_STOP_FILE: stopFile };
 delete env.TEST_DATABASE_URL; delete env.INTERLEAVE_TEST_DATABASE_URL;
 try {
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../node_modules/vitest/vitest.mjs', import.meta.url)), 'run', 'test/cli.managed.integration.test.ts', '--bail=1', ...process.argv.slice(2)], { env, stdio: 'inherit' });
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../node_modules/vitest/vitest.mjs', import.meta.url)), 'run', 'test/cli.managed.integration.test.ts', '--bail=1', ...process.argv.slice(2)], {
+    env, stdio: 'inherit', detached: process.platform !== 'win32',
+  });
   const code = await new Promise(resolve => {
     child.once('error', () => { console.error('Could not start managed PostgreSQL qualification. Run npm ci first.'); resolve(1); });
     child.once('close', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 1)));
