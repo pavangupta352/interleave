@@ -20,6 +20,7 @@ export type {
 } from './export.js';
 export type {
   ActorContext, ActorResult, ConnectionIdentity, DatabaseContext, ExploreOptions, ExplorationResult,
+  ExplorationStrategy, ExplorationSearch, ExplorationMetrics,
   Failure, MinimizeOptions, MinimizationResult, Outcome, ProtocolKind, ProtocolProfile, RunOptions,
   RunResult, Scenario, StepIdentity, TraceStep, TransactionStatus, UnitCompletion,
   WaitObservation, StepStage, ReadyCompletion, MetadataCompletion,

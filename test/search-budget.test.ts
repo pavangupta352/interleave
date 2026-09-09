@@ -10,6 +10,7 @@ import { replay } from '../src/replay.js';
 import { minimizationExitCode } from '../src/cli/status.js';
 
 const scenario: Scenario = { name: 'budgeted', setup: async () => {}, actors: { a: async () => {}, b: async () => {} }, invariant: async () => {} };
+const selectors = [{ strategy: 'fifo' as const }, { seed: 0 }];
 function result(outcome: RunResult['outcome'] = 'passed'): RunResult {
   return {
     schemaVersion: 1, scenario: 'budgeted', outcome, mode: 'explore', plan: [],
@@ -26,29 +27,30 @@ function result(outcome: RunResult['outcome'] = 'passed'): RunResult {
 afterEach(() => { vi.useRealTimers(); mocks.run.mockReset(); });
 
 describe('whole-search resource budgets', () => {
-  test('cancels an active exploration run at the overall deadline', async () => {
+  test.each(selectors)('cancels an active exploration run at the overall deadline with %j', async selection => {
     vi.useFakeTimers();
     mocks.run.mockImplementation(async (_scenario, options) => new Promise(resolve => options.signal.addEventListener('abort', () => resolve({ ...result(), outcome: 'inconclusive', reason: 'cancelled' }), { once: true })));
-    const search = explore(scenario, { databaseUrl: 'test', totalTimeoutMs: 25 });
+    const search = explore(scenario, { databaseUrl: 'test', totalTimeoutMs: 25, ...selection });
     await vi.advanceTimersByTimeAsync(26);
     const actual = await search;
     expect(actual.stopReason).toBe('deadline');
     expect(actual.explored).toBe(1);
     expect(actual.runs[0]?.outcome).toBe('inconclusive');
+    expect(actual.metrics).toMatchObject({ attemptedRuns: 1, completedRuns: 0, traceCountsComplete: false });
   });
 
-  test('reports candidate saturation instead of a falsely exhausted frontier', async () => {
+  test.each(selectors)('reports candidate saturation instead of a falsely exhausted frontier with %j', async selection => {
     mocks.run.mockResolvedValue(result());
-    const actual = await explore(scenario, { databaseUrl: 'test', maxRuns: 20, maxCandidates: 1 });
+    const actual = await explore(scenario, { databaseUrl: 'test', maxRuns: 20, maxCandidates: 1, ...selection });
     expect(actual.stopReason).toBe('max-candidates');
     expect(actual.explored).toBe(1);
   });
 
-  test('bounds retained results and records the truncation', async () => {
+  test.each(selectors)('bounds retained results and records the truncation with %j', async selection => {
     const large = result();
     large.trace[0]!.sql = 'SELECT 1 /*' + 'x'.repeat(8000) + '*/';
     mocks.run.mockResolvedValue(large);
-    const actual = await explore(scenario, { databaseUrl: 'test', maxSearchBytes: 2048 });
+    const actual = await explore(scenario, { databaseUrl: 'test', maxSearchBytes: 2048, ...selection });
     expect(actual.stopReason).toBe('max-search-bytes');
     expect(actual.explored).toBe(1);
     expect(actual.runs).toHaveLength(0);
@@ -84,7 +86,7 @@ describe('whole-search resource budgets', () => {
   });
 });
 
-test('deduplicated prefixes do not falsely exhaust an exactly sufficient byte budget', async () => {
+test.each(selectors)('deduplicated prefixes do not falsely exhaust an exactly sufficient byte budget with %j', async selection => {
   mocks.run.mockImplementation(async (_scenario, options) => {
     const run = result();
     const first = options.plan[0] === 'b' ? 'b' : 'a';
@@ -93,21 +95,21 @@ test('deduplicated prefixes do not falsely exhaust an exactly sufficient byte bu
     run.trace = [first, last].map((actor, index) => ({ ...run.trace[index]!, actor, backendPid: actor === 'a' ? 1 : 2, available: index === 0 ? ['a', 'b'] : [last] }));
     return run;
   });
-  const full = await explore(scenario, { databaseUrl: 'test', maxRuns: 10 });
+  const full = await explore(scenario, { databaseUrl: 'test', maxRuns: 10, ...selection });
   expect(full.stopReason).toBe('frontier-exhausted');
-  const exact = await explore(scenario, { databaseUrl: 'test', maxRuns: 10, maxSearchBytes: full.retainedBytes });
+  const exact = await explore(scenario, { databaseUrl: 'test', maxRuns: 10, maxSearchBytes: full.retainedBytes, ...selection });
   expect(exact.stopReason).toBe('frontier-exhausted');
   expect(exact.retainedBytes).toBe(full.retainedBytes);
 });
 
-test('hard application and harness failures remain counted when their artifacts are omitted', async () => {
+test.each(selectors)('hard application and harness failures remain counted when their artifacts are omitted with %j', async selection => {
   for (const outcome of ['actor-error', 'harness-error'] as const) {
     const run = result();
     run.outcome = outcome;
     run.reason = 'failure';
     run.actors[0] = { actor: 'a', status: 'rejected', error: 'x'.repeat(4000) };
     mocks.run.mockResolvedValue(run);
-    const search = await explore(scenario, { databaseUrl: 'test', maxSearchBytes: 1024 });
+    const search = await explore(scenario, { databaseUrl: 'test', maxSearchBytes: 1024, ...selection });
     expect(search.hardFailureCount).toBe(1);
     expect(search.runs).toHaveLength(0);
   }

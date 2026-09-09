@@ -192,6 +192,10 @@ export interface RunOptions {
 }
 
 export interface ExploreOptions extends RunOptions {
+  /** FIFO preserves insertion order; supplying a seed opts into seeded selection. */
+  strategy?: ExplorationStrategy;
+  /** Deterministic uint32 frontier seed; required for seeded, forbidden for FIFO. */
+  seed?: number;
   maxRuns?: number;
   stopOnFailure?: boolean;
   totalTimeoutMs?: number;
@@ -199,9 +203,33 @@ export interface ExploreOptions extends RunOptions {
   maxSearchBytes?: number;
 }
 
+export type ExplorationStrategy = 'fifo' | 'seeded';
+
+/** Versioned frontier selection; exact replay still consumes a RunResult trace. */
+export type ExplorationSearch =
+  | { version: 1; strategy: 'fifo'; seed?: never }
+  | { version: 1; strategy: 'seeded'; seed: number };
+
+export interface ExplorationMetrics {
+  /** Dispatched runs, including incomplete executions and omitted artifacts. */
+  attemptedRuns: number;
+  /** Valid passed, violation or actor-error runs with complete trace and cleanup. */
+  completedRuns: number;
+  /** Longest explicit actor prefix actually dispatched; initial fair [] is zero. */
+  maxAttemptedDepth: number;
+  /** Validated trace entries before retention, including describe/execute/recover. */
+  recordedReleasedSteps: number;
+  /** Adjacent actor changes within each validated trace, never across runs. */
+  recordedActorSwitches: number;
+  /** False means trace counters are lower bounds from partial recorded evidence. */
+  traceCountsComplete: boolean;
+}
+
 export interface ExplorationResult {
   schemaVersion: 1;
   scenario: string;
+  search: ExplorationSearch;
+  metrics: ExplorationMetrics;
   runs: RunResult[];
   firstFailure?: RunResult;
   explored: number;

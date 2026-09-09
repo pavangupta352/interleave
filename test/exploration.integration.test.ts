@@ -6,6 +6,7 @@ import { explore } from '../src/explore.js';
 import { replay } from '../src/replay.js';
 import { minimize } from '../src/minimize.js';
 import { runOnce } from '../src/runner.js';
+import { parseRunArtifact } from '../src/artifact.js';
 import type { Scenario } from '../src/types.js';
 
 const databaseUrl = testDatabaseUrl();
@@ -43,6 +44,62 @@ describe('exploration integration', () => {
     expect(result.pending).toBeGreaterThan(0);
     expect(result.stopReason).toBe('max-runs');
     expect(new Set(result.runs.map(run => run.trace.map(step => step.actor).join(''))).size).toBe(2);
+  });
+
+  test('seeded exploration discovers a fresh exact-replayable failure after a passing serial plan', async () => {
+    const databases: string[] = [];
+    const scenario = race();
+    const setup = scenario.setup;
+    scenario.setup = async context => {
+      const { rows } = await context.db.query<{ name: string }>('SELECT current_database() AS name');
+      databases.push(rows[0]!.name);
+      console.info('[seeded-exploration-database]', rows[0]!.name);
+      await setup(context);
+    };
+    try {
+      const result = await explore(scenario, {
+        databaseUrl, seed: 2, plan: ['a', 'a', 'b', 'b'], maxRuns: 4,
+      });
+      expect(result.search).toEqual({ version: 1, strategy: 'seeded', seed: 2 });
+      expect(result.stopReason).toBe('failure');
+      expect(result.runs.map(run => run.plan)).toEqual([['a', 'a', 'b', 'b'], ['b']]);
+      expect(result.runs.map(run => run.outcome)).toEqual(['passed', 'violation']);
+      expect(result.runs.map(run => run.trace.map(step => step.actor))).toEqual([
+        ['a', 'a', 'b', 'b'], ['b', 'a', 'b', 'a'],
+      ]);
+      expect(result.metrics).toEqual({
+        attemptedRuns: 2, completedRuns: 2, maxAttemptedDepth: 4,
+        recordedReleasedSteps: 8, recordedActorSwitches: 4, traceCountsComplete: true,
+      });
+      expect(result.runs.every(run => run.cleanup.complete)).toBe(true);
+      expect(result.firstFailure).toBe(result.runs[1]);
+      const original = parseRunArtifact(JSON.stringify(result.firstFailure));
+      expect(original.environment.fixture).toBeDefined();
+      expect(original.failure?.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+
+      const exact = await replay(scenario, original, { databaseUrl });
+      expect(exact.mode).toBe('replay');
+      expect(exact.outcome).toBe('violation');
+      expect(exact.environment.fixture).toEqual(original.environment.fixture);
+      expect(exact.failure?.fingerprint).toBe(original.failure!.fingerprint);
+      expect(exact.trace.map(step => [step.actor, step.sql, step.fingerprint])).toEqual(
+        original.trace.map(step => [step.actor, step.sql, step.fingerprint]),
+      );
+      expect(exact.cleanup.complete).toBe(true);
+      expect(databases).toHaveLength(3);
+      expect(new Set(databases).size).toBe(3);
+      expect(databases.every(name => /^interleave_[a-f0-9]+$/.test(name))).toBe(true);
+    } finally {
+      const administrator = new Client({ connectionString: databaseUrl });
+      try {
+        await administrator.connect();
+        const { rows } = await administrator.query<{ datname: string }>(
+          'SELECT datname FROM pg_database WHERE datname = ANY($1::text[]) ORDER BY datname', [databases],
+        );
+        console.info('[seeded-exploration-cleanup]', JSON.stringify({ databases, remaining: rows.map(row => row.datname) }));
+        expect(rows).toEqual([]);
+      } finally { await administrator.end(); }
+    }
   });
 
   test('replays the exact failure three times against fresh real databases', async () => {
