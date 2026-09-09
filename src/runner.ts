@@ -79,6 +79,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   let failure: Interrupted | undefined;
   let creationCleanupError: string | undefined;
   let finished = false;
+  let applicationRejected = false;
   const proxies: ActorProxy[] = [];
   const actors: Promise<void>[] = [];
   const settled = new Map<string, ActorResult>();
@@ -216,7 +217,13 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           catch { stop('harness-error', `${actor} returned a value that cannot be recorded as JSON`); }
         }
         settled.set(actor, entry); wake();
-      }, error => { settled.set(actor, { actor, status: 'rejected', error: message(error) }); wake(); });
+      }, error => {
+        // Only rejections observed before interruption are application failures.
+        // Closing proxies or aborting actor work can itself reject pending work.
+        if (!failure && !finished) applicationRejected = true;
+        settled.set(actor, { actor, status: 'rejected', error: message(error) });
+        wake();
+      });
       actors.push(task);
     }
 
@@ -333,8 +340,12 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     }
   } catch (error) {
     if (error instanceof OwnedDatabaseCreationError) creationCleanupError = error.message;
-    result.outcome = error instanceof Interrupted ? error.outcome : 'harness-error';
-    result.reason = message(error);
+    // An interrupted execution cannot claim complete actor-error evidence, but
+    // must retain a failure already observed before the harness stopped it.
+    result.outcome = error instanceof Interrupted && !applicationRejected ? error.outcome : 'harness-error';
+    result.reason = applicationRejected
+      ? message(`One or more application operations rejected before execution was interrupted; ${message(error)}`)
+      : message(error);
   } finally {
     finished = true;
     clearTimeout(deadline);
