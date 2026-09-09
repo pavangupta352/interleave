@@ -194,6 +194,10 @@ Common execution limits are `--max-steps`, `--timeout-ms`, and
 `--max-attempts` and `--total-timeout-ms`. Values are integer counts, bytes, or
 milliseconds as named. Defaults and supported contracts are in [API](api.md).
 
+Choose execution limits for each invocation. Replay does not inherit the recorded
+timeout: if recording needed `--timeout-ms 30000`, pass that option again when
+replaying or minimizing. Omitting it selects the default 10-second per-run limit.
+
 `--json` writes one JSON value to stdout: the corresponding public API result
 (ExplorationResult for run, RunResult for replay/doctor/demo, MinimizationResult
 for minimize). Usage failures produce an object containing `error.message` and
