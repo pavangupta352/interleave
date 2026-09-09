@@ -1,6 +1,8 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import { renderReport, writeReport } from '../src/report.js';
 import type { RunResult } from '../src/types.js';
@@ -44,5 +46,36 @@ test('report writes refuse overwrite and invalid evidence creates no output', as
     expect(await readFile(target, 'utf8')).toBe(original);
     await expect(writeReport(join(directory, 'invalid.html'), { ...reportFixture(), schemaVersion: 9 } as unknown as RunResult)).rejects.toThrow(/version/);
     await expect(readFile(join(directory, 'invalid.html'))).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('public CLI --force replaces an existing report with the selected artifact', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'interleave report force '));
+  const artifact = join(directory, 'selected.json');
+  const target = join(directory, 'evidence.html');
+  const selected = reportFixture();
+  selected.reason = 'selected force-report fixture';
+  try {
+    await writeFile(artifact, JSON.stringify(selected));
+    await writeFile(target, '<html>existing sentinel</html>');
+    const env = { ...process.env };
+    delete env.TEST_DATABASE_URL;
+    delete env.INTERLEAVE_TEST_DATABASE_URL;
+    const result = spawnSync(process.execPath, [
+      fileURLToPath(new URL('../dist/cli.js', import.meta.url)),
+      'report', artifact, '--out', target, '--force', '--json',
+    ], { encoding: 'utf8', env, timeout: 10_000, maxBuffer: 1024 * 1024 });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(JSON.parse(result.stdout)).toEqual({ path: target, scenario: selected.scenario, outcome: selected.outcome });
+    const html = await readFile(target, 'utf8');
+    expect(html).toContain('<!doctype html>');
+    expect(html).toContain('Content-Security-Policy');
+    expect(html).toContain("default-src 'none'");
+    expect(html).not.toContain('existing sentinel');
+    const embedded = /<script id="run-data" type="application\/json">([\s\S]*?)<\/script>/.exec(html)![1]!;
+    expect(JSON.parse(embedded).run).toEqual(selected);
+    expect((await readdir(directory)).sort()).toEqual(['evidence.html', 'selected.json']);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
