@@ -21,11 +21,41 @@ export function pghybridAdapterOptions(adapter: PghybridAdapter): Pick<RunOption
 
 type Search = (table?: string) => Promise<SearchResult[]>;
 
+/** Own checked-out client errors and public retirement for a caller-owned Pool. */
+export function observePoolClients(pool: Pool, onError: (error: Error) => void): {
+  interrupt(): void; waitForEnd(): Promise<void>;
+} {
+  const retiring = new Map<Client, Promise<void>>();
+  const stopping = new WeakSet<Client>();
+  let interrupted = false;
+  const stop = (client: Client): void => {
+    if (stopping.has(client)) return;
+    stopping.add(client);
+    void client.end().catch(onError);
+  };
+  pool.on('connect', client => {
+    // Pool.error covers idle clients. A checked-out client also needs its own
+    // listener, including the interval before an ORM submits its first query.
+    client.on('error', onError);
+    const ended = new Promise<void>(resolve => client.once('end', () => {
+      retiring.delete(client); client.off('error', onError); resolve();
+    }));
+    retiring.set(client, ended);
+    if (interrupted) stop(client);
+  });
+  return {
+    interrupt() { interrupted = true; for (const client of retiring.keys()) stop(client); },
+    waitForEnd: () => Promise.all([...retiring.values()]).then(() => {}),
+  };
+}
+
 /** The library owns no connection; this example owns and closes its real caller. */
 async function usingCaller<T>(adapter: PghybridAdapter, { connectionString, signal }: ActorContext, action: (search: Search) => Promise<T>): Promise<T> {
   let search: Search;
   let connect = async (): Promise<void> => {};
   let closeDriver: (aborted: boolean) => Promise<void>;
+  let interruptPool: (() => void) | undefined;
+  let clientError: Error | undefined;
   let pg: EventEmitter | undefined;
   if (adapter === 'postgresjs') {
     const sql = postgres(connectionString, { max: 1, ssl: false, connection: { application_name: applicationName } });
@@ -41,13 +71,9 @@ async function usingCaller<T>(adapter: PghybridAdapter, { connectionString, sign
     pg = pool;
     // Pool.end()/query rejection may precede the retired client's end event.
     // Observe the public lifecycle before opening a replacement on this actor URL.
-    const retiring = new Set<Promise<void>>();
-    pool.on('connect', client => {
-      const ended = new Promise<void>(resolve => client.once('end', resolve));
-      retiring.add(ended);
-      void ended.then(() => { retiring.delete(ended); });
-    });
-    const endedClients = () => Promise.all([...retiring]).then(() => {});
+    const lifecycle = observePoolClients(pool, error => { clientError ??= error; abort(); });
+    const endedClients = lifecycle.waitForEnd;
+    interruptPool = lifecycle.interrupt;
     closeDriver = async () => { await pool.end(); await endedClients(); };
     if (adapter === 'drizzle') {
       const db = drizzle(pool);
@@ -67,13 +93,20 @@ async function usingCaller<T>(adapter: PghybridAdapter, { connectionString, sign
   }
   let ending: Promise<void> | undefined;
   const close = (aborted = false): Promise<void> => ending ??= closeDriver(aborted);
-  const abort = (): void => { void close(true).catch(() => {}); };
+  const abort = (): void => {
+    // End checked-out clients promptly, but let acquisition/query release unwind
+    // before destroying the ORM. Kysely still needs its Pool during acquisition.
+    if (interruptPool) interruptPool();
+    else void close(true).catch(() => {});
+  };
   pg?.on('error', abort);
   signal.addEventListener('abort', abort, { once: true });
   try {
     signal.throwIfAborted();
     await connect();
-    return await action(search);
+    const result = await action(search);
+    if (clientError) throw clientError;
+    return result;
   } finally {
     signal.removeEventListener('abort', abort);
     try { await close(); } finally { pg?.off('error', abort); }

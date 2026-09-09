@@ -66,6 +66,40 @@ still closing. The first unmodified helper hit the single-connection gate in
 five real tests. Waiting for actual retirement fixes those cases without
 timers, private driver fields or a larger connection limit.
 
+### Followup: connection retirement and early Kysely cancellation
+
+Subsequent CI exposed a further retirement ordering: a caller's public Client
+`end` can precede both proxy-side socket close notifications. The proxy now
+defers one bounded replacement startup until the original session actually
+retires. Its [direct retirement tests](../../test/proxy-retirement.integration.test.ts)
+retain the original both-socket closure requirement, reject live overlap and
+discard abandoned prospective connections. The actual handled Pool search has
+a regression that delays only delivery of an already-observed close event.
+
+A separate cancellation run exposed a checked-out Kysely Client error. A Pool's
+`error` handler covers idle clients; it does not own every checked-out client's
+error event. The example now observes each Client's public `error` and `end`,
+ends clients on interruption, and waits for the acquisition or query to unwind
+before destroying Kysely. Connections that arrive after interruption are also
+ended. No driver or vendor code is changed.
+
+The [caller-ownership tests](../../test/pghybrid-pool-ownership.pgvector.integration.test.ts)
+use Kysely's real public acquisition hook to establish the pre-query phase.
+Before the fix, cancellation produced an uncaught client error and worker exit
+1 without actor settlement. After the fix, the actual Client end releases the
+hook normally, the actor rejects, and the worker returns inconclusive evidence
+with complete cleanup. Additional real tests cover a late connection and
+SQLSTATE **57P01** from terminating the single identified backend in an owned
+database. The queued-search cancellation tests now also observe the real
+proxy scheduling unit before cancelling; backend activity alone was an
+insufficient phase witness.
+
+The focused followup passed **21 tests in two files** on Node 24.7.0 in **22.04
+seconds**, with all recorded owned databases independently absent and its exact
+managed container removed. This focused result does not replace the full Node
+22/24 matrix. The Postgres.js early-discovery limitation
+below remains unchanged.
+
 ## Installed source binding
 
 The [packaged test](../../test/pghybrid-adapters-packaged.pgvector.integration.test.ts)

@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { createPghybridAdapterScenario, pghybridAdapterOptions, type PghybridAdapter } from '../examples/pghybrid/adapters.js';
 import { runOnce } from '../src/runner.js';
 import { parseRunArtifact } from '../src/artifact.js';
+import * as proxyModule from '../src/proxy.js';
 import type { Scenario } from '../src/types.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
 
@@ -147,6 +148,14 @@ test('actual changed document data is incompatible before any adapter query is r
 test.each(adapters)('%s closes a pending real search on cancellation and deadline', async adapter => {
   for (const interruption of ['cancel', 'deadline'] as const) {
     const controller = new AbortController();
+    let searchQueued = false;
+    const createProxy = proxyModule.createProxy;
+    const observation = vi.spyOn(proxyModule, 'createProxy').mockImplementation(options => createProxy({
+      ...options, onUnit(unit) {
+        if (unit.actor === 'first' && unit.sql.includes('websearch_to_tsquery')) searchQueued = true;
+        options.onUnit(unit);
+      },
+    }));
     const original = createPghybridAdapterScenario(adapter);
     const scenario = tracked({ ...original, actors: { first: original.actors.first!, async second({ connectionString }) {
       if (adapter === 'postgresjs') {
@@ -160,18 +169,21 @@ test.each(adapters)('%s closes a pending real search on cancellation and deadlin
       timeoutMs: interruption === 'deadline' ? 2000 : 10_000 });
     let settled = false;
     void running.then(() => { settled = true; }, () => { settled = true; });
-    const admin = new Client({ connectionString: databaseUrl }); await admin.connect();
+    const admin = new Client({ connectionString: databaseUrl });
     let ready = false;
     try {
+      await admin.connect();
       const until = Date.now() + 5000;
       while (!settled && Date.now() < until) {
-        ready = (await admin.query("SELECT 1 FROM pg_stat_activity WHERE datname = ANY($1::text[]) AND application_name = 'pghybrid-adapter-qualification' AND ($2::boolean = false OR (query LIKE '%pg_catalog.pg_type%' AND state = 'idle'))", [owned, adapter === 'postgresjs'])).rowCount! > 0;
+        ready = (await admin.query("SELECT 1 FROM pg_stat_activity WHERE datname = ANY($1::text[]) AND application_name = 'pghybrid-adapter-qualification' AND ($2::boolean = false OR (query LIKE '%pg_catalog.pg_type%' AND state = 'idle'))", [owned, adapter === 'postgresjs'])).rowCount! > 0 && searchQueued;
         if (ready) break;
         await new Promise(resolve => setTimeout(resolve, 10));
       }
+      expect(ready, 'the actual queued search and its backend must precede interruption').toBe(true);
       if (interruption === 'cancel') controller.abort();
       const run = await running;
-      expect(ready).toBe(true);
+      console.log(JSON.stringify({ pghybridAdapterInterruption: { adapter, interruption, searchQueued,
+        outcome: run.outcome, reason: run.reason, actors: run.actors, cleanup: run.cleanup } }));
       expect(run.outcome, run.reason).toBe('inconclusive');
       expect(run.reason).toMatch(interruption === 'cancel' ? /cancel/i : /deadline/i);
       if (adapter === 'postgresjs') {
@@ -181,6 +193,10 @@ test.each(adapters)('%s closes a pending real search on cancellation and deadlin
       expect(run.actors.find(actor => actor.actor === 'first')?.status).toBe('rejected');
       expect(run.cleanup.complete).toBe(true);
       expect(parseRunArtifact(run)).toEqual(run);
-    } finally { controller.abort(); await running; await admin.end(); }
+    } finally {
+      controller.abort();
+      try { await running; }
+      finally { try { await admin.end(); } finally { observation.mockRestore(); } }
+    }
   }
 });
