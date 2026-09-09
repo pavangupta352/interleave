@@ -122,3 +122,17 @@ Use `{ mode: 'guided' }` explicitly to try the old actor order against changed q
 `exportRegression` and `verifyRegressionExport` produce and validate a
 [portable regression bundle](regressions.md) with explicit source selection and
 integrity hashes. Report and export operations do not execute a scenario.
+
+Shared app/runtime exports preserve the original application lock and package
+instance graph through one offline installation. `exportRegression` accepts
+`runtimeArchive?: string` for the original lock-matching Interleave tarball and
+`dependencyArchives?: string[]` for original local/private tarballs. Safe
+contained files and locked official-registry HTTPS tarballs are discovered
+automatically. All required archives must be available and verified; unsupported
+topology or install hooks fail explicitly. The separate installation profile
+remains available for recordings without shared instances.
+
+`artifactFile?: string` preserves original JSON bytes after checking that the
+parsed artifact equals the supplied run. The CLI supplies its selected artifact
+file automatically; object-only API calls serialize the validated run. See the
+regression guide for archive, installer and qualification limits.

@@ -6,6 +6,7 @@ const definitions = {
   safe: { type: 'boolean' }, 'keep-going': { type: 'boolean' },
   'database-url': { type: 'string' }, out: { type: 'string' }, plan: { type: 'string' },
   'project-root': { type: 'string' }, include: { type: 'string', multiple: true },
+  'runtime-archive': { type: 'string' }, 'dependency-archive': { type: 'string', multiple: true },
   'max-steps': { type: 'string' }, 'timeout-ms': { type: 'string' }, 'max-evidence-bytes': { type: 'string' },
   'max-connections-per-actor': { type: 'string' },
   'protocol-profile': { type: 'string' },
@@ -20,7 +21,7 @@ const allowed: Record<string, string[]> = {
   init: [], run: [...runFlags, ...searchFlags, ...sourceFlags],
   replay: [...runFlags, 'guided', ...sourceFlags], minimize: [...runFlags, 'max-attempts', 'total-timeout-ms', ...sourceFlags],
   doctor: [...runFlags], demo: [...runFlags, 'safe'], report: ['out', 'force'],
-  export: ['out', 'project-root', 'include'],
+  export: ['out', 'project-root', 'include', 'runtime-archive', 'dependency-archive'],
 };
 const numbers: Record<string, [number, number]> = {
   'max-steps': [1, 100_000], 'timeout-ms': [1, 600_000], 'max-evidence-bytes': [1024, 12 * 1024 * 1024],
@@ -34,7 +35,7 @@ export function parseCliArgs(args: string[]) {
   const seen = new Set<string>();
   for (const token of parsed.tokens) {
     if (token.kind !== 'option') continue;
-    if (seen.has(token.name) && token.name !== 'include') throw new TypeError(`Option --${token.name} may only be supplied once`);
+    if (seen.has(token.name) && !['include', 'dependency-archive'].includes(token.name)) throw new TypeError(`Option --${token.name} may only be supplied once`);
     seen.add(token.name);
   }
   const command = parsed.positionals[0];
@@ -89,6 +90,7 @@ Reduction: --max-attempts <n>, --total-timeout-ms <n>
 Run/replay/minimize: --out <run.json> writes one retained run.
 Source inputs: --project-root <dir>, repeated --include <relative-path>.
 Export: --project-root <dir>, --out <new-directory>, repeated --include <path>.
+Shared export: --runtime-archive <original.tgz>, repeated --dependency-archive <original.tgz>.
 --force permits atomic replacement of run artifacts and reports. init and export never overwrite.
 Exact replay is default; --guided creates separately labeled new evidence.
 Artifacts preserve private SQL and selected observations, which may be sensitive.

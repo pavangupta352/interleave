@@ -14,6 +14,12 @@ function execute(args: string[]) {
 }
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 describe('CLI arguments and scaffolding', () => {
+  test('export accepts one runtime archive and repeated dependency archives', () => {
+    const parsed = parseCliArgs(['export', 'scenario.mjs', 'run.json', '--runtime-archive', '/runtime.tgz', '--dependency-archive', '/a.tgz', '--dependency-archive', '/b.tgz']);
+    expect(parsed.values).toMatchObject({ 'runtime-archive': '/runtime.tgz', 'dependency-archive': ['/a.tgz', '/b.tgz'] });
+    expect(() => parseCliArgs(['run', 'scenario.mjs', '--runtime-archive', '/runtime.tgz'])).toThrow(/not supported/);
+    expect(() => parseCliArgs(['export', '--runtime-archive', '/a.tgz', '--runtime-archive', '/b.tgz'])).toThrow(/once/);
+  });
   test.each(['run', 'replay', 'minimize'])('source input selection is available on %s', command => {
     const parsed = parseCliArgs([command, 'scenario.mjs', '--project-root', '/project with spaces', '--include', 'input.json', '--include', 'fixtures']);
     expect(parsed.values['project-root']).toBe('/project with spaces');

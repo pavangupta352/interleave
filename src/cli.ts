@@ -68,7 +68,10 @@ async function main(args: string[]): Promise<number> {
       scenarioFile: positionals[0]!,
       projectRoot: values['project-root'],
       destination: values.out,
+      artifactFile: positionals[1]!,
       ...(values.include === undefined ? {} : { include: values.include }),
+      ...(values['runtime-archive'] === undefined ? {} : { runtimeArchive: values['runtime-archive'] }),
+      ...(values['dependency-archive'] === undefined ? {} : { dependencyArchives: values['dependency-archive'] }),
     });
     output(exported, describeExport(exported));
     return 0;

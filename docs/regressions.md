@@ -3,8 +3,10 @@
 An Interleave regression export keeps one observed invariant violation together
 with the trusted local scenario source needed to replay it. The export is a new
 directory containing the exact run artifact, selected application files, npm
-package metadata and lockfile, a tarball matching the recorded built Interleave runtime, a
-separate runtime dependency lock, and a versioned integrity manifest.
+package metadata and lockfile, archives matching the recorded built Interleave
+runtime, and a versioned integrity manifest. Recordings with a shared app/runtime
+installation use the original app lock and one offline installation. Other
+recordings retain separate app and runtime installations.
 
 Exports preserve application SQL and recorded observations verbatim. Those files
 can contain credentials, personal data, or other private values. Review the
@@ -29,10 +31,38 @@ identities. Export compares the selected source, actual installed dependency
 bytes, and built runtime against the recording before writing, then captures
 them again after packaging to detect intervening changes.
 
-This profile rejects recordings that share installed dependency instances
-between the application and Interleave. Its separate installation directories
-cannot preserve that module sharing. It does not rewrite the recording or
-silently treat separate module instances as equivalent.
+When the application and Interleave share installed packages, export requires
+the recording runtime to be the unambiguous ordinary top-level application
+installation at `node_modules/@pavangupta352/interleave`. The application source
+must import that Interleave package. Export preserves the entire recorded
+package graph and every shared instance; an external/global runtime, ambiguous
+Interleave copies, or a lock that changes sharing is rejected.
+
+The shared profile needs the original runtime archive matching the app lock's
+SHA-512 integrity. Supply it explicitly when it cannot be discovered:
+
+```sh
+node node_modules/@pavangupta352/interleave/dist/cli.js export \
+  ./scenario.mjs ./failed-run.json --project-root . \
+  --runtime-archive /absolute/path/to/original-interleave.tgz \
+  --out ./counter-regression
+```
+
+Export can read contained relative `file:` tarballs or download exact locked
+HTTPS tarball URLs from `registry.npmjs.org`, with bounded size/time and no
+redirects. It does not read an outside-project path named by a lock. Use repeated
+`--dependency-archive /path/to/original.tgz` for local or private dependencies
+whose original archives are unavailable through those rules. Explicit archives
+must be ordinary files reached without symbolic links. Unsupported/custom
+download sources require explicit archives; no credentials are inferred.
+
+All locked archives are retained under content-hashed names for offline
+installation. Every archive must match its original lock integrity. Packages
+in the historical source/runtime graph must also match every recorded package
+file, including documentation and declarations. Modified installed package
+bytes cannot be replaced by the original registry package, and a fresh runtime
+repack cannot replace a different original tarball merely because its selected
+implementation files match. No lock or recorded identity is rewritten.
 
 The scenario and project root are explicit trusted local inputs. The destination
 must not exist. Interleave claims that directory exclusively and verifies its
@@ -85,9 +115,17 @@ arbitrary runtime file discovery is complete.
 Application dependency locks must use npm lockfile version 2 or 3. Their direct
 dependency declarations must match `package.json`; npm validates the virtual
 dependency tree without installation or lifecycle scripts. Registry and HTTP(S)
-tarball dependencies need integrity digests. Workspace, linked/local, and Git
-dependency locks are not supported by this export profile. The current
-qualification uses npm 11.5.1.
+tarball dependencies need integrity digests. Workspace, linked/local dependency
+directories and Git locks are unsupported. The shared profile also accepts
+integrity-pinned local tarballs and requires one canonical SHA-512 SRI per lock
+entry. It rejects application `.npmrc`, `npm-shrinkwrap.json`, bundled
+dependencies, dependency install hooks and native build packages. A historically
+missing optional package is rejected if the original lock would install it.
+Its fixed installation uses npm's hoisted layout, includes development/optional/
+peer dependencies, and disables lifecycle scripts. A lock requiring different
+installation flags needs another qualified profile. The current qualification
+uses npm 11.5.1 on POSIX Node installations; Windows shared installation is
+explicitly unsupported.
 
 `--json` returns the destination, manifest fingerprint, selected files, and
 replay commands as argument arrays. Human output prints the same paths and
@@ -109,6 +147,9 @@ const result = await exportRegression(run, {
   projectRoot: '.',
   destination: './counter-regression',
   include: ['migrations'],
+  artifactFile: './failed-run.json', // preserve original JSON formatting bytes
+  // runtimeArchive: '/absolute/path/to/original-interleave.tgz',
+  // dependencyArchives: ['/absolute/path/to/private-dependency.tgz'],
 });
 
 console.log(result.fingerprint);
@@ -121,15 +162,25 @@ built runtime. Packaging checks the actual tarball contents, including every
 recorded runtime implementation file; an npm `files` rule that omits executing
 code causes export to fail.
 
+`runtimeArchive` and `dependencyArchives` apply to the shared installation
+profile. Their bytes must match the unchanged original lock. Unmatched explicit
+archives are rejected. `artifactFile` is optional: its parsed content must equal
+the supplied run, and the file must remain unchanged while exporting. The CLI
+sets it automatically to preserve original run JSON bytes. Without that option,
+the object API serializes the validated run into `run.json`.
+
 `verifyRegressionExport(directory)` reads inert JSON and ordinary files. It does
 not import scenario code. It validates the manifest schema and fingerprint,
 checks safe relative paths and expected file roles, rejects symbolic or
 undeclared files, hashes every byte, re-validates the recorded run, and checks
-the package/lock pairing and both virtual dependency trees with npm. It recomputes
+the package/lock pairing and the relevant virtual dependency trees with npm. It recomputes
 the recorded source identity hashes, compares the copied application manifest
 exactly, and checks the bounded gzip/tar payload against recorded runtime bytes.
-Archive links, special entries, unsafe or duplicate paths, and oversized or
-malformed payloads are rejected. Verification
+For shared exports it also checks every archive's original lock binding, full
+historical package inventories and sharing topology, and regenerates the exact
+installer to reject changed options or executable instructions. Archive links,
+special entries, unsafe or duplicate paths, and oversized or malformed payloads
+are rejected. Verification
 does not install dependencies or execute application lifecycle scripts. A
 successful verification establishes consistency between the bundled bytes,
 manifest, and recorded source/runtime evidence. The manifest is not a signature and does not
@@ -138,11 +189,28 @@ establish who created or trusted the source.
 Bundled runtime dependencies are outside this installation profile: nonempty or
 enabled `bundleDependencies`/`bundledDependencies` declarations and every archive
 path containing a `node_modules` component are rejected. Ordinary dependency
-directories are created later by the separate lockfile installations. File reads
+directories are created later by npm using the selected installation profile. File reads
 also reject special files, including FIFOs, without waiting for another process
 to open them.
 
 ## Folder layout
+
+The shared installation profile contains:
+
+```text
+counter-regression/
+├── manifest.json
+├── run.json
+├── install.mjs
+├── app/
+│   ├── package.json        # original bytes
+│   ├── package-lock.json   # original bytes
+│   └── … selected scenario and application files
+└── archives/
+    └── <sha256>.tgz        # every locked package's original archive
+```
+
+The separate installation profile contains:
 
 ```text
 counter-regression/
@@ -171,6 +239,10 @@ counter-regression/
 - a fingerprint over the complete manifest content except the fingerprint field
   itself.
 
+Shared manifests additionally declare `installation.layout: "shared-app"`, the
+`npm-offline-v1` profile, the app-installed runtime path, and the exact mapping
+from original lock paths to bundled archives. The run artifact remains schema 1.
+
 The source fingerprint is the recording's selected-source component fingerprint.
 It covers every copied application file, including package and lock metadata,
 using paths relative to `app/`. The runtime fingerprint also comes from the
@@ -179,8 +251,27 @@ dependency, and runtime identity.
 
 ## Replay from a clean directory
 
-Change into the exported folder and run the three argument arrays shown by the
-export command or stored under `manifest.replay`. They perform these operations:
+Verify the original exported folder, then change into it and run the argument
+arrays shown by export or stored under `manifest.replay`.
+
+For a shared installation, `node install.mjs` verifies every durable input,
+seeds a new private cache using public `npm cache add`, and runs one offline
+`npm ci` for the original app. It isolates npm's user/global configuration,
+removes inherited Node/npm configuration from child processes, disables hooks,
+and enforces bounded time/output. It then compares the complete installed
+source/runtime identity to the original recording before importing any scenario.
+The replay command uses
+`app/node_modules/@pavangupta352/interleave/dist/cli.js`.
+
+The installer requires `app/node_modules` to be absent, preserving any existing
+installation rather than deleting it. It retains its uniquely named cache for
+inspection and prints the exact path; remove it explicitly when finished.
+Verification describes the original bundle before generated installation/cache
+files exist. Node itself and npm are trusted host tools: a startup hook supplied
+to the initial `node install.mjs` command runs before installer code can remove
+that setting. Start it from a trusted Node environment.
+
+For separate installations, the commands perform these operations:
 
 1. `npm ci --prefix app` installs the selected application's locked dependencies.
 2. `npm ci` installs the hashed bundled runtime and its separately locked
@@ -198,7 +289,7 @@ make an unsupported recording valid.
 The replay executable always comes from the bundled runtime. Both original
 lockfiles remain unchanged by the generated installation commands.
 
-The runtime lock captures the graph resolved when export is created. Byte
+The separate runtime lock captures the graph resolved when export is created. Byte
 verification does not establish that a future installation reproduces the
 recorded installed dependency bytes. For example, files modified inside
 `node_modules` before recording can match at export time but differ from a fresh
@@ -206,7 +297,10 @@ lockfile installation. Transitive versions and platform-specific optional
 packages can also differ. Exact replay compares the resulting complete identity
 and rejects such differences before scenario execution. A successful export is
 not a claim that the folder has already been installed or replayed; clean-install
-replay is a separate qualification step.
+replay is a separate qualification step. Shared exports retain all exact archives
+and reject recorded package edits that do not match them, but another npm version
+or platform can still select a different installed graph. The installer detects
+that mismatch; it does not rewrite the historical baseline.
 
 The installed export parser bundles TypeScript; its Apache 2.0 license and third
 party notices are shipped under `dist/vendor/typescript` inside the runtime.
