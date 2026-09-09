@@ -46,6 +46,10 @@ export default {
         try { await close(); log({ event: 'caller-closed' }); } finally { pool.off('error', abort); }
       }
     },
-    async second() { await new Promise(() => {}); },
+    async second({ signal }) {
+      // Withhold readiness during acquisition, then cooperate with cancellation.
+      if (signal.aborted) return;
+      await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    },
   },
 };

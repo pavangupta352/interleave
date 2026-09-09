@@ -122,6 +122,7 @@ test('public Kysely acquisition cancellation owns the checked-out Client through
     expect(run.reason).toMatch(/cancel/i);
     expect(run.reason).not.toMatch(/worker.*exit/i);
     expect(run.actors.find(actor => actor.actor === 'first')?.status).toBe('rejected');
+    expect(run.actors.find(actor => actor.actor === 'second')?.status).toBe('fulfilled');
     expect(observed.map(event => event.event)).toEqual(['setup', 'pool-connect', 'pool-acquire', 'reserve-hook-entered',
       'caller-abort', 'client-end', 'reserve-hook-completed', 'caller-closed']);
     expect(run.trace).toEqual([]);

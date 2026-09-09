@@ -100,6 +100,26 @@ managed container removed. This focused result does not replace the full Node
 22/24 matrix. The Postgres.js early-discovery limitation
 below remains unchanged.
 
+The next Node 22 CI run completed the first caller's full terminal-event
+journal, then reported a worker SIGKILL. Its second fixture actor deliberately
+never settled, forcing the runner's full 100 ms actor-settlement wait inside
+the supervisor's 250 ms cancellation grace. That actor now withholds readiness
+until the public abort signal, then fulfills. The regression requires its
+fulfillment alongside the first actor's rejection, the full caller journal,
+zero released steps and exact database absence. The original fixture fails
+the new lifecycle assertion deterministically.
+
+The CI journal does not identify the exact reporting phase interrupted by
+SIGKILL. This fixture correction isolates the acquisition lifecycle test;
+supervisor grace, execution budgets, source coverage and driver behavior are
+unchanged.
+
+After this correction, the full vector selection passed **34 tests in seven
+files** on both Node **22.18.0** and **24.7.0**, including all five installed
+adapter record/replay rows. Each run independently confirmed its 54 journaled
+database names absent and removed its exact managed container. Fresh CI and
+release-archive qualification remain separate checks.
+
 ## Installed source binding
 
 The [packaged test](../../test/pghybrid-adapters-packaged.pgvector.integration.test.ts)
