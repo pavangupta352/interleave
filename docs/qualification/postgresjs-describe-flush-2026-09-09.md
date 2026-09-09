@@ -1,6 +1,6 @@
 # Postgres.js metadata-stage qualification — 9 September 2026
 
-Status: local development qualification of the protocol core and programmatic runner. The measured combination is **Postgres.js 3.4.9, Node.js 24.7.0, PostgreSQL 16.13**, plaintext transport, and one physical connection per actor. The repository pins the driver and its integrity in the development lockfile. This record does not extend the existing node-postgres server matrix to every Postgres.js feature or platform.
+Status: local development qualification of the protocol core, programmatic runner, packaged CLI, offline export and report viewer. The measured database combination is **Postgres.js 3.4.9, Node.js 24.7.0, PostgreSQL 16.13**, plaintext transport, and one physical connection per actor. The repository pins the driver and its integrity in the development lockfile. This record does not extend the existing node-postgres server matrix to every Postgres.js feature or platform.
 
 ## Select the profile
 
@@ -72,8 +72,34 @@ Both default preparation and explicit `prepare: false` were exercised through th
 
 The final local verification passed **127 tests in nine files**, TypeScript checks, and the production build. The focused tests are [protocol stages](../../test/protocol-staged.test.ts), [real driver/proxy](../../test/proxy-staged.integration.test.ts), [programmatic runner/replay/reduction](../../test/postgresjs-runner.integration.test.ts), and [contained shutdown](../../test/postgresjs-shutdown.integration.test.ts), alongside the existing protocol, proxy, auxiliary, profile and schema tests. This is constructed compatibility evidence, not a reproduced historical application bug or a claim of race freedom.
 
+## Packaged workflow and report
+
+The [installed-package test](../../test/postgresjs-export.integration.test.ts)
+installs an actual Interleave tarball and Postgres.js 3.4.9 in a fresh app. Its
+public `defineScenario` entry loads the unchanged [counter example](../../examples/postgresjs/scenario.mjs).
+The built CLI records eight releases: four real descriptions and four
+executions, leaving the deliberately unsafe counter at one. Its source manifest
+includes the actual driver and shared app/runtime dependency topology.
+
+The test exports that failure with its original lock and archives, removes the
+original archive directory, then runs the bundled installer with an unavailable
+registry and a fresh private offline cache. Strict replay from the restored app
+retains matching source, fixture, stage, query and failure identities with
+complete cleanup. The four original app files and deliberately noncanonical
+JSON whitespace remain byte-for-byte unchanged. This local qualification passed
+in 16.85 seconds; it is not a performance comparison.
+
+The report checks use separate actual source-bound neveroversell and Postgres.js
+records. Chromium, Firefox and WebKit each passed 12 legacy and eight staged
+checks at 1440×1000 and 390×844. The staged checks distinguish description
+metadata from execution results, verify the prefix link, reject contradictory
+stage imports without losing the current record, switch between both schema
+versions, and download the exact staged object. They found no runtime errors,
+external requests or horizontal overflow. Desktop and mobile screenshots were
+also visually inspected.
+
 ## Retained boundaries
 
 The qualified early-Flush grammar is exactly one Parse/statement Describe/Flush followed by matching Bind/unlimited Execute/Sync, or Sync-only error recovery. Successful metadata-only Sync, arbitrary interleaved early-Flush prefixes, cursor suspension, COPY and cancellation routing remain unsupported. `max: 1` avoids competing command-producing connections; the independent queryless auxiliary profile does not permit simultaneous command sessions. TLS termination and application extensions require their own profiles.
 
-The driver and proxy execute original SQL and forward original query/result frames. No driver internals, application business logic, clocks or parameter values were patched. Source-bound file execution, portable export and browser presentation require their own verification in addition to this core qualification.
+The driver and proxy execute original SQL and forward original query/result frames. No driver internals, application business logic, clocks or parameter values were patched. The constructed counter and packaged workflow establish compatibility for this measured use; they do not qualify every Postgres.js feature or constitute a historical driver defect.

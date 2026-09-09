@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
 import { runScenarioFile, renderReport } from '../../dist/index.js';
 import { loadNeveroversell } from '../../dist/cli/demo.js';
-import { checkReport } from './report-checks.mjs';
+import { checkReport, checkStagedReport } from './report-checks.mjs';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 assert.ok(databaseUrl, 'Use npm run test:browser to provision a dedicated PostgreSQL server');
@@ -24,7 +24,17 @@ try {
   assert.ok(artifact.environment.fixture, 'Browser qualification must use an actual bound PostgreSQL run');
   assert.ok(artifact.environment.source, 'Browser qualification must bind actual application and runtime files');
   const html = await renderReport(artifact);
-  server = createServer((_request, response) => { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(html); });
+  const staged = await runScenarioFile(fileURLToPath(new URL('../../examples/postgresjs/scenario.mjs', import.meta.url)), {
+    databaseUrl, signal: controller.signal, protocolProfile: 'describe-flush-v1',
+    source: { projectRoot: fileURLToPath(new URL('../../', import.meta.url)) },
+  });
+  assert.equal(staged.outcome, 'violation', staged.reason);
+  assert.equal(staged.cleanup.complete, true);
+  assert.equal(staged.schemaVersion, 2);
+  assert.ok(staged.environment.source);
+  assert.ok(staged.trace.some(step => step.completion?.kind === 'metadata'));
+  const stagedHtml = await renderReport(staged);
+  server = createServer((request, response) => { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(request.url === '/staged' ? stagedHtml : html); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const url = `http://127.0.0.1:${server.address().port}/`;
   for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
@@ -35,7 +45,8 @@ try {
       const page = await browser.newPage({ viewport, acceptDownloads: true });
       try {
         const result = await checkReport(page, url, artifact);
-        console.log(`[browser] ${name} ${viewport.width}×${viewport.height}: ${result.checks.length} checks passed`);
+        const stagedResult = await checkStagedReport(page, `${url}staged`, staged, artifact);
+        console.log(`[browser] ${name} ${viewport.width}×${viewport.height}: ${result.checks.length} legacy + ${stagedResult.checks.length} staged checks passed`);
       } finally { await page.close(); }
     }
     await browser.close(); browser = undefined;

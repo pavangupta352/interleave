@@ -104,3 +104,53 @@ export async function checkReport(page, url, artifact) {
     return { checks: ['recorded fixture, source, runtime and startup identities', 'invalid schema preserved current record', 'invalid UTF-8 rejected', '16 MiB import cap', 'hostile text inert', 'download exact equality', '100-row pagination', 'keyboard page crossing', 'filtered original indices', 'empty evidence', 'no runtime errors', 'no external requests'], passed: true };
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }
+
+/** Actual driver metadata must never be presented as a completed SQL execution. */
+export async function checkStagedReport(page, url, artifact, legacy) {
+  const errors = [], requests = [];
+  const onError = error => errors.push(error.message);
+  const onRequest = request => { if (request.url() !== url) requests.push(request.url()); };
+  page.on('pageerror', onError); page.on('request', onRequest);
+  try {
+    await page.goto(url);
+    await page.getByRole('heading', { name: artifact.scenario, exact: true }).waitFor();
+    const prefix = artifact.trace.find(step => step.completion?.kind === 'metadata' && step.completion.result === 'described');
+    assert.ok(prefix);
+    await page.locator(`.command[data-step="${prefix.index}"]`).click();
+    const inspector = page.locator('#inspector');
+    assert.equal(await inspector.getByText('Description only', { exact: true }).count(), 1);
+    assert.equal(await inspector.locator('dt').filter({ hasText: 'Rows affected / returned' }).count(), 0);
+    assert.equal(await inspector.locator('dt').filter({ hasText: /^Transaction$/ }).count(), 0);
+    assert.equal(await inspector.getByText('Parameters described', { exact: true }).count(), 1);
+    assert.equal(await page.locator(`.command[data-step="${prefix.index}"]`).getByText('Metadata received', { exact: true }).count(), 1);
+    assert.ok((await inspector.textContent()).includes('before parameter values are sent'));
+    const execution = artifact.trace.find(step => step.actor === prefix.actor && step.connection === prefix.connection && step.prefixOrdinal === prefix.ordinal);
+    assert.ok(execution);
+    await page.locator(`.command[data-step="${execution.index}"]`).click();
+    assert.equal(await inspector.getByText('Rows affected / returned', { exact: true }).count(), 1);
+    await inspector.locator('.identity summary').click();
+    assert.equal(await inspector.getByText(`Step ${prefix.index + 1}`, { exact: true }).count(), 1);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Staged identity fits the viewport');
+    assert.equal(await page.getByText(/undefined|NaN/).count(), 0);
+    const upload = (name, value) => page.locator('#import-file').evaluate((element, data) => {
+      const transfer = new DataTransfer(); transfer.items.add(new File([JSON.stringify(data.value)], data.name, { type: 'application/json' }));
+      element.files = transfer.files; element.dispatchEvent(new Event('change', { bubbles: true }));
+    }, { name, value });
+    const broken = structuredClone(artifact);
+    broken.trace[execution.index].prefixOrdinal = execution.ordinal;
+    await upload('broken-stage.json', broken);
+    await page.getByRole('status').filter({ hasText: /Could not open broken-stage.json/ }).waitFor();
+    assert.equal(await page.locator('#scenario').textContent(), artifact.scenario);
+    await upload('legacy.json', legacy);
+    await page.getByRole('heading', { name: legacy.scenario, exact: true }).waitFor();
+    await upload('staged.json', artifact);
+    await page.getByRole('heading', { name: artifact.scenario, exact: true }).waitFor();
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download JSON' }).click();
+    const download = await downloadPromise, stream = await download.createReadStream();
+    const chunks = []; for await (const chunk of stream) chunks.push(chunk);
+    assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString()), artifact);
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    return { checks: ['real description metadata', 'no invented ready status', 'linked execution identity', 'mobile overflow', 'invalid stage rejected', 'legacy and staged imports', 'exact staged download', 'no errors or external requests'], passed: true };
+  } finally { page.off('pageerror', onError); page.off('request', onRequest); }
+}

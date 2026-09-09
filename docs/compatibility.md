@@ -27,6 +27,34 @@ INTERLEAVE_TEST_POSTGRES_IMAGE=postgres:17 npm run test:integration
 INTERLEAVE_TEST_POSTGRES_IMAGE=postgres:18 npm run test:integration
 ```
 
-`INTERLEAVE_TEST_POSTGRES_IMAGE` accepts exactly `postgres:16`, `postgres:17`, or `postgres:18`. The harness binds a random loopback port, generates a random password, labels the container with an unguessable run identity, verifies that identity before cleanup, and removes the container and its anonymous volumes after the run. If `TEST_DATABASE_URL` is explicitly set, tests use that dedicated administrator endpoint instead of starting a container.
+`INTERLEAVE_TEST_POSTGRES_IMAGE` accepts exactly `postgres:16`, `postgres:17`, `postgres:18`, or `pgvector/pgvector:0.8.6-pg17-bookworm`. The harness binds a random loopback port, generates a random password, labels the container with an unguessable run identity, verifies that identity before cleanup, and removes the container and its anonymous volumes after the run. If `TEST_DATABASE_URL` is explicitly set, tests use that dedicated administrator endpoint instead of starting a container.
 
 The dated, immutable image identities and measured test results are in the [native PostgreSQL qualification record](qualification/postgresql-native-matrix-2026-09-09.md).
+
+## Explicit protocol and extension profiles
+
+Postgres.js 3.4.9 parameterized queries use the opt-in `describe-flush-v1`
+protocol. Real Parse/Describe/Flush metadata and later Bind/Execute/Sync work
+have separate release gates and schema-version-2 evidence. Cached prepared
+queries can still use a complete-cycle release. See the [driver qualification
+record](qualification/postgresjs-describe-flush-2026-09-09.md) and
+[runnable example](../examples/postgresjs/README.md), including the required
+driver shutdown listener for interrupted transactions. This qualification is
+separate from the earlier native CI result above.
+
+The separate fixture profile `postgresql17-pgvector0.8.6-v1` requires PostgreSQL
+17 and vector 0.8.6 in `public`, owned by the capture role. It checks the complete
+qualified extension member inventory, catalog definitions and effective
+settings before capturing application rows. The native profile keeps rejecting
+the extension. Catalog identity does not attest the installed server binary.
+
+Run the explicit vector tests with:
+
+```sh
+INTERLEAVE_TEST_POSTGRES_IMAGE=pgvector/pgvector:0.8.6-pg17-bookworm npm run test:integration -- pgvector
+```
+
+Native jobs exclude files ending in `.pgvector.integration.test.ts`; the selected
+vector profile runs them against an extension-capable server. Setting an image
+while supplying `TEST_DATABASE_URL` selects the tests but does not change that
+server: it must already provide the stated PostgreSQL and extension versions.

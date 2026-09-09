@@ -18,6 +18,13 @@ Select a row to inspect exact SQL, protocol, command tags, affected/returned row
 count, SQLSTATE, transaction state and recorded lock observations. Parameter bytes
 contribute to command fingerprints but are not displayed as query text.
 
+For `describe-flush-v1` records, each row is a release stage. **Describe** shows
+actual parameter and column metadata without inventing a row count or transaction
+state. **Execute** shows the later PostgreSQL result; its command identity links
+back to the description. **Recover** represents Sync after a description error.
+A query may therefore occupy more than one row. Both original version 1 and
+staged version 2 records can be imported into the same viewer.
+
 Use the arrow keys to move through the filtered order; Home and End select its
 first and last command, including across page boundaries. The ledger renders at
 most 100 commands per page. Search and actor filters preserve the original step

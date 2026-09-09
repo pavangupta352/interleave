@@ -75,6 +75,19 @@ connections for each actor. The default is one. Additional live connections must
 remain queryless; a second live command producer is explicitly unsupported. Exact
 replay and reduction inherit the recorded cap.
 
+`--protocol-profile describe-flush-v1` enables drivers that request metadata with
+Parse/Describe/Flush before sending parameter values. A description and its later
+execution are separate releases, each counted by `--max-steps`. The default
+`sync-cycle-v1` retains whole simple-query or extended-through-Sync cycles.
+Replay and reduction inherit the recorded protocol. See the [Postgres.js
+example](../examples/postgresjs/README.md) for driver setup and cancellation.
+
+`--fixture-profile postgresql17-pgvector0.8.6-v1` selects the separate PostgreSQL
+17 / pgvector 0.8.6 catalog contract. It requires that exact extension version in
+`public`, owned by the capture role. The default `native` profile permits
+`plpgsql` and rejects other extensions. Exact replay rejects an explicit profile
+change before importing the scenario; guided replay records new evidence.
+
 ## Inspect and retain a regression
 
 ```sh
@@ -89,6 +102,12 @@ selected files must still match the failure record. Additional data inputs must
 be declared when recording; export inherits that selection.
 Review the printed install and replay steps; export itself does not install or
 execute the copied project. Neither command requires a database URL.
+
+For a recorded shared app installation, `--runtime-archive <original.tgz>` and
+repeated `--dependency-archive <original.tgz>` arguments supply original archives
+whose integrity must match the recorded npm lock. The shared installer restores
+that original graph from bundled archives in a fresh private offline cache.
+An arbitrary repack does not substitute for the original archive.
 
 ## Check the environment and run the demo
 
