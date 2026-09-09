@@ -15,8 +15,6 @@ import {
 } from './vector-catalog.js';
 
 export type FixtureIdentityErrorCode = 'unsupported' | 'budget-exceeded' | 'not-quiescent' | 'aborted' | 'database-error';
-export type FixtureIdentityProfile = 'native' | 'postgresql17-pgvector0.8.6-v1';
-export type ResolvedFixtureIdentityProfile = 'postgresql16-native-v1' | 'postgresql17-native-v1' | 'postgresql18-native-v1' | 'postgresql17-pgvector0.8.6-v1';
 export class FixtureIdentityError extends Error {
   constructor(readonly code: FixtureIdentityErrorCode, message: string) { super(message); this.name = 'FixtureIdentityError'; }
 }
