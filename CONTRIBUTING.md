@@ -31,6 +31,7 @@ Useful references:
 - [Implementation and release gates](docs/plans/implementation.md)
 - [Preparing and verifying release archives](docs/releasing.md)
 - [Offline evidence reports](docs/reports.md) and [regression bundles](docs/regressions.md)
+- [Code of conduct](CODE_OF_CONDUCT.md) and [private security reporting](SECURITY.md)
 
 Keep fixes focused, preserve third-party notices, and describe the behavior before
 and after the change. Include the checks you actually ran. A passing bounded
