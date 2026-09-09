@@ -43,7 +43,7 @@ Interface: shared scenario/options/run-artifact types in `src/types.ts`; `runOnc
 - [x] Test unique DB isolation by writing a sentinel into the supplied admin database and proving it survives setup, success, failure and cancellation cleanup. Implement owned DB lifecycle.
 - [x] Test two existing functions reading/updating one row: force both reads before either update without sleeps and assert the real lost update. Implement actor readiness, choices and unit release.
 - [x] Test an actual row-lock waiter and release the lock owner; assert server-confirmed wait evidence and eventual completion. Separately run a slow nonblocked query and assert it is never classified as blocked.
-- [ ] Test stable actor-local ordering, completion/reconnect, setup error, invariant error, actor error, deadlock, run/step/readiness limits and termination cleanup.
+- [x] Test stable actor-local ordering, completion/reconnect, setup error, invariant error, actor error, deadlock, run/step/readiness limits and termination cleanup. Actor readiness uses the existing per-run deadline; there is no separate readiness timer. See [budgets and outcomes](../api.md#budgets-and-outcomes).
 - [x] Review scheduler semantics and prove failure categories cannot accidentally become a pass.
 
 ### 3. Exploration, strict replay and minimization
@@ -56,7 +56,7 @@ Interfaces: `explore(scenario, ExploreOptions) -> ExplorationResult`; `replay(sc
 - [x] Repeatedly replay the actual captured failure; change a SQL clause/parameter/actor and prove strict mode rejects it before presenting a result as matching. Detect extra/missing tail steps.
 - [x] Test guided replay separately: changed queries produce a new trace labeled guided, never exact-match success.
 - [x] Add irrelevant ordering choices around a known failure. Minimize instructions in fresh databases and assert the same invariant fingerprint; prove a different thrown error is not accepted.
-- [ ] Verify deterministic seeds, infeasible plans, cancellation and resource ceilings. Independent review.
+- [x] Verify deterministic seeds, infeasible plans, cancellation and resource ceilings. Independent core and CLI reviews found no open issues; see the [search qualification](../qualification/seeded-search-2026-09-09.md).
 
 ### 4. Library, CLI, versioned artifacts and regression packages
 

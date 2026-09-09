@@ -12,8 +12,8 @@ const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 const fixture = (name: string): string => fileURLToPath(new URL(`./fixtures/cli/${name}.mjs`, import.meta.url));
 const temporary: string[] = [];
 async function directory() { const path = await mkdtemp(join(tmpdir(), 'interleave CLI ')); temporary.push(path); return path; }
-function start(args: string[], extraEnv: Record<string, string> = {}) {
-  const child = spawn(process.execPath, ['--import', import.meta.resolve('tsx'), cli, ...args, '--json'], {
+function start(args: string[], extraEnv: Record<string, string> = {}, json = true) {
+  const child = spawn(process.execPath, ['--import', import.meta.resolve('tsx'), cli, ...args, ...(json ? ['--json'] : [])], {
     env: { ...process.env, TEST_DATABASE_URL: databaseUrl, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = ''; let stderr = '';
@@ -27,6 +27,37 @@ async function execute(args: string[]) { return start(args).result; }
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 
 describe('CLI real PostgreSQL integration', () => {
+  test('records seeded search metrics and replays the retained artifact without a seed', async () => {
+    const out = join(await directory(), 'seeded run.json');
+    const scenario = fixture('counter');
+    const discovered = await execute(['run', scenario, '--seed', '0', '--out', out]);
+    expect(discovered.code, discovered.stdout + discovered.stderr).toBe(1);
+    const search = JSON.parse(discovered.stdout);
+    expect(search.search).toEqual({ version: 1, strategy: 'seeded', seed: 0 });
+    expect(search.metrics).toEqual({ attemptedRuns: 1, completedRuns: 1, maxAttemptedDepth: 0,
+      recordedReleasedSteps: 4, recordedActorSwitches: 3, traceCountsComplete: true });
+    const recorded = await readRunArtifact(out);
+    expect(recorded).not.toHaveProperty('search'); expect(recorded).not.toHaveProperty('metrics');
+    expect(recorded.outcome).toBe('violation'); expect(recorded.cleanup.complete).toBe(true);
+    const replayed = await execute(['replay', scenario, out]);
+    expect(replayed.code, replayed.stdout + replayed.stderr).toBe(1);
+    expect(JSON.parse(replayed.stdout).cleanup.complete).toBe(true);
+  });
+  test('human search output distinguishes recorded activity and completed attempts', async () => {
+    const result = await start(['run', fixture('passed'), '--seed', '0'], {}, false).result;
+    expect(result.code, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout).toContain('1 attempted, 1 completed');
+    expect(result.stdout).toContain('seeded (seed 0)');
+    expect(result.stdout).toContain('Recorded release units: 0; actor switches: 0');
+    expect(result.stdout).not.toContain('partial evidence');
+  });
+  test('human search output labels incomplete trace counts as lower bounds', async () => {
+    const result = await start(['run', fixture('counter'), '--seed', '0', '--max-steps', '1'], {}, false).result;
+    expect(result.code, result.stdout + result.stderr).toBe(4);
+    expect(result.stdout).toContain('1 attempted, 0 completed');
+    expect(result.stdout).toContain('Recorded release units: 1; actor switches: 0');
+    expect(result.stdout).toContain('partial evidence (lower bounds)');
+  });
   test('runs, records, exactly replays and minimizes a real violation, including output paths with spaces', async () => {
     const out = join(await directory(), 'failed run.json');
     const scenario = fixture('path with spaces/scenario');

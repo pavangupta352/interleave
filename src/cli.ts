@@ -13,7 +13,7 @@ import { doctor } from './cli/doctor.js';
 import { initializeProject } from './cli/init.js';
 import { loadNeveroversell } from './cli/demo.js';
 import { exportRegression, type ExportRegressionResult } from './export.js';
-import type { ExplorationResult, MinimizationResult, ProtocolProfile, RunOptions, RunResult } from './types.js';
+import type { ExplorationResult, ExplorationStrategy, MinimizationResult, ProtocolProfile, RunOptions, RunResult } from './types.js';
 import type { FixtureIdentityProfile } from './fixture-identity.js';
 
 const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
@@ -106,6 +106,8 @@ async function main(args: string[]): Promise<number> {
       ...(values['total-timeout-ms'] === undefined ? {} : { totalTimeoutMs: Number(values['total-timeout-ms']) }),
       ...(values['max-candidates'] === undefined ? {} : { maxCandidates: Number(values['max-candidates']) }),
       ...(values['max-search-bytes'] === undefined ? {} : { maxSearchBytes: Number(values['max-search-bytes']) }),
+      ...(values.strategy === undefined ? {} : { strategy: values.strategy as ExplorationStrategy }),
+      ...(values.seed === undefined ? {} : { seed: Number(values.seed) }),
       ...(values['keep-going'] ? { stopOnFailure: false } : {}),
     });
     result = search; run = search.firstFailure ?? search.runs.at(-1); code = explorationExitCode(search);
@@ -151,7 +153,14 @@ function describeExport(result: ExportRegressionResult): string {
   return `Exported verified regression to ${result.destination}\nManifest: ${result.manifestPath}\nFingerprint: ${result.fingerprint}\nReplay from that directory:\n${commands.join('\n')}`;
 }
 function describe(result: RunResult | ExplorationResult | MinimizationResult): string {
-  if ('explored' in result) return `${result.scenario}: ${result.explored} runs, ${result.violationCount} violations; ${result.stopReason}.\n${result.coverage}`;
+  if ('explored' in result) {
+    const metrics = result.metrics;
+    const selector = result.search.strategy === 'seeded' ? `seeded (seed ${result.search.seed})` : 'fifo';
+    return `${result.scenario}: ${metrics.attemptedRuns} attempted, ${metrics.completedRuns} completed; violations: ${result.violationCount}; ${result.stopReason}.\n`
+      + `Search: ${selector}; pending prefixes: ${result.pending}; maximum attempted depth: ${metrics.maxAttemptedDepth}.\n`
+      + `Recorded release units: ${metrics.recordedReleasedSteps}; actor switches: ${metrics.recordedActorSwitches}${metrics.traceCountsComplete ? '' : '; partial evidence (lower bounds)'}.\n`
+      + result.coverage;
+  }
   if ('reducedChoices' in result) {
     const failed = result.attemptFailure;
     const attempt = failed ? `\nReduction trial failed (${failed.outcome}).${failed.reason ? `\n${failed.reason}` : ''}${!failed.cleanup.complete ? `\nCleanup incomplete: ${failed.cleanup.error ?? 'Owned resource cleanup could not be confirmed'}` : ''}` : '';

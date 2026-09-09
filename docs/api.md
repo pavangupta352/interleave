@@ -95,10 +95,62 @@ Run options require `databaseUrl`, an explicit administrator URL for a dedicated
 | `maxEvidenceBytes` | 8 MiB | Recorded evidence budget per run |
 | `maxConnectionsPerActor` | 1 | Physical connection cap per actor; additional live connections must remain queryless |
 | `protocolProfile` | `sync-cycle-v1` | Whole cycles, or explicit `describe-flush-v1` metadata and continuation stages |
+| `fixtureProfile` | `native` | Native PostgreSQL 16/17/18 capture, or explicit `postgresql17-pgvector0.8.6-v1` on its qualified server and extension |
 | `source` | Automatic local module graph | File targets: `{ projectRoot?, include? }` selects the portable root and additional data paths |
 | `signal` | — | Caller cancellation |
 
 Exploration additionally supports `maxRuns` (100), `totalTimeoutMs` (60,000), `maxCandidates` (10,000), `maxSearchBytes` (64 MiB), and `stopOnFailure` (true). Retained bytes count encoded result data and candidate keys, not process heap usage. `omittedRuns`, `violationCount`, and `hardFailureCount` remain visible when a completed result cannot fit the retained-data budget. A resource stop never becomes an exhausted-frontier claim.
+
+### Search selection and measurements
+
+The default `strategy: 'fifo'` takes the oldest pending actor-choice prefix.
+Candidate generation visits the most recent observed deviations first; this is
+not breadth-first traversal by prefix length. The initial supplied plan, or the
+empty plan with fair fallback, runs first under either strategy.
+
+Set `seed` to an integer from 0 through 4,294,967,295 to select deterministic
+seeded dequeue order, or specify both `strategy: 'seeded'` and `seed`. Explicit
+`strategy: 'fifo'` with a seed, seeded strategy without a seed, negative zero,
+fractions and values outside that range are errors. No seed is chosen implicitly.
+
+```js
+const search = await explore('./scenario.mjs', {
+  databaseUrl: process.env.TEST_DATABASE_URL,
+  maxRuns: 50,
+  seed: 42,
+});
+console.log(search.search, search.metrics, search.pending, search.stopReason);
+```
+
+The summary records `search: { version: 1, strategy, seed? }`. Version 1 hashes
+the ASCII string `interleave:seeded-frontier-v1`, a NUL, the unsigned decimal seed,
+a NUL, and the zero-based attempt index with SHA-256. Its first four bytes,
+read as an unsigned big-endian integer modulo pending frontier length, select
+the next prefix. Remaining entries retain their order. This is deterministic
+selection, not uniform random sampling. Identical seeds and identical returned
+observations give identical prefix selection; changed observations or elapsed
+time cutoffs can change the explored executions. Exact replay uses the retained
+run's trace and captured inputs, independently of the search seed.
+
+`metrics` summarizes every attempted run, including valid artifacts omitted from
+`runs` because they exceed the search retention budget:
+
+| Field | Meaning |
+| --- | --- |
+| `attemptedRuns` | Prefixes dispatched, including interrupted, incompatible and failed attempts |
+| `completedRuns` | Validated passed, violation or actor-error artifacts with complete cleanup and completion evidence for every trace step |
+| `maxAttemptedDepth` | Longest explicit prefix actually dispatched; the initial fair empty plan has depth zero |
+| `recordedReleasedSteps` | Sum of recorded release units; a simple-query batch counts once, while staged metadata, execution and recovery count separately |
+| `recordedActorSwitches` | Adjacent trace entries from different actors, counted within each run; reconnects of one actor do not count |
+| `traceCountsComplete` | False if any attempt lacks valid completed evidence; release and switch counts must then be read as lower bounds |
+
+Recorded release units do not count SQL statements, affected rows or confirmed
+server executions. A partial trace can end before delivery or completion, and an
+evidence fallback can omit trace entries. `explored` retains its existing meaning
+and equals `attemptedRuns` in a returned search. Metrics describe observed
+attempts; they do not establish coverage of untested schedules.
+
+### Reduction and deadlines
 
 Reduction supports `maxAttempts` (100) and `totalTimeoutMs` (60,000). Its initial exact verification counts as an attempt. It keeps the last verified matching failure; `locallyMinimal` applies to deleting explicit choices under the runner's fair fallback policy. It does not mean globally shortest execution or minimal application code.
 
@@ -110,6 +162,12 @@ the retained `run` remains the last verified invariant violation. Never infer
 that every reduction attempt cleaned up solely from `run.cleanup`.
 
 Deadlines interrupt execution. Owned database creation and cleanup have separate bounds and are awaited, so teardown can extend beyond an execution deadline.
+
+`timeoutMs` also bounds waiting for an actor that has not issued its next command
+or settled. There is no separate readiness timer. Waiting alone never counts as
+a PostgreSQL lock observation. File supervision can interrupt a blocked worker;
+an in-process scenario that synchronously blocks Node's event loop cannot be
+preempted by its own timer.
 
 Run outcomes are `passed`, `violation`, `actor-error`, `incompatible`, `inconclusive`, and `harness-error`. Only an invariant assertion produces `violation`. Inspect `reason`, `cleanup`, and the search stop reason; passing sampled schedules does not prove race freedom.
 

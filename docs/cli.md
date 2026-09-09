@@ -39,6 +39,28 @@ worker. It stops at the first invariant violation by default; `--keep-going`
 continues within the selected limits. `--plan alice,bob,alice,bob` supplies the
 initial actor-choice prefix. Sampled success does not prove race freedom.
 
+The default `--strategy fifo` selects the oldest pending prefix. Use `--seed 42`
+to select a repeatable seeded search order, or explicitly combine
+`--strategy seeded --seed 42`. Seeds are decimal integers from 0 through
+4,294,967,295; zero is valid. Explicit FIFO with a seed, or seeded selection
+without a seed, is rejected. These flags apply only to `run`.
+
+```sh
+interleave run scenario.mjs --seed 42 --max-runs 50 --json > search.json
+```
+
+The search summary records the effective strategy and seed, attempted and
+completed runs, pending prefixes, maximum attempted prefix depth, recorded
+release units and actor switches. Counts include validated attempts omitted
+from retained results. If any attempt has incomplete evidence, the human summary
+labels the trace counts as lower bounds; JSON reports
+`metrics.traceCountsComplete: false`. A release unit is not a SQL-statement or
+affected-row count. See the [metric definitions](api.md#search-selection-and-measurements).
+
+A seed selects pending work when the observed choices are the same. It does not
+freeze external effects, database execution or elapsed-time budget cutoffs.
+Preserve a run artifact for exact replay; replay does not accept a seed.
+
 `--out` writes one validated RunResult artifact: the first retained violation,
 or otherwise the last retained run. Search summary JSON is a different object
 and is not a replay artifact. Writes are atomic and refuse existing destinations.

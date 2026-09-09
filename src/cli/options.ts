@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util';
+import { normalizeExplorationSearch } from '../exploration-search.js';
 
 const definitions = {
   help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
@@ -12,10 +13,11 @@ const definitions = {
   'protocol-profile': { type: 'string' },
   'fixture-profile': { type: 'string' },
   'max-runs': { type: 'string' }, 'total-timeout-ms': { type: 'string' },
+  strategy: { type: 'string' }, seed: { type: 'string' },
   'max-candidates': { type: 'string' }, 'max-search-bytes': { type: 'string' }, 'max-attempts': { type: 'string' },
 } as const;
 const runFlags = ['database-url', 'out', 'force', 'max-steps', 'timeout-ms', 'max-evidence-bytes', 'max-connections-per-actor', 'protocol-profile', 'fixture-profile'];
-const searchFlags = ['max-runs', 'total-timeout-ms', 'max-candidates', 'max-search-bytes', 'keep-going', 'plan'];
+const searchFlags = ['max-runs', 'total-timeout-ms', 'max-candidates', 'max-search-bytes', 'keep-going', 'plan', 'strategy', 'seed'];
 const sourceFlags = ['project-root', 'include'];
 const allowed: Record<string, string[]> = {
   init: [], run: [...runFlags, ...searchFlags, ...sourceFlags],
@@ -27,6 +29,7 @@ const numbers: Record<string, [number, number]> = {
   'max-steps': [1, 100_000], 'timeout-ms': [1, 600_000], 'max-evidence-bytes': [1024, 12 * 1024 * 1024],
   'max-connections-per-actor': [1, 8],
   'max-runs': [1, 10_000], 'total-timeout-ms': [1, 3_600_000],
+  seed: [0, 4_294_967_295],
   'max-candidates': [1, 100_000], 'max-search-bytes': [1024, 256 * 1024 * 1024], 'max-attempts': [1, 10_000],
 };
 
@@ -58,6 +61,10 @@ export function parseCliArgs(args: string[]) {
       throw new TypeError(`--${key} must be an integer from ${min} to ${max}`);
     }
   }
+  normalizeExplorationSearch({
+    ...(parsed.values.strategy === undefined ? {} : { strategy: parsed.values.strategy }),
+    ...(parsed.values.seed === undefined ? {} : { seed: Number(parsed.values.seed) }),
+  });
   const plan = parsed.values.plan?.split(',');
   if (plan && (plan.length > 100_000 || plan.some(actor => !/^[a-zA-Z][a-zA-Z0-9_-]{0,47}$/.test(actor) || ['constructor', 'prototype', '__proto__'].includes(actor)))) throw new TypeError('--plan must be comma-separated actor names');
   return { command, values: parsed.values, positionals: parsed.positionals.slice(1), plan };
@@ -85,6 +92,8 @@ Protocol: --protocol-profile <sync-cycle-v1|describe-flush-v1>; default sync-cyc
 Fixture: --fixture-profile <native|postgresql17-pgvector0.8.6-v1>; default native
 Search: --max-runs <n>, --total-timeout-ms <n>, --max-candidates <n>,
         --max-search-bytes <n>, --plan <alice,bob,...>, --keep-going
+        --strategy <fifo|seeded>, --seed <0..4294967295>
+        Default: fifo. A seed selects seeded search; explicit fifo rejects a seed.
 Reduction: --max-attempts <n>, --total-timeout-ms <n>
 
 Run/replay/minimize: --out <run.json> writes one retained run.
