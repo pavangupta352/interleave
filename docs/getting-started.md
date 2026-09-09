@@ -69,7 +69,7 @@ administrator database URL of a dedicated test instance, not an application or
 production database. Replace the values in this illustrative URL:
 
 ```sh
-export TEST_DATABASE_URL='postgresql://test_admin:replace-me@127.0.0.1:5432/postgres'
+export TEST_DATABASE_URL='postgresql://<user>:<password>@<host>:<port>/<admin-database>'
 node dist/cli.js doctor
 ```
 

@@ -170,14 +170,12 @@ jobs:
           POSTGRES_PASSWORD: interleave-test
           POSTGRES_DB: postgres
         ports:
-          - 5432:5432
+          - 5432
         options: >-
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    env:
-      TEST_DATABASE_URL: postgresql://postgres:interleave-test@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -186,6 +184,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node --test check-race.mjs
+        env:
+          TEST_DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/postgres', 'postgres', 'interleave-test', job.services.postgres.ports[5432]) }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -195,6 +195,8 @@ jobs:
           if-no-files-found: ignore
 ```
 
+GitHub assigns an available host port; the test step constructs its connection
+URL from that [service port](https://docs.github.com/en/actions/tutorials/use-containerized-services/use-docker-service-containers).
 The service is a disposable CI server; Interleave creates and drops its own
 execution databases inside it. Its password is only for this isolated example
 service. The artifact step runs after a failed test and does not change the test's

@@ -119,7 +119,10 @@ export async function withManagedPostgres<T>(options: ManagedPostgresOptions, us
         try { logs = await docker(['logs', '--tail', '200', id]); }
         catch { throw new Error(`Could not inspect PostgreSQL startup readiness: ${name}`); }
         if (logs.split(/\r?\n/).some(line => line.trim() === 'PostgreSQL init process complete; ready for start up.')) {
-          const candidate = `postgresql://postgres:${password}@127.0.0.1:${bindings[0].HostPort}/postgres`;
+          const endpoint = new URL(`postgresql://${bindings[0].HostIp}:${bindings[0].HostPort}/postgres`);
+          endpoint.username = 'postgres';
+          endpoint.password = password;
+          const candidate = endpoint.toString();
           try {
             const version = await dependencies.probe(candidate);
             const major = options.image === POSTGRES_IMAGES[3] ? '17' : options.image.split(':')[1];
