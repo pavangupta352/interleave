@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -81,3 +82,35 @@ jobs:
           npx playwright install --with-deps chromium firefox webkit
       - name: Check desktop and mobile reports using a real PostgreSQL run
         run: npm run test:browser
+
+  release-candidate:
+    name: Prepare release assets (no publication)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [postgres, pgvector, browser]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+      - name: Verify the canonical packaging toolchain
+        run: test "$(npm --version)" = 11.5.1
+      - name: Build twice, inspect original archives and smoke-test the exact package
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          INTERLEAVE_RELEASE_NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/prepare-release.mjs --tag "$RELEASE_TAG" --out release-candidate
+      - name: Upload prepared archives, checksums and manifest
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: release-candidate-${{ github.ref_name }}
+          path: release-candidate/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          include-hidden-files: false
+          overwrite: false
