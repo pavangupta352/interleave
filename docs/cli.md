@@ -8,36 +8,62 @@ fixtures should be runnable `.mjs`/ESM files with their own installed dependenci
 The installed CLI does not provide tsx or custom TypeScript loaders. Source-mode
 development tests use tsx separately.
 
+Use [getting started](getting-started.md) to acquire the current unpublished
+development build and configure PostgreSQL. Commands below use an installed
+application's `npx --no-install interleave`. In a built source checkout, replace
+that prefix with `node dist/cli.js`. See [troubleshooting](troubleshooting.md)
+for setup failures and outcome-specific next steps.
+
 ## Start a project
 
 ```sh
-interleave init race-check
-cd race-check
-npm install
+npx --no-install interleave init ../race-check
 ```
 
 `init` creates `scenario.mjs`, `package.json`, and `README.md`. It never installs
-packages or overwrites existing files. A development version may need installation
-from a locally built Interleave tarball instead of the registry; the generated
-README explains that path.
+packages or overwrites existing files. Install the original local Interleave
+archive into that new project using the [complete development-package route](getting-started.md#install-this-development-build-into-an-application).
+There is no published development version promised by this guide.
 
-Set `TEST_DATABASE_URL` to the administrator database of a **dedicated test
-PostgreSQL server** with permission to create and drop databases. Alternatively,
-pass `--database-url <url>` explicitly. No default server is selected by the CLI.
-Every execution creates and cleans up a separate generated database.
+## Select PostgreSQL
+
+Use `--docker` on `run`, `replay`, `minimize`, `doctor` or `demo` to start an owned
+local server and remove it after the command. The first invocation may download
+the image. Each execution still creates and cleans up a separate generated
+database. `report`, `export` and `init` never start a server.
+
+`--postgres-image` requires `--docker` and accepts exactly `postgres:16`,
+`postgres:17`, `postgres:18`, or `pgvector/pgvector:0.8.6-pg17-bookworm`.
+The default is `postgres:16` for the native fixture profile and the vector image
+for the explicit pgvector profile. An incompatible image/profile combination
+is rejected. `--docker` also rejects `--database-url` and a nonempty
+`TEST_DATABASE_URL`; unset the variable when choosing managed Docker.
+
+Alternatively, set `TEST_DATABASE_URL` to the administrator database of a **dedicated test
+PostgreSQL server** with permission to create and drop databases, or pass
+`--database-url <url>` explicitly. No existing server is selected implicitly.
+Every execution creates and cleans up a separate generated database; the supplied
+server remains running. The execution examples below assume this URL route.
+To use managed Docker, unset `TEST_DATABASE_URL` and add `--docker` to each
+execution command. Report and export need neither route.
 
 ## Discover, replay, and reduce
 
 ```sh
-interleave run scenario.mjs --max-runs 50 --out failure.interleave.json
-interleave replay scenario.mjs failure.interleave.json
-interleave minimize scenario.mjs failure.interleave.json --out reduced.interleave.json
+npx --no-install interleave run scenario.mjs --max-runs 50 --out failure.interleave.json
+npx --no-install interleave replay scenario.mjs failure.interleave.json
+npx --no-install interleave minimize scenario.mjs failure.interleave.json --out reduced.interleave.json
 ```
 
 `run` explores observed actor-choice prefixes. Every attempt runs in a supervised
 worker. It stops at the first invariant violation by default; `--keep-going`
 continues within the selected limits. `--plan alice,bob,alice,bob` supplies the
 initial actor-choice prefix. Sampled success does not prove race freedom.
+
+A detected invariant violation exits 1, including a successful replay or completed
+minimization of that failure. A shell with `set -e` would stop there. The
+[application walkthrough](application-guide.md#record-inspect-and-replay) checks
+expected statuses explicitly; do not suppress all failures with `|| true`.
 
 The default `--strategy fifo` selects the oldest pending prefix. Use `--seed 42`
 to select a repeatable seeded search order, or explicitly combine
@@ -46,7 +72,7 @@ to select a repeatable seeded search order, or explicitly combine
 without a seed, is rejected. These flags apply only to `run`.
 
 ```sh
-interleave run scenario.mjs --seed 42 --max-runs 50 --json > search.json
+npx --no-install interleave run scenario.mjs --seed 42 --max-runs 50 --json > search.json
 ```
 
 The search summary records the effective strategy and seed, attempted and
@@ -73,6 +99,11 @@ fixture, connection profile or command identity produces an incompatible result.
 `replay --guided` explicitly
 creates separately labeled new evidence using the old actor order; it does not
 claim exact replay compatibility.
+
+Guided mode still requires the requested order to be feasible and fully consumed.
+If a repair removes commands, the old order can also be incompatible in guided
+mode. The [repair example](ci.md#try-an-atomic-repair-as-new-evidence) demonstrates
+that case and uses fresh exploration for the new behavior.
 
 `minimize` first verifies the recorded failure and reduces explicit schedule
 choices while retaining the same invariant failure. Its initial verification
@@ -113,8 +144,8 @@ change before importing the scenario; guided replay records new evidence.
 ## Inspect and retain a regression
 
 ```sh
-interleave report failure.interleave.json --out failure.html
-interleave export scenario.mjs failure.interleave.json --project-root . --out regression
+npx --no-install interleave report failure.interleave.json --out failure.html
+npx --no-install interleave export scenario.mjs failure.interleave.json --project-root . --out regression
 ```
 
 The [offline report](reports.md) opens without a server and does not execute code.
@@ -134,15 +165,18 @@ An arbitrary repack does not substitute for the original archive.
 ## Check the environment and run the demo
 
 ```sh
-interleave doctor
-interleave demo neveroversell --out neveroversell.interleave.json
-interleave demo neveroversell --safe
+npx --no-install interleave doctor
+npx --no-install interleave demo neveroversell --out neveroversell.interleave.json
+npx --no-install interleave demo neveroversell --safe
 ```
 
 `doctor` creates its own disposable database, performs two real parameterized
 queries through actor proxies, verifies the observations, and cleans up. It
 reports the observed PostgreSQL and Node versions. This check does not certify
 all PostgreSQL features or application drivers.
+
+Use `doctor --json` when collecting the actual environment and cleanup fields
+for a [bug report](troubleshooting.md#report-a-reproducible-problem).
 
 `demo` runs the pinned, vendored neveroversell application code in supervised
 workers. The default scenario deliberately oversells one unit with two buyers

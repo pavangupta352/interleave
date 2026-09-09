@@ -5,6 +5,10 @@ what application behavior you expected, which PostgreSQL and driver versions you
 used, and what the recorded outcome shows. Review artifacts before attaching them;
 SQL and selected observations can contain private application data.
 
+For first use, follow [getting started](docs/getting-started.md) and the
+[application guide](docs/application-guide.md). [Troubleshooting](docs/troubleshooting.md)
+explains which environment, outcome and cleanup details make a useful report.
+
 Discuss substantial protocol or replay-profile changes in an issue before writing
 a large patch. A new supported feature needs a clear boundary, a real PostgreSQL
 regression that fails without the fix, and an honest explanation of what remains

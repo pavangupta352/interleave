@@ -2,6 +2,10 @@
 
 The API is under development. These entries describe the implemented core; release and compatibility qualification remain in progress.
 
+For a complete application example, start with the [application guide](application-guide.md).
+The [CI guide](ci.md) shows result checks and evidence retention. The API requires
+an explicit dedicated `databaseUrl`; managed `--docker` is a CLI option.
+
 ## Define a scenario
 
 `defineScenario` validates a name, setup function, two to eight named actors, and an invariant. Setup and the invariant receive a direct connection to a fresh database. Each actor receives its own proxy URL and cancellation signal.
@@ -45,16 +49,22 @@ Return a JSON value only when that observation belongs in the recorded evidence.
 `runScenarioFile(file, options)` imports an explicitly selected, trusted local scenario in a disposable worker. Its parent owns database cleanup even if the worker exits or crashes. Prefer file targets for the complete workflow:
 
 ```js
-import { explore, replay, minimize, writeRunArtifact } from '@pavangupta352/interleave';
+import { explore, minimize, writeRunArtifact } from '@pavangupta352/interleave';
 
 const options = { databaseUrl: process.env.TEST_DATABASE_URL };
 const search = await explore('./scenario.mjs', { ...options, maxRuns: 50 });
 if (search.firstFailure) {
-  const confirmed = await replay('./scenario.mjs', search.firstFailure, options);
-  const reduced = await minimize('./scenario.mjs', confirmed, options);
+  const reduced = await minimize('./scenario.mjs', search.firstFailure, options);
   await writeRunArtifact('./failure.interleave.json', reduced.run);
 }
 ```
+
+Minimization performs its own exact verification of the original failure and
+requires the same invariant fingerprint. Passing a newly observed replay result
+as the baseline could select a different outcome or failure. Inspect the search
+and reduction stop reasons, cleanup and `attemptFailure` before deciding the
+whole workflow completed; the [CI example](ci.md#check-the-repaired-operation-with-the-node-test-runner)
+shows explicit acceptance checks.
 
 `explore`, `replay`, and `minimize` also accept a scenario object. Object targets run in the caller's process through `runOnce`. The caller must own its application's process and client lifecycles; a JavaScript callback that blocks the event loop cannot be interrupted there. File targets keep worker supervision for every search, replay, and reduction attempt.
 
