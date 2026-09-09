@@ -1,4 +1,4 @@
-import type { TransactionStatus, UnitCompletion } from '../types.js';
+import type { MetadataCompletion, ReadyCompletion, TransactionStatus } from '../types.js';
 export function backendError(frame: Buffer): { code: string; message: string } {
   let offset = 5; let code = ''; let message = '';
   while (offset < frame.length && frame[offset] !== 0) {
@@ -15,7 +15,8 @@ export class BackendSummary {
   private readonly tags: string[] = [];
   private rows = 0;
   private error: { code: string; message: string } | undefined;
-  accept(frame: Buffer): UnitCompletion | undefined {
+  constructor(error?: { code: string; message: string }) { this.error = error; }
+  accept(frame: Buffer): ReadyCompletion | undefined {
     const type = String.fromCharCode(frame[0]!);
     if (type === 'C') {
       if (frame.at(-1) !== 0) throw new Error('Malformed backend command tag');
@@ -29,5 +30,42 @@ export class BackendSummary {
       return { transactionStatus: status as TransactionStatus, commandTags: [...this.tags], rowCount: this.rows, ...(this.error ? { error: this.error } : {}) };
     }
     return undefined;
+  }
+}
+
+/** Completes on the terminal statement metadata, never on Flush or ParameterDescription. */
+export class MetadataSummary {
+  private state: 'parse' | 'parameters' | 'columns' | 'done' = 'parse';
+  private parameterCount = 0;
+  accept(frame: Buffer): MetadataCompletion | undefined {
+    const type = String.fromCharCode(frame[0]!);
+    if (this.state === 'done') throw new Error('Unexpected response after metadata completion');
+    if (['N', 'S', 'A'].includes(type)) return undefined;
+    if (type === 'E') { this.state = 'done'; return { kind: 'metadata', result: 'error', error: backendError(frame) }; }
+    if (this.state === 'parse' && type === '1' && frame.length === 5) { this.state = 'parameters'; return undefined; }
+    if (this.state === 'parameters' && type === 't' && frame.length >= 7) {
+      this.parameterCount = frame.readUInt16BE(5);
+      if (frame.length !== 7 + 4 * this.parameterCount) throw new Error('Malformed parameter metadata');
+      this.state = 'columns'; return undefined;
+    }
+    if (this.state === 'columns' && (type === 'T' || type === 'n')) {
+      let columns = 0;
+      if (type === 'n') { if (frame.length !== 5) throw new Error('Malformed NoData metadata'); }
+      else {
+        if (frame.length < 7) throw new Error('Malformed row metadata');
+        columns = frame.readUInt16BE(5); let offset = 7;
+        for (let index = 0; index < columns; index++) {
+          const end = frame.indexOf(0, offset);
+          if (end < 0 || end + 19 > frame.length) throw new Error('Malformed row metadata');
+          offset = end + 1;
+          if (frame.readUInt16BE(offset + 16) !== 0) throw new Error('Unexpected statement metadata format');
+          offset += 18;
+        }
+        if (offset !== frame.length) throw new Error('Malformed row metadata trailing fields');
+      }
+      this.state = 'done';
+      return { kind: 'metadata', result: 'described', parameterCount: this.parameterCount, columnCount: columns, resultShape: type === 'T' ? 'rows' : 'no-data' };
+    }
+    throw new Error('Unsupported profile: unexpected backend metadata response');
   }
 }

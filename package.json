@@ -52,6 +52,7 @@
     "@types/pg": "^8.15.0",
     "esbuild": "0.28.2",
     "playwright": "1.63.0",
+    "postgres": "3.4.9",
     "tsx": "4.23.13",
     "typescript": "5.9.3",
     "vitest": "5.0.0"

@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto';
-import type { ProtocolKind } from '../types.js';
+import type { ProtocolKind, ProtocolProfile, StepStage } from '../types.js';
 import { DEFAULT_BUFFER_LIMIT, positiveLimit, type FrameLimits } from './framing.js';
 export interface FrontendUnit {
   protocol: ProtocolKind;
   sql: string;
   fingerprint: string;
   bytes: Buffer;
+  stage?: StepStage;
+  /** Only a describe prefix carries its real protocol statement name. */
+  statementName?: string;
   reconciliation: { operations: BackendOperation[]; index: number; failed: boolean };
 }
 type BackendOperation =
@@ -104,6 +107,49 @@ export class FrontendAssembler {
     if (this.metadataBytes > this.maxBuffered) throw new Error('Protocol prepared metadata-byte limit exceeded');
     map.set(name, value);
   }
+  /** Interpret only the qualified metadata prefix, on a fork of acknowledged state. */
+  describe(frames: Buffer[]): FrontendUnit {
+    if (this.bytes || frames.length !== 3 || frames.map(frame => String.fromCharCode(frame[0]!)).join('') !== 'PDH' || frames[2]!.length !== 5) {
+      throw new Error('Unsupported profile: expected Parse/statement Describe/Flush prefix');
+    }
+    if (frames.reduce((sum, frame) => sum + frame.length, 0) > this.maxBuffered) throw new Error('Protocol cycle buffered-byte limit exceeded');
+    this.accept(frames[0]!);
+    const parsed = this.backendOperations[0];
+    if (parsed?.type !== 'P') throw new Error('Malformed metadata prefix');
+    const reader = new Reader(frames[1]!);
+    if (reader.take(1).toString() !== 'S' || reader.cstring().toString('hex') !== parsed.name) throw new Error('Unsupported profile: metadata Describe must reference the prefix statement');
+    reader.done(); this.accept(frames[1]!);
+    const unit: FrontendUnit = { protocol: 'extended', stage: 'describe', statementName: parsed.name,
+      sql: parsed.statement.sql, fingerprint: hash(JSON.stringify(['describe-flush-v1', 'describe', parsed.statement.identity])),
+      bytes: Buffer.concat(frames), reconciliation: { operations: this.backendOperations, index: 0, failed: false } };
+    this.reset(); return unit;
+  }
+  /** Bind identity is available only after the real server acknowledges the prefix. */
+  continuation(frames: Buffer[], prefix: FrontendUnit, error?: { code: string; message: string }): FrontendUnit {
+    if (this.bytes || prefix.stage !== 'describe' || prefix.statementName === undefined) throw new Error('Invalid metadata continuation state');
+    if (error) {
+      if (frames.length !== 1 || frames[0]![0] !== 83 || frames[0]!.length !== 5) throw new Error('Unsupported profile: metadata error recovery requires Sync only');
+      return { protocol: 'extended', stage: 'recover', sql: prefix.sql,
+        fingerprint: hash(JSON.stringify(['describe-flush-v1', 'recover', prefix.fingerprint])), bytes: frames[0]!,
+        reconciliation: { operations: [], index: 0, failed: false } };
+    }
+    if (frames.length !== 3 || frames.map(frame => String.fromCharCode(frame[0]!)).join('') !== 'BES') throw new Error('Unsupported profile: metadata continuation requires Bind/Execute/Sync');
+    const bind = new Reader(frames[0]!); const portal = bind.cstring().toString('hex');
+    if (bind.cstring().toString('hex') !== prefix.statementName) throw new Error('Unsupported profile: continuation Bind must reference the prefix statement');
+    const execute = new Reader(frames[1]!);
+    if (execute.cstring().toString('hex') !== portal) throw new Error('Unsupported profile: continuation Execute must reference the bound portal');
+    if (execute.i32() !== 0) throw new Error('Unsupported profile: staged Execute requires an unlimited row count');
+    execute.done();
+    let unit: FrontendUnit | undefined;
+    for (const frame of frames) unit = this.accept(frame);
+    if (!unit) throw new Error('Incomplete metadata continuation');
+    unit.stage = 'execute';
+    unit.fingerprint = hash(JSON.stringify(['describe-flush-v1', 'execute', prefix.fingerprint, unit.fingerprint]));
+    return unit;
+  }
+  private reset(): void {
+    this.frames = []; this.backendOperations = []; this.bytes = 0; this.executions = []; this.operations = []; this.executionDependencies.clear();
+  }
   accept(frame: Buffer): FrontendUnit | undefined {
     const type = String.fromCharCode(frame[0]!); const reader = new Reader(frame);
     if (type === 'H') throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync');
@@ -160,7 +206,7 @@ export class FrontendAssembler {
       reader.done();
       const identity = this.executions.length ? [...this.executions, ...this.operations.filter(op => !this.executionDependencies.has(op.identity))] : this.operations;
       const unit: FrontendUnit = { protocol: 'extended', sql: identity.map(x => x.sql).join('; '), fingerprint: hash(JSON.stringify(['extended', identity.map(x => x.identity)])), bytes: Buffer.concat(this.frames, this.bytes), reconciliation: { operations: this.backendOperations, index: 0, failed: false } };
-      this.frames = []; this.backendOperations = []; this.bytes = 0; this.executions = []; this.operations = []; this.executionDependencies.clear();
+      this.reset();
       return unit;
     }
     return undefined;
@@ -172,23 +218,35 @@ export class FrontendAssembler {
 export class FrontendCycleBuffer {
   private frames: Buffer[] = [];
   private bytes = 0;
+  private cycleBytes = 0;
+  private hasPrefix = false;
   private readonly maxBuffered: number;
-  constructor(limits: FrameLimits = {}) { this.maxBuffered = positiveLimit(limits.maxBufferedBytes, DEFAULT_BUFFER_LIMIT); }
+  private readonly staged: boolean;
+  constructor(limits: FrameLimits & { protocolProfile?: ProtocolProfile } = {}) {
+    this.maxBuffered = positiveLimit(limits.maxBufferedBytes, DEFAULT_BUFFER_LIMIT);
+    this.staged = limits.protocolProfile === 'describe-flush-v1';
+  }
   get bufferedBytes(): number { return this.bytes; }
   accept(frame: Buffer): Buffer[] | undefined {
     const type = String.fromCharCode(frame[0]!);
-    if (type === 'H') throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync');
+    if (type === 'H') {
+      if (!this.staged) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync');
+      if (this.hasPrefix || this.frames.length !== 2 || this.frames[0]![0] !== 80 || this.frames[1]![0] !== 68 || frame.length !== 5) throw new Error('Unsupported profile: early Flush requires one Parse/Describe prefix');
+    }
     if ('dcf'.includes(type)) throw new Error('Unsupported profile: streaming COPY');
     if (type === 'Q') {
-      if (this.bytes) throw new Error('Unsupported profile: Simple Query inside an unfinished extended cycle');
+      if (this.bytes || this.hasPrefix) throw new Error('Unsupported profile: Simple Query inside an unfinished extended cycle');
       return [frame];
     }
-    if (!'PBDECS'.includes(type)) throw new Error('Unsupported profile: frontend protocol message');
+    if (!'PBDECSH'.includes(type)) throw new Error('Unsupported profile: frontend protocol message');
     this.bytes += frame.length;
-    if (this.bytes > this.maxBuffered) throw new Error('Protocol cycle buffered-byte limit exceeded');
+    this.cycleBytes += frame.length;
+    if (this.cycleBytes > this.maxBuffered) throw new Error('Protocol cycle buffered-byte limit exceeded');
     this.frames.push(frame);
-    if (type !== 'S') return undefined;
+    if (type !== 'S' && type !== 'H') return undefined;
     const cycle = this.frames; this.frames = []; this.bytes = 0;
+    if (type === 'H') this.hasPrefix = true;
+    else { this.cycleBytes = 0; this.hasPrefix = false; }
     return cycle;
   }
 }

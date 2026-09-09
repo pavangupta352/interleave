@@ -1,6 +1,6 @@
 import net, { type Socket } from 'node:net';
 import { createHash } from 'node:crypto';
-import { BackendSummary } from './protocol/backend.js';
+import { BackendSummary, MetadataSummary } from './protocol/backend.js';
 import { FrameDecoder, DEFAULT_BUFFER_LIMIT, positiveLimit } from './protocol/framing.js';
 import { FrontendAssembler, FrontendCycleBuffer, type FrontendUnit } from './protocol/frontend.js';
 import type { ActorProxy, PendingUnit, ProxyEvent, ProxyOptions, UnitCompletion } from './types.js';
@@ -40,6 +40,9 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   if ((sslMode && sslMode !== 'disable') || ['ssl', 'sslcert', 'sslkey', 'sslrootcert'].some(p => upstreamUrl.searchParams.has(p))) throw new Error('Unsupported profile: upstream TLS; use an explicitly plaintext disposable PostgreSQL server');
   const maxConnections = options.maxConnectionsPerActor === undefined ? 1 : options.maxConnectionsPerActor;
   if (!Number.isSafeInteger(maxConnections) || maxConnections < 1 || maxConnections > 8) throw new Error('maxConnectionsPerActor must be an integer between 1 and 8');
+  const profile = options.protocolProfile === undefined ? 'sync-cycle-v1' : options.protocolProfile;
+  if (profile !== 'sync-cycle-v1' && profile !== 'describe-flush-v1') throw new Error('protocolProfile must be sync-cycle-v1 or describe-flush-v1');
+  const staged = profile === 'describe-flush-v1';
   const maxBuffered = positiveLimit(options.maxBufferedBytes, DEFAULT_BUFFER_LIMIT);
   // Validate framing limits before listening.
   new FrameDecoder('typed', options);
@@ -63,7 +66,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
         : `Unsupported profile: physical connection limit per actor is ${maxConnections}`));
       return;
     }
-    const connection = generation++; let ordinal = 0; let backendPid = 0; let startupFingerprint = '';
+    const connection = generation++; let ordinal = 0; let nextCycle = 0; let backendPid = 0; let startupFingerprint = '';
     let started = false; let ready = false; let negotiated = false; let terminated = false; let failed = false;
     let closed = false; let clientClosed = false; let upstreamClosed = false; let retainedBytes = 0;
     let pendingTerminate: Buffer | undefined;
@@ -71,12 +74,18 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     const upstream = net.connect({ host: upstreamUrl.hostname, port: Number(upstreamUrl.port || 5432) }); track(upstream); upstream.setNoDelay(true);
     interface Queued { frames: Buffer[]; byteLength: number; ordinal: number; unit?: PendingUnit }
     const queue: Queued[] = [];
-    let inFlight: { original: FrontendUnit; summary: BackendSummary; errorSeen: boolean; resolve(value: UnitCompletion): void; reject(error: Error): void } | undefined;
+    let prefix: { original: FrontendUnit; cycle: number; ordinal: number; complete: boolean; error?: { code: string; message: string } } | undefined;
+    let inFlight: { original: FrontendUnit; summary: BackendSummary | MetadataSummary; errorSeen: boolean; resolve(value: UnitCompletion): void; reject(error: Error): void } | undefined;
+    function checkRetained(): void {
+      const inFlightBytes = inFlight?.original.bytes.length ?? 0;
+      const prefixBytes = prefix && prefix.original !== inFlight?.original ? prefix.original.bytes.length : 0;
+      if (retainedBytes + cycles.bufferedBytes + frontend.bufferedBytes + inFlightBytes + prefixBytes > maxBuffered) throw new Error('Protocol queued buffered-byte limit exceeded');
+    }
     function shutdown(): void {
       if (closed) return; closed = true;
-      const outstanding = Boolean(inFlight || queue.length || cycles.bufferedBytes);
+      const outstanding = Boolean(inFlight || prefix || queue.length || cycles.bufferedBytes);
       const current = inFlight; inFlight = undefined; current?.reject(new Error('Proxy connection closed before command completion'));
-      queue.length = 0; retainedBytes = 0;
+      queue.length = 0; retainedBytes = 0; prefix = undefined;
       // A protocol error rejects the driver's active query before TCP close, allowing
       // the actor's finally block to close its client without an idle error event.
       if (outstanding && !client.destroyed) client.end(errorResponse('Interleave actor proxy closed before command completion'));
@@ -88,7 +97,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     function fail(error: Error): void {
       if (failed || closed) return; failed = true; notifyError(error);
       const current = inFlight; inFlight = undefined; current?.reject(error);
-      queue.length = 0; retainedBytes = 0; upstream.destroy();
+      queue.length = 0; retainedBytes = 0; prefix = undefined; upstream.destroy();
       client.end(errorResponse(error.message));
       const timer = setTimeout(shutdown, 100); timer.unref(); client.once('close', () => clearTimeout(timer));
     }
@@ -108,23 +117,34 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       // Never publish identity derived from a preceding cycle's unacknowledged intent.
       const proposed = assembler.fork();
       let original: FrontendUnit | undefined;
-      for (const frame of entry.frames) original = proposed.accept(frame);
+      if (prefix) {
+        if (!prefix.complete) return;
+        original = proposed.continuation(entry.frames, prefix.original, prefix.error);
+      } else if (staged && entry.frames.at(-1)![0] === 72) original = proposed.describe(entry.frames);
+      else for (const frame of entry.frames) original = proposed.accept(frame);
       if (!original) throw new Error('Incomplete frontend scheduling unit');
       const retained = original;
+      const stage = retained.stage ?? 'complete';
+      const cycle = prefix?.cycle ?? nextCycle;
+      const prefixOrdinal = prefix?.ordinal;
+      const prefixError = prefix?.error;
       if (!startupFingerprint) throw new Error('Actor startup identity was not established');
       let released = false;
       const unit: PendingUnit = {
         actor: options.actor, connection, ordinal: entry.ordinal, protocol: retained.protocol,
         sql: retained.sql,
         fingerprint: createHash('sha256').update(`interleave-session-v1\0${startupFingerprint}\0${retained.fingerprint}`).digest('hex'), backendPid,
+        ...(staged ? { stage, cycle, ...(prefixOrdinal === undefined ? {} : { prefixOrdinal }) } : {}),
         release(): Promise<UnitCompletion> {
           if (released) return Promise.reject(new Error('Scheduling unit already released'));
           if (closed || failed || closing) return Promise.reject(new Error('Proxy connection closed before release'));
           if (!ready || inFlight || queue[0] !== entry) return Promise.reject(new Error('Scheduling units must release in connection order after prior completion'));
           released = true; queue.shift(); retainedBytes -= entry.byteLength;
+          if (stage === 'complete' || stage === 'describe') nextCycle++;
+          if (stage === 'describe') prefix = { original: retained, cycle, ordinal: entry.ordinal, complete: false };
           return new Promise<UnitCompletion>((resolve, reject) => {
-            inFlight = { original: retained, summary: new BackendSummary(), errorSeen: false, resolve, reject };
-            guard(() => write(upstream, retained.bytes, client));
+            inFlight = { original: retained, summary: stage === 'describe' ? new MetadataSummary() : new BackendSummary(prefixError), errorSeen: Boolean(prefixError), resolve, reject };
+            guard(() => { checkRetained(); write(upstream, retained.bytes, client); });
           });
         },
       };
@@ -134,7 +154,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     function enqueue(frames: Buffer[]): void {
       const byteLength = frames.reduce((total, frame) => total + frame.length, 0);
       retainedBytes += byteLength;
-      if (retainedBytes + cycles.bufferedBytes + frontend.bufferedBytes > maxBuffered) throw new Error('Protocol queued buffered-byte limit exceeded');
+      checkRetained();
       queue.push({ frames, byteLength, ordinal: ordinal++ });
       announce();
     }
@@ -162,7 +182,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
         if (type === 'p' && !ready) { write(upstream, frame, client); continue; }
         if (type === 'X') {
           if (frame.length !== 5) throw new Error('Malformed Terminate message');
-          if (queue.length || cycles.bufferedBytes || (inFlight && !inFlight.errorSeen)) throw new Error('Actor disconnected with unfinished scheduled work');
+          if (queue.length || cycles.bufferedBytes || (prefix && (!inFlight || inFlight.original.stage === 'describe')) || (inFlight && !inFlight.errorSeen)) throw new Error('Actor disconnected with unfinished scheduled work');
           terminated = true;
           // Drivers may reject on ErrorResponse and close before ReadyForQuery.
           // Drain that actual completion even after the frontend has gone away.
@@ -177,7 +197,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
         commandOwner = session;
         const unit = cycles.accept(frame);
         if (unit) enqueue(unit);
-        if (retainedBytes + cycles.bufferedBytes + frontend.bufferedBytes > maxBuffered) throw new Error('Protocol queued buffered-byte limit exceeded');
+        checkRetained();
       }
     }));
     upstream.on('data', chunk => guard(() => {
@@ -196,10 +216,20 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           write(client, frame, upstream); announce(); continue;
         }
         if (inFlight) assembler.reconcile(inFlight.original, frame);
+        else if (prefix && !['N', 'S', 'A'].includes(type)) throw new Error('Unsupported profile: backend response outside a released metadata stage');
         const completion = inFlight?.summary.accept(frame);
         if (!terminated) write(client, frame, upstream);
         if (completion && inFlight) {
-          const current = inFlight; inFlight = undefined; current.resolve(completion);
+          const current = inFlight; inFlight = undefined;
+          if (completion.kind === 'metadata') {
+            if (!prefix) throw new Error('Missing open metadata cycle');
+            prefix.complete = true;
+            if (completion.result === 'error') prefix.error = completion.error;
+          } else {
+            prefix = undefined;
+            if (staged) completion.kind = 'ready';
+          }
+          current.resolve(completion);
           if (pendingTerminate) { const frame = pendingTerminate; pendingTerminate = undefined; upstream.end(frame); }
           else announce();
         }
@@ -210,13 +240,13 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     client.on('end', () => {
       if (closing || failed || closed) return;
       if (negotiated && !started) fail(new Error('Unsupported profile: TLS/GSS encryption required; configure this local actor connection with ssl:false'));
-      else if (!terminated && (inFlight || queue.length || cycles.bufferedBytes || frontend.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
+      else if (!terminated && (inFlight || prefix || queue.length || cycles.bufferedBytes || frontend.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
       else if (pendingTerminate) return;
       else upstream.end();
     });
     upstream.on('end', () => {
       if (closed) return;
-      if (!closing && !failed && (inFlight || queue.length || (!terminated && ready))) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
+      if (!closing && !failed && (inFlight || prefix || queue.length || (!terminated && ready))) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
       else client.end();
     });
     function finishClose(): void {
@@ -229,13 +259,13 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     }
     client.on('close', () => {
       clientClosed = true;
-      if (!closing && !failed && !terminated && !closed && (inFlight || queue.length || cycles.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
+      if (!closing && !failed && !terminated && !closed && (inFlight || prefix || queue.length || cycles.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
       if (!pendingTerminate) upstream.destroy();
       finishClose();
     });
     upstream.on('close', () => {
       upstreamClosed = true;
-      if (!closed && !closing && !failed && inFlight) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
+      if (!closed && !closing && !failed && (inFlight || prefix)) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
       if (!closed && !client.writableEnded && !failed) client.destroy();
       finishClose();
     });
