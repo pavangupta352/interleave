@@ -38,6 +38,7 @@ try {
 } catch (error) {
   const message = error instanceof Error ? error.message : 'Command failed';
   const code = signal ? signal === 'SIGINT' ? 130 : 143
+    : stderrFailed || stdoutFailed ? 2
     : error instanceof MinimizationVerificationError && error.outcome === 'incompatible' ? 3
     : error instanceof MinimizationVerificationError && error.outcome === 'inconclusive' ? 4 : 2;
   if (json && !stdoutFailed) process.stdout.write(`${JSON.stringify({ error: { message }, exitCode: code })}\n`);

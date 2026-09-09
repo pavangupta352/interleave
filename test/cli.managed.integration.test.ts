@@ -13,14 +13,32 @@ const cli = process.env.INTERLEAVE_TEST_INSTALLED_CLI ?? fileURLToPath(new URL('
 const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/cli/${name}.mjs`, import.meta.url));
 const directories: string[] = [];
 const evidence = process.env.INTERLEAVE_MANAGED_EVIDENCE_DIR;
+const stopFile = process.env.INTERLEAVE_MANAGED_STOP_FILE;
 let commandIndex = 0;
 async function directory() { const path = await mkdtemp(join(tmpdir(), 'interleave managed CLI ')); directories.push(path); return path; }
-afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+const active = new Set<{ child: ReturnType<typeof spawn>; result: Promise<unknown> }>();
+afterEach(async () => {
+  const remaining = [...active];
+  for (const entry of remaining) entry.child.kill('SIGTERM');
+  await Promise.allSettled(remaining.map(entry => entry.result));
+  await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true })));
+}, 300_000);
+async function stopRequested(): Promise<'SIGINT' | 'SIGTERM' | undefined> {
+  const value = stopFile ? await readFile(stopFile, 'utf8').catch(() => '') : '';
+  return value === 'SIGINT' || value === 'SIGTERM' ? value : undefined;
+}
 
 async function start(args: string[], extra: Record<string, string> = {}, closeProgress = false) {
+  if (await stopRequested()) throw new Error('Managed PostgreSQL qualification was interrupted before starting another command');
   const index = ++commandIndex, startedAt = new Date().toISOString();
   const env = { ...process.env, ...extra }; delete env.TEST_DATABASE_URL; delete env.INTERLEAVE_TEST_DATABASE_URL;
   const child = spawn(process.execPath, [cli, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let polling = false;
+  const stopPoll = stopFile ? setInterval(async () => {
+    if (polling) return; polling = true;
+    try { const signal = await stopRequested(); if (signal) { child.kill(signal); clearInterval(stopPoll); } }
+    finally { polling = false; }
+  }, 25) : undefined;
   let stdout = '', stderr = '', observedName: string | undefined;
   let observation: Promise<string> | undefined;
   child.stdout.on('data', chunk => { stdout += chunk; });
@@ -30,7 +48,14 @@ async function start(args: string[], extra: Record<string, string> = {}, closePr
     const match = /Disposable PostgreSQL is ready \((interleave-cli-[a-f0-9-]{36})\)/.exec(stderr);
     if (match && !observation) {
       observedName = match[1]!;
-      observation = exec('docker', ['inspect', '--type', 'container', '--format', '{{.Id}} {{.Image}}', observedName], { timeout: 10_000, maxBuffer: 1024 * 1024 }).then(result => result.stdout.trim());
+      observation = exec('docker', ['inspect', '--type', 'container', '--format', '{{.Id}} {{.Image}}', observedName], { timeout: 10_000, maxBuffer: 1024 * 1024 }).then(async result => {
+        const identity = result.stdout.trim();
+        if (evidence) {
+          await mkdir(evidence, { recursive: true });
+          await writeFile(join(evidence, String(index).padStart(2, '0') + '.started.json'), JSON.stringify({ index, args, pid: child.pid, observedName, identity, startedAt, readyAt: new Date().toISOString() }, null, 2) + '\n');
+        }
+        return identity;
+      });
       // The result is consumed below even if inspection fails before close.
       void observation.catch(() => {});
     }
@@ -38,6 +63,7 @@ async function start(args: string[], extra: Record<string, string> = {}, closePr
   const result = new Promise<{ code: number | null; stdout: string; stderr: string; identity?: string }>((resolve, reject) => {
     child.once('error', reject);
     child.once('close', async (code, signal) => {
+      clearInterval(stopPoll);
       try {
         const identity = observation ? await observation : undefined;
         const names = [...new Set(stderr.match(/interleave-cli-[a-f0-9-]{36}/g) ?? [])];
@@ -65,6 +91,8 @@ async function start(args: string[], extra: Record<string, string> = {}, closePr
       } catch (error) { reject(error); }
     });
   });
+  const entry = { child, result }; active.add(entry);
+  void result.finally(() => active.delete(entry)).catch(() => {});
   return { child, result };
 }
 async function command(args: string[]) { return (await start(args)).result; }
@@ -95,6 +123,14 @@ test('closing the progress pipe during real managed startup still removes the ow
   expect(result.code, result.stdout + result.stderr).toBe(2);
   expect(JSON.parse(result.stdout).error).toBeDefined();
   expect(result.stderr).toContain('Starting disposable');
+}, 240_000);
+
+test('a closed progress pipe retains command failure priority when minimization verification aborts', async () => {
+  const artifact = join(await directory(), 'recorded.json'), scenario = fixture('counter');
+  expect((await command(['run', scenario, '--docker', '--out', artifact, '--json'])).code).toBe(1);
+  const result = await (await start(['minimize', scenario, artifact, '--docker', '--json'], {}, true)).result;
+  expect(result.code, result.stdout + result.stderr).toBe(2);
+  expect(JSON.parse(result.stdout)).toMatchObject({ error: { message: expect.any(String) }, exitCode: 2 });
 }, 240_000);
 
 test('human doctor describes exactly the environment in its saved artifact', async () => {
