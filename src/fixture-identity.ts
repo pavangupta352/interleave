@@ -353,6 +353,10 @@ export async function captureFixtureIdentity(connectionString: string, options: 
     if ((await query(`SELECT 1 FROM (${userCreatedReservedObjects}) reserved_object LIMIT 1`)).length) {
       throw new FixtureIdentityError('unsupported', 'Fixture identity does not cover user-created objects in reserved PostgreSQL schemas');
     }
+    // Preserve the actor-equivalent login state before the capture transaction
+    // changes transaction_* settings. Extension GUCs are added after the
+    // catalog contract is validated and its library is loaded below.
+    const originalSettings = await records('effective-settings', 'SELECT name,setting,unit FROM pg_catalog.pg_settings');
     const vectorSchema: string[] = [];
     if (vectorProfile) {
       const extension = await query<{
@@ -397,15 +401,17 @@ export async function captureFixtureIdentity(connectionString: string, options: 
         throw new FixtureIdentityError('unsupported', 'pgvector setting catalog contract differs from the qualified 0.8.6 profile');
       }
       await query("SELECT pg_catalog.set_config('search_path',$1,true)", [originalPath]);
-      settings = [settingContract, await records('effective-settings', 'SELECT name,setting,unit FROM pg_catalog.pg_settings')];
       const vectorSettings = await query<{ name: string }>(`SELECT name FROM pg_catalog.pg_settings
         WHERE name OPERATOR(pg_catalog.=) ANY($1::pg_catalog.text[]) ORDER BY name COLLATE "C"`, [[...pgvectorSettingNames]]);
       if (vectorSettings.length !== pgvectorSettingNames.length
         || vectorSettings.some((row, index) => row.name !== [...pgvectorSettingNames].sort()[index])) {
         throw new FixtureIdentityError('unsupported', 'pgvector effective setting inventory differs from the qualified 0.8.6 profile');
       }
+      const vectorEffectiveSettings = await records('pgvector-effective-settings', `SELECT name,setting,unit FROM pg_catalog.pg_settings
+        WHERE name OPERATOR(pg_catalog.=) ANY($1::pg_catalog.text[]) ORDER BY name COLLATE "C"`, [[...pgvectorSettingNames]]);
+      settings = [originalSettings, settingContract, vectorEffectiveSettings];
     } else {
-      settings = [await records('effective-settings', 'SELECT name,setting,unit FROM pg_catalog.pg_settings')];
+      settings = [originalSettings];
       // Original actor-equivalent defaults above are evidence; normalize only this capture connection.
       await query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     }

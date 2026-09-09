@@ -89,6 +89,19 @@ describe('PostgreSQL 17 pgvector 0.8.6 fixture identity', () => {
     expect(operatorClassChanged.components.schema).not.toBe(reloptionsChanged.components.schema);
   });
 
+  test('captures startup transaction defaults before its read-only capture transaction', async () => {
+    const owned = await vectorFixture();
+    const serializable = new URL(owned.connectionString);
+    serializable.searchParams.set('options', '-c default_transaction_isolation=serializable');
+    const readCommitted = new URL(owned.connectionString);
+    readCommitted.searchParams.set('options', '-c default_transaction_isolation=read\\ committed');
+    const first = await captureFixtureIdentity(serializable.toString(), { profile });
+    const second = await captureFixtureIdentity(readCommitted.toString(), { profile });
+    expect(first.components.settings).not.toBe(second.components.settings);
+    expect(first.components.schema).toBe(second.components.schema);
+    expect(first.components.data).toBe(second.components.data);
+  });
+
   test('rejects a removed member, changed member ACL, extra extension and unowned custom operator', async () => {
     const removed = await vectorFixture();
     await removed.db.query('ALTER EXTENSION vector DROP FUNCTION vector_dims(vector)');
