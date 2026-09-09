@@ -45,6 +45,9 @@ Recent hardening preserves unknown cleanup after an unacknowledged database
 creation, applies completed-evidence checks to every exact replay entry point,
 and rejects incomplete or incorrectly encoded regression artifacts. Runtime
 identity also binds the CLI helpers required by exported replay commands.
+Completed legacy records missing fixture or connection identities are rejected
+before exact execution or export. Interrupted runs preserve application failures
+observed before cancellation or cleanup began.
 
 Historical application cases and comparative measurements, final distribution
 verification and the remaining [release checklist](docs/plans/implementation.md)

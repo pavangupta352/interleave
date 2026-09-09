@@ -181,6 +181,12 @@ preempted by its own timer.
 
 Run outcomes are `passed`, `violation`, `actor-error`, `incompatible`, `inconclusive`, and `harness-error`. Only an invariant assertion produces `violation`. Inspect `reason`, `cleanup`, and the search stop reason; passing sampled schedules does not prove race freedom.
 
+If an application operation rejects before an interruption, the interrupted run
+reports `harness-error` and retains the failure reason. Its evidence is still
+incomplete. Rejections caused by cancellation or cleanup alone do not turn an
+otherwise inconclusive run into an application failure. A run that finishes all
+operations with a rejection retains the ordinary `actor-error` outcome.
+
 ## Replay and artifacts
 
 Exact replay requires completed evidence and cleanup. It checks the PostgreSQL and Node.js versions, starting fixture identity, actor connection startups (including connections that sent no SQL), command identity, connection generation, query fingerprints, observed lock waits and transaction state. Startup values contribute to hashes; their raw values are not copied into the connection record. File targets additionally check their selected source, actual installed dependencies and Interleave runtime. Exact replay and reduction inherit the recorded connection and protocol profiles and source selection unless explicitly overridden; changed exact inputs produce an incompatible result.
@@ -188,6 +194,9 @@ Exact replay requires completed evidence and cleanup. It checks the PostgreSQL a
 The same completed-evidence preflight applies to `replay`, `runOnce` and
 `runScenarioFile` in exact mode, before database creation or file import. Partial
 records remain readable for inspection and can supply guided actor hints.
+Completed legacy records without fixture or connection identities return
+`incompatible` before creating a database or importing a scenario. A guided run
+can create new bound evidence from them.
 
 The staged profile produces version 2 artifacts with explicit stage, cycle, and continuation links. Version 1 records retain their original whole-cycle meaning. Exact staged replay checks SQL and Parse inputs before releasing metadata, then checks actual Bind inputs before releasing execution. Metadata records parameter and column counts or the real error; it does not claim row values, affected rows, transaction state, or equality of backend object identifiers. A completed run must close every staged cycle.
 

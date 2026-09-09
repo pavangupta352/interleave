@@ -1,8 +1,10 @@
 # Development validation
 
-The latest local integrated search and CLI qualification passed **654 native
-tests in 50 files**, plus **ten pgvector checks**, build and type checks. See the
-[seeded-search record](qualification/seeded-search-2026-09-09.md) for that scope.
+The local integrated replay and cleanup hardening qualification passed **754 native
+tests in 56 files**, plus **ten pgvector checks**, build and type checks. See the
+[hardening record](qualification/replay-release-hardening-2026-09-09.md) for its
+exact source and scope. The earlier
+[seeded-search record](qualification/seeded-search-2026-09-09.md) remains available.
 The [compatibility page](compatibility.md) links completed CI matrices and exact
 driver, server and extension profiles. The earlier snapshots below retain their
 original dates and results; their then-open limits are historical.

@@ -29,6 +29,7 @@ Useful references:
 - [Library API](docs/api.md) and [CLI](docs/cli.md)
 - [Architecture and execution boundaries](docs/architecture/specification.md)
 - [Implementation and release gates](docs/plans/implementation.md)
+- [Preparing and verifying release archives](docs/releasing.md)
 - [Offline evidence reports](docs/reports.md) and [regression bundles](docs/regressions.md)
 
 Keep fixes focused, preserve third-party notices, and describe the behavior before

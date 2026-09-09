@@ -31,6 +31,10 @@ identities. Export compares the selected source, actual installed dependency
 bytes, and built runtime against the recording before writing, then captures
 them again after packaging to detect intervening changes.
 
+The recording must also have complete command and cleanup evidence, with
+fixture and actor connection identities. Export creation and offline verification
+reject missing identities even when the legacy artifact remains readable.
+
 When the application and Interleave share installed packages, export requires
 the recording runtime to be the unambiguous ordinary top-level application
 installation at `node_modules/@pavangupta352/interleave`. The application source
