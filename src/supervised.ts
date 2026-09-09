@@ -4,6 +4,7 @@ import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createOwnedDatabase, OwnedDatabaseCreationError } from './database.js';
+import { assertCompletedRun } from './completed-run.js';
 import { parseRunArtifact } from './artifact.js';
 import { assertEvidenceEnvelope, finalizeRunEvidence } from './evidence.js';
 import { captureSourceIdentity, SourceIdentityError, type SourceIdentity } from './source-identity.js';
@@ -31,7 +32,10 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   const mode = options.mode ?? (options.replay ? 'replay' : 'explore');
   if (!['explore', 'replay', 'guided'].includes(mode)) throw new TypeError('Unknown execution mode');
   if (mode === 'replay' && !options.replay) throw new TypeError('replay mode requires a recorded run');
-  if (options.replay) parseRunArtifact(options.replay);
+  if (options.replay) {
+    const recorded = parseRunArtifact(options.replay);
+    if (mode === 'replay') assertCompletedRun(recorded);
+  }
   const recordedProtocol = options.replay?.limits.protocolProfile ?? 'sync-cycle-v1';
   const protocolProfile = resolveProtocolProfile(options.protocolProfile, mode === 'replay' ? recordedProtocol : undefined);
   const protocolProfileMismatch = mode === 'replay' && protocolProfile !== recordedProtocol;
@@ -238,7 +242,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     }
     result.cleanup = { complete: false };
     if (creationFailure) {
-      // No handle was returned, but the failed creation still owns a database.
+      // No handle was returned; creation or its recovery left uncertain cleanup.
       result.cleanup.error = creationFailure.message;
       result.outcome = 'harness-error'; result.reason = creationFailure.message; delete result.failure;
     } else {

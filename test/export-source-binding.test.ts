@@ -54,6 +54,26 @@ test('rejects a runtime archive whose npm file selection omits recorded implemen
   const run = await bindExportFixture(inert, f);
   await expect(exportRegression(run, f).then(() => 'exported')).rejects.toThrow(/packed runtime|archive|omitted.js/i);
 });
+test('binds CLI helper implementation and rejects an archive policy that omits it', async () => {
+  const f = await fixture();
+  await mkdir(join(f.runtimeRoot, 'dist/cli'));
+  await writeFile(join(f.runtimeRoot, 'dist/cli/options.js'), 'export const options=42;');
+  await writeFile(join(f.runtimeRoot, 'dist/cli.js'), "import { options } from './cli/options.js';export { options };");
+  await json(join(f.runtimeRoot, 'package.json'), {
+    name: '@pavangupta352/interleave', version: '0.1.0-test', type: 'module',
+    files: ['dist/source-identity.js', 'dist/cli.js', 'dist/export.js', 'dist/index.js'],
+  });
+  const run = await bindExportFixture(inert, f);
+  await expect(exportRegression(run, f).then(() => 'exported')).rejects.toThrow(/packed runtime|archive|cli\/options/i);
+});
+test('changing a CLI helper after recording invalidates the selected runtime', async () => {
+  const f = await fixture();
+  await mkdir(join(f.runtimeRoot, 'dist/cli'));
+  await writeFile(join(f.runtimeRoot, 'dist/cli/options.js'), 'export const options=42;');
+  const run = await bindExportFixture(inert, f);
+  await writeFile(join(f.runtimeRoot, 'dist/cli/options.js'), 'export const options=99;');
+  await expect(exportRegression(run, f).then(() => 'exported')).rejects.toThrow(/identity|recorded.*source|changed|drift/i);
+});
 test('verifies npm extended archive headers for long Unicode runtime filenames', async () => {
   const f = await fixture(); await writeFile(join(f.runtimeRoot, 'dist', `${'é'.repeat(70)}.js`), 'export default 42;');
   const run = await bindExportFixture(inert, f);

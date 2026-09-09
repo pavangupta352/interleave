@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { Client, escapeIdentifier } from 'pg';
+import { Client, DatabaseError, escapeIdentifier } from 'pg';
 
 import type { OwnedDatabase, WaitObservation } from './types.js';
 
@@ -8,12 +8,18 @@ const CONNECTION_TIMEOUT_MS = 5_000;
 const QUERY_TIMEOUT_MS = 30_000;
 const CLIENT_CLOSE_TIMEOUT_MS = 5_000;
 
-/** Creation succeeded, but initialization and recovery could not prove cleanup. */
+/** Creation or recovery could not prove that the generated database is absent. */
 export class OwnedDatabaseCreationError extends AggregateError {
   readonly cleanupComplete = false;
 
-  constructor(readonly databaseName: string, errors: readonly unknown[]) {
-    super(errors, `Owned database creation failed and cleanup was incomplete for ${databaseName}`, { cause: errors[0] });
+  constructor(
+    readonly databaseName: string,
+    errors: readonly unknown[],
+    readonly ownership: 'confirmed' | 'unknown' = 'confirmed',
+  ) {
+    super(errors, ownership === 'unknown'
+      ? `PostgreSQL database creation could not be confirmed; cleanup is unknown for generated database ${databaseName}`
+      : `Owned database creation failed and cleanup was incomplete for ${databaseName}`, { cause: errors[0] });
     this.name = 'OwnedDatabaseCreationError';
   }
 }
@@ -144,14 +150,26 @@ export async function createOwnedDatabase(databaseUrl: string): Promise<OwnedDat
   const name = generatedDatabaseName();
   const connectionString = ownedConnectionString(parsedAdministratorUrl, name);
   const administrator = postgresClient(administratorUrl);
-  let databaseCreated = false;
+  let creationState: 'not-started' | 'pending' | 'confirmed' | 'rejected' = 'not-started';
   let db: Client | undefined;
   let observer: Client | undefined;
 
   try {
     await administrator.connect();
-    await administrator.query(`CREATE DATABASE ${escapeIdentifier(name)}`);
-    databaseCreated = true;
+    creationState = 'pending';
+    try {
+      await administrator.query(`CREATE DATABASE ${escapeIdentifier(name)}`);
+      creationState = 'confirmed';
+    } catch (error) {
+      // Only a definite server statement rejection proves CREATE did not succeed.
+      // Connection loss, client timeouts and unknown completion retain uncertainty.
+      if (error instanceof DatabaseError && error.severity === 'ERROR'
+        && error.code !== undefined && /^[A-Z0-9]{5}$/.test(error.code)
+        && !error.code.startsWith('08') && error.code !== '40003') {
+        creationState = 'rejected';
+      }
+      throw error;
+    }
     await closeClient(administrator, 'creation administrator client');
 
     db = postgresClient(connectionString);
@@ -222,7 +240,12 @@ export async function createOwnedDatabase(databaseUrl: string): Promise<OwnedDat
       // The cleanup connection below is the authoritative cleanup path.
     }
 
-    if (databaseCreated) {
+    if (creationState === 'pending') {
+      // A generated name alone cannot distinguish our unacknowledged creation
+      // from a pre-existing collision. Preserve the name without dropping it.
+      throw new OwnedDatabaseCreationError(name, [error], 'unknown');
+    }
+    if (creationState === 'confirmed') {
       try {
         await cleanupGeneratedDatabase(administratorUrl, name, [db, observer]);
       } catch (cleanupError) {

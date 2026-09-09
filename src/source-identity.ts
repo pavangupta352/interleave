@@ -457,7 +457,7 @@ async function captureRuntime(state: CaptureState, builtRuntimeRoot?: string): P
   await walk(root, directory, state, async path => { files.push(record(portable(root, path), await state.read(root, path))); }, (path, isDirectory) => {
     const parts = path.split('/');
     if (parts.includes('node_modules')) unsupported('Nested node_modules within the Interleave runtime implementation directory are unsupported; install runtime dependencies at the package root');
-    if (parts.some(part => ['report', 'cli', 'examples', 'vendor'].includes(part))) return false;
+    if (parts.some(part => ['report', 'examples', 'vendor'].includes(part))) return false;
     return isDirectory || (path.endsWith(mode === 'source' ? '.ts' : '.js') && !path.endsWith('.d.ts'));
   });
   const component = fileComponent(files);

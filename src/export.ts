@@ -13,6 +13,7 @@ import {
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseRunArtifact } from './artifact.js';
+import { assertCompletedRun } from './completed-run.js';
 import { captureExportSourceIdentity, type SourceIdentity, type SourceIdentityFile } from './source-identity.js';
 import type { RunResult } from './types.js';
 
@@ -113,12 +114,7 @@ export async function exportRegression(
   if (validatedRun.outcome !== 'violation' || !validatedRun.failure) {
     throw new TypeError('Regression export requires a completed violation with a failure fingerprint');
   }
-  if (!validatedRun.cleanup.complete) {
-    throw new TypeError('Regression export requires a completed run with successful cleanup');
-  }
-  if (validatedRun.trace.some((step) => step.completedAt === undefined || step.completion === undefined)) {
-    throw new TypeError('Regression export requires every recorded command to have completed');
-  }
+  assertCompletedRun(validatedRun);
   if (options.include !== undefined && (!Array.isArray(options.include)
       || options.include.length > MAX_FILES
       || options.include.some((path) => typeof path !== 'string'))) {
@@ -307,7 +303,8 @@ export async function verifyRegressionExport(directory: string): Promise<Regress
       || (manifest.installation && (runtimeManifestFile || runtimeLockFile || manifest.files.find(file => file.path === 'install.mjs')?.role !== 'installer'))) {
     throw new TypeError('Regression manifest does not bind its required files to their expected roles');
   }
-  const parsedRun = parseRunArtifact((await readOrdinaryFile(join(root, 'run.json'), MAX_FILE_BYTES, root)).toString('utf8'));
+  const parsedRun = parseRunArtifact(decodeUtf8(await readOrdinaryFile(join(root, 'run.json'), MAX_FILE_BYTES, root), 'Recorded run artifact'));
+  assertCompletedRun(parsedRun);
   if (parsedRun.outcome !== 'violation' || !parsedRun.failure || !parsedRun.cleanup.complete
       || parsedRun.scenario !== manifest.scenario.name
       || parsedRun.failure.fingerprint !== manifest.recordedRun.failureFingerprint) {
@@ -432,7 +429,7 @@ function verifyPackedRuntime(bytes: Buffer, source: SourceIdentity, runtime: { n
       throw new Error('Packed Interleave runtime src/dist node_modules entries are unsupported dependency shadows');
     }
     if (path === 'package.json' || (path.startsWith('dist/') && path.endsWith('.js')
-        && !parts.some(part => ['report', 'cli', 'examples', 'vendor', 'node_modules'].includes(part)))) {
+        && !parts.some(part => ['report', 'examples', 'vendor', 'node_modules'].includes(part)))) {
       selected.push({ path, bytes: data.length, sha256: digest(data) });
     }
   }

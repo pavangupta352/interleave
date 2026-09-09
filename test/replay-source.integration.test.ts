@@ -47,6 +47,33 @@ test('file runs record selected source and actual dependencies before execution 
   expect(await loads(f.root)).toBe(2);
 });
 
+test.each(['outcome', 'cleanup', 'trace'] as const)('direct supervised exact replay rejects incomplete %s before importing the file', async boundary => {
+  const f = await application();
+  const original = await runScenarioFile(f.entry, f.options);
+  expect(original.outcome).toBe('violation');
+  const incomplete = structuredClone(original);
+  if (boundary === 'outcome') {
+    incomplete.outcome = 'inconclusive';
+    incomplete.reason = 'Interrupted after recorded work';
+    delete incomplete.failure;
+  } else if (boundary === 'cleanup') {
+    incomplete.cleanup = { complete: false, error: 'Cleanup unconfirmed' };
+  } else {
+    delete incomplete.trace[0]!.completion;
+    delete incomplete.trace[0]!.completedAt;
+  }
+  expect(parseRunArtifact(incomplete)).toEqual(incomplete);
+  await expect(runScenarioFile(f.entry, { ...f.options, replay: incomplete })).rejects.toThrow(/completed run|complete trace|cleanup/i);
+  expect(await loads(f.root)).toBe(1);
+  if (boundary === 'trace') {
+    const guided = await replay(f.entry, incomplete, { ...f.options, mode: 'guided' });
+    expect(guided.mode).toBe('guided');
+    expect(guided.outcome).toBe('violation');
+    expect(guided.cleanup.complete).toBe(true);
+    expect(await loads(f.root)).toBe(2);
+  }
+});
+
 test('exact and guided replay inherit recorded source selections without repeating CLI options', async () => {
   const f = await application();
   const first = await runScenarioFile(f.entry, f.options);

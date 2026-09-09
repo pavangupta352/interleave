@@ -151,6 +151,41 @@ describe('regression export', () => {
     })).rejects.toThrow(/missing-operation|could not be resolved|complete local source/i);
   });
 
+  test.each(['completion', 'UTF-8'] as const)('rejects a rehashed bundle with invalid %s evidence', async boundary => {
+    const { projectRoot, scenarioFile } = await fixtureProject();
+    const runtimeRoot = await fixtureRuntime();
+    const destination = join(await temporaryDirectory('interleave incomplete evidence '), 'regression');
+    const run = completedViolation();
+    run.trace = [{
+      index: 0, actor: 'alice', connection: 0, ordinal: 0, protocol: 'simple',
+      sql: 'SELECT 1', fingerprint: 'b'.repeat(64), backendPid: 123,
+      available: ['alice'], releasedAt: 0, completedAt: 1, waits: [],
+      completion: { transactionStatus: 'I', commandTags: ['SELECT 1'], rowCount: 1 },
+    }];
+    const bound = await bindExportFixture(run, { scenarioFile, projectRoot, runtimeRoot });
+    await exportRegression(bound, { scenarioFile, projectRoot, destination, runtimeRoot });
+    if (boundary === 'completion') {
+      delete bound.trace[0]!.completion;
+      delete bound.trace[0]!.completedAt;
+    }
+    const bytes = Buffer.from(`${JSON.stringify(bound, null, 2)}\n`);
+    if (boundary === 'UTF-8') {
+      const offset = bytes.indexOf('both increments survive');
+      expect(offset).toBeGreaterThan(0);
+      bytes[offset] = 0xff;
+    }
+    await writeFile(join(destination, 'run.json'), bytes);
+    const manifestPath = join(destination, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const entry = manifest.files.find((file: { path: string }) => file.path === 'run.json');
+    entry.bytes = bytes.length;
+    entry.sha256 = createHash('sha256').update(bytes).digest('hex');
+    const { fingerprint: _ignored, ...unsigned } = manifest;
+    manifest.fingerprint = createHash('sha256').update(JSON.stringify(unsigned)).digest('hex');
+    await writeJson(manifestPath, manifest);
+    await expect(verifyRegressionExport(destination).then(() => 'verified')).rejects.toThrow(boundary === 'completion' ? /complet/i : /UTF-8/i);
+  });
+
   test('rejects traversal, symbolic-link escapes and existing destinations without changing them', async () => {
     const { projectRoot } = await fixtureProject();
     const runtimeRoot = await fixtureRuntime();

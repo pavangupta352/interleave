@@ -56,6 +56,16 @@ if (search.firstFailure) {
 
 Supervision is a lifecycle boundary for trusted code. On POSIX it terminates the worker's process group; on Windows it terminates the worker. Application-created detached processes remain the scenario's responsibility. `cleanup.complete` reports the owned database and harness resources, and failed creation recovery retains the generated database name. It is not a sandbox or a guarantee about arbitrary external effects.
 
+If the server's database-creation acknowledgement is lost, ownership and cleanup
+remain unknown. The failure retains the exact generated database name and marks
+cleanup incomplete. Interleave does not drop an unconfirmed name, since it cannot
+distinguish its own creation from a pre-existing collision. Inspect that named
+database on the dedicated test server before deciding how to recover it.
+The qualified driver exposes the server's localized error severity. If that
+severity is not recognizable as a definite statement rejection, Interleave
+conservatively retains unknown cleanup, even when the server may have rejected
+the creation.
+
 ## Protocol profiles
 
 The default `protocolProfile: 'sync-cycle-v1'` schedules one Simple Query packet or one complete extended cycle ending in Sync. Select `protocolProfile: 'describe-flush-v1'` for the qualified Postgres.js flow that needs server metadata before sending parameter values.
@@ -174,6 +184,10 @@ Run outcomes are `passed`, `violation`, `actor-error`, `incompatible`, `inconclu
 ## Replay and artifacts
 
 Exact replay requires completed evidence and cleanup. It checks the PostgreSQL and Node.js versions, starting fixture identity, actor connection startups (including connections that sent no SQL), command identity, connection generation, query fingerprints, observed lock waits and transaction state. Startup values contribute to hashes; their raw values are not copied into the connection record. File targets additionally check their selected source, actual installed dependencies and Interleave runtime. Exact replay and reduction inherit the recorded connection and protocol profiles and source selection unless explicitly overridden; changed exact inputs produce an incompatible result.
+
+The same completed-evidence preflight applies to `replay`, `runOnce` and
+`runScenarioFile` in exact mode, before database creation or file import. Partial
+records remain readable for inspection and can supply guided actor hints.
 
 The staged profile produces version 2 artifacts with explicit stage, cycle, and continuation links. Version 1 records retain their original whole-cycle meaning. Exact staged replay checks SQL and Parse inputs before releasing metadata, then checks actual Bind inputs before releasing execution. Metadata records parameter and column counts or the real error; it does not claim row values, affected rows, transaction state, or equality of backend object identifiers. A completed run must close every staged cycle.
 

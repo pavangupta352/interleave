@@ -317,3 +317,8 @@ Run `verifyRegressionExport` before installing or replaying a folder received
 from elsewhere. Verification does not make untrusted application code safe to
 execute. Inspect the selected source and dependency lifecycle scripts before
 running npm or Interleave.
+
+Verification rejects invalid UTF-8 and incomplete command evidence even when
+the bundle's checksums have been recomputed. Runtime identity includes the CLI
+helper modules used by the replay executable; changed helpers or an archive
+that omits recorded helpers fail verification.

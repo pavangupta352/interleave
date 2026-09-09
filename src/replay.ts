@@ -1,4 +1,5 @@
 import { parseRunArtifact } from './artifact.js';
+import { assertCompletedRun } from './completed-run.js';
 import { runTarget } from './run-target.js';
 import { sourceSelection } from './source-selection.js';
 import { resolveFixtureProfile } from './fixture-profile.js';
@@ -17,8 +18,6 @@ export async function replay(scenario: Scenario | string, original: RunResult, o
       ...(source ? { source } : {}),
       plan: recorded.trace.map(step => step.actor), mode: 'guided' });
   }
-  if (!['passed', 'violation', 'actor-error'].includes(recorded.outcome) || !recorded.cleanup.complete || recorded.trace.some(step => !step.completion)) {
-    throw new TypeError('Exact replay requires a completed run with complete trace and cleanup');
-  }
+  assertCompletedRun(recorded);
   return runTarget(scenario, { ...options, replay: recorded, mode: 'replay' });
 }

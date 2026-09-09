@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { AssertionError } from 'node:assert';
 import { createOwnedDatabase, OwnedDatabaseCreationError } from './database.js';
+import { assertCompletedRun } from './completed-run.js';
 import { createProxy } from './proxy.js';
 import { defineScenario } from './scenario.js';
 import { ARTIFACT_LIMITS, parseRunArtifact, validateJsonValue } from './artifact.js';
@@ -50,7 +51,10 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   if (Buffer.byteLength(JSON.stringify(options.plan ?? [])) > maxEvidenceBytes / 2) throw new TypeError('Initial schedule exceeds the evidence byte limit');
   const mode = options.mode ?? (options.replay ? 'replay' : 'explore');
   if (mode === 'replay' && !options.replay) throw new TypeError('replay mode requires a recorded run');
-  if (options.replay) parseRunArtifact(options.replay);
+  if (options.replay) {
+    const recorded = parseRunArtifact(options.replay);
+    if (mode === 'replay') assertCompletedRun(recorded);
+  }
   const recordedProtocol = options.replay?.limits.protocolProfile ?? 'sync-cycle-v1';
   const protocolProfile = resolveProtocolProfile(options.protocolProfile, mode === 'replay' ? recordedProtocol : undefined);
   if (options.maxConnectionsPerActor !== undefined && !Number.isSafeInteger(options.maxConnectionsPerActor)) {

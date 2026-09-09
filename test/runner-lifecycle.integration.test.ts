@@ -10,6 +10,31 @@ import { testDatabaseUrl } from './helpers/postgres.js';
 const databaseUrl = testDatabaseUrl();
 const empty: Scenario = { name: 'lifecycle-budget', setup: async () => {}, actors: { a: async () => {}, b: async () => {} }, invariant: async () => {} };
 
+test.each(['outcome', 'cleanup', 'trace'] as const)('direct in-process exact replay rejects incomplete %s before setup', async boundary => {
+  let setupCalls = 0;
+  const actor: Scenario['actors'][string] = async ({ connectionString }) => {
+    const client = new Client({ connectionString });
+    await client.connect();
+    try { await client.query('SELECT 1'); } finally { await client.end(); }
+  };
+  const scenario: Scenario = { ...empty, async setup() { setupCalls++; }, actors: { a: actor, b: actor } };
+  const original = await runOnce(scenario, { databaseUrl });
+  expect(original.outcome).toBe('passed');
+  const incomplete = structuredClone(original);
+  if (boundary === 'outcome') {
+    incomplete.outcome = 'inconclusive';
+    incomplete.reason = 'Interrupted after recorded work';
+  } else if (boundary === 'cleanup') {
+    incomplete.cleanup = { complete: false, error: 'Cleanup unconfirmed' };
+  } else {
+    delete incomplete.trace[0]!.completion;
+    delete incomplete.trace[0]!.completedAt;
+  }
+  expect(parseRunArtifact(incomplete)).toEqual(incomplete);
+  await expect(runOnce(scenario, { databaseUrl, replay: incomplete })).rejects.toThrow(/completed run|complete trace|cleanup/i);
+  expect(setupCalls).toBe(1);
+});
+
 test('runner integration preserves failed recovery after a confirmed database creation', async () => {
   const originalQuery = Client.prototype.query;
   const originalConnect = Client.prototype.connect;

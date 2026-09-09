@@ -41,6 +41,11 @@ bounded exploration does not prove an application has no races.
 
 ### Before a stable release
 
+Recent hardening preserves unknown cleanup after an unacknowledged database
+creation, applies completed-evidence checks to every exact replay entry point,
+and rejects incomplete or incorrectly encoded regression artifacts. Runtime
+identity also binds the CLI helpers required by exported replay commands.
+
 Historical application cases and comparative measurements, final distribution
 verification and the remaining [release checklist](docs/plans/implementation.md)
 are still open. Registry installation and stable release artifacts will be
