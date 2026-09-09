@@ -179,7 +179,7 @@ function qualificationContext(source, env) {
   for (const job of ['postgres', 'pgvector', 'browser']) assert(needs?.[job]?.result === 'success', `Required CI job family did not succeed: ${job}`);
   return { kind: 'github-actions-needs', runUrl: `https://github.com/pavangupta352/interleave/actions/runs/${env.GITHUB_RUN_ID}/attempts/${env.GITHUB_RUN_ATTEMPT}`,
     commit: source.commit, jobFamilies: { postgres: 'success', pgvector: 'success', browser: 'success' },
-    scope: 'Existing nine-job matrix; those jobs pack their own source. Candidate archive acceptance here is the installed smoke only.' };
+    scope: 'Existing nine-job matrix using its own source checkouts and builds. Candidate archive acceptance here is the installed smoke only.' };
 }
 
 export async function prepareRelease({ repository = repositoryDefault, ref, tag, out, archive, signal, qualificationEnvironment = {} }) {
@@ -225,18 +225,38 @@ export async function prepareRelease({ repository = repositoryDefault, ref, tag,
       reproducibility: { cleanBuilds: 2, packageBytesEqual: true, scope: 'Same recorded Node/npm/platform and committed lock. No cross-platform equality claim.' },
       acceptance: acceptance.result, consumerLock: { filename: 'consumer-package-lock.json', sha256: sha256(acceptance.lockBytes) }, qualification,
       files: first.inventory,
-      limits: ['Prepared assets only; no tag, release, registry publication or authentication was performed.', 'Historical qualifications and final publication acceptance remain separate required gates.', 'Installed smoke covers import/help/version/init; no candidate-archive database, browser or registry-download qualification is claimed.', 'Checksums record byte agreement; no signature, attestation or exhaustive secret detection is claimed.'] };
+      limits: ['Prepared assets only; no tag, release, registry publication or authentication was performed.', 'Historical qualifications and final publication acceptance remain separate required gates.', 'Installed smoke covers import/help/version/init; no candidate-archive database, browser or registry-download qualification is claimed.', 'Checksums record byte agreement; no signature, attestation or exhaustive secret detection is claimed.', 'A prepared-only manifest alone is not sufficient. Run --verify on the complete asset directory before using it.'] };
     signal?.throwIfAborted();
     await mkdir(out);
-    for (const [path, bytes] of [[first.filename, candidate], [sourceFilename, sourceBytes], ['consumer-package-lock.json', acceptance.lockBytes], ['release-manifest.json', Buffer.from(json(manifest))]]) {
-      await writeFile(join(out, path), bytes, { flag: 'wx', mode: 0o644 });
+    try {
+      const ownership = await lstat(out);
+      const checkOutput = async () => {
+        signal?.throwIfAborted();
+        const current = await lstat(out);
+        assert(current.isDirectory() && !current.isSymbolicLink() && current.dev === ownership.dev && current.ino === ownership.ino,
+          'Release output changed ownership while being written');
+      };
+      for (const [path, bytes] of [[first.filename, candidate], [sourceFilename, sourceBytes], ['consumer-package-lock.json', acceptance.lockBytes], ['release-manifest.json', Buffer.from(json(manifest))]]) {
+        await checkOutput();
+        await writeFile(join(out, path), bytes, { flag: 'wx', mode: 0o644 });
+      }
+      const paths = [first.filename, sourceFilename, 'consumer-package-lock.json', 'release-manifest.json'].sort();
+      const checksums = [];
+      for (const path of paths) {
+        await checkOutput();
+        checksums.push(`${sha256(await readOrdinaryFile(join(out, path), MAX_ARCHIVE, out))}  ${path}`);
+      }
+      await checkOutput();
+      await writeFile(join(out, 'SHA256SUMS'), `${checksums.join('\n')}\n`, { flag: 'wx', mode: 0o644 });
+      await checkOutput();
+      await verifyPreparedAssets(out);
+      await checkOutput();
+      return manifest;
+    } catch (error) {
+      // A path can change after a check. Preserve all uncertain output, as the
+      // exporter does, instead of deleting or replacing someone else's files.
+      throw new Error(`${error.message}\nIncomplete release output preserved at ${out}. Inspect this folder; it may have changed ownership. Run --verify on the complete asset directory before using it.`, { cause: error });
     }
-    const paths = [first.filename, sourceFilename, 'consumer-package-lock.json', 'release-manifest.json'].sort();
-    const checksums = [];
-    for (const path of paths) checksums.push(`${sha256(await readOrdinaryFile(join(out, path), MAX_ARCHIVE))}  ${path}`);
-    await writeFile(join(out, 'SHA256SUMS'), `${checksums.join('\n')}\n`, { flag: 'wx', mode: 0o644 });
-    await verifyPreparedAssets(out);
-    return manifest;
   } finally { await rm(scratch, { recursive: true, force: true }); }
 }
 

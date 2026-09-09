@@ -1,6 +1,8 @@
 import { execFile as execute } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -153,3 +155,47 @@ test('interrupts the owned build process group and removes its temporary source 
     await expect(readFile(join(owned!.cwd, 'build.mjs'))).rejects.toThrow();
   } finally { controller.abort(); await finished; }
 }, 15_000);
+
+
+test.each(['checksum write', 'late cancellation', 'final verification', 'replaced directory'] as const)('preserves and explicitly identifies incomplete output after %s', async boundary => {
+  const f = await fixture(); const out = join(f.root, 'incomplete candidate');
+  const retained = `${out}.original`; const tarName = `pavangupta352-interleave-${f.version}.tgz`;
+  const controller = new AbortController(); const originalWrite = fs.writeFile;
+  let injected = false; let originalTar: Buffer | undefined;
+  fs.writeFile = (async (...args: Parameters<typeof fs.writeFile>) => {
+    const path = String(args[0]);
+    if (path === join(out, 'SHA256SUMS') && boundary === 'checksum write') {
+      injected = true; throw new Error('Injected late checksum write failure');
+    }
+    await originalWrite(...args);
+    if (path === join(out, tarName)) {
+      originalTar = await readFile(path);
+      if (boundary === 'replaced directory') {
+        await fs.rename(out, retained); await mkdir(out);
+        await originalWrite(join(out, 'concurrent-content'), 'preserve'); injected = true;
+      }
+    }
+    if (path === join(out, 'release-manifest.json') && boundary === 'late cancellation') { injected = true; controller.abort(); }
+    if (path === join(out, 'SHA256SUMS') && boundary === 'final verification') {
+      injected = true; await fs.appendFile(join(out, 'consumer-package-lock.json'), '\nchanged-after-checksum');
+    }
+  }) as typeof fs.writeFile;
+  syncBuiltinESMExports();
+  let failure: unknown;
+  try { await prepareRelease({ repository: f.repository, ref: f.ref, out, signal: controller.signal }); }
+  catch (error) { failure = error; }
+  finally { fs.writeFile = originalWrite; syncBuiltinESMExports(); }
+  expect(injected).toBe(true); expect(failure).toBeInstanceOf(Error);
+  expect(String(failure)).toContain(`Incomplete release output preserved at ${out}`);
+  expect(String(failure)).toMatch(/verify|inspect/i);
+  expect(originalTar).toBeDefined();
+  expect(await readFile(join(boundary === 'replaced directory' ? retained : out, tarName))).toEqual(originalTar);
+  if (boundary === 'replaced directory') {
+    expect(String(failure)).toMatch(/ownership/);
+    expect(await fs.readdir(out)).toEqual(['concurrent-content']);
+    expect(await readFile(join(out, 'concurrent-content'), 'utf8')).toBe('preserve');
+  } else {
+    expect(JSON.parse(await readFile(join(out, 'release-manifest.json'), 'utf8')).status).toBe('prepared-only');
+    await expect(verifyPreparedAssets(out)).rejects.toThrow();
+  }
+}, 45_000);
