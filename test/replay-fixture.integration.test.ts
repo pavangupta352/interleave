@@ -28,7 +28,8 @@ describe('fixture-bound replay on real PostgreSQL', () => {
     const first = await runOnce(scenario(), { databaseUrl });
     expect(first.outcome).toBe('violation');
     const identity = (first.environment as Record<string, unknown>).fixture;
-    expect(identity).toMatchObject({ version: 1, profile: 'postgresql16-native-v1', algorithm: 'sha256' });
+    const major = first.environment.serverVersion.split('.')[0];
+    expect(identity).toMatchObject({ version: 1, profile: `postgresql${major}-native-v1`, algorithm: 'sha256' });
     const second = await replay(scenario(), parseRunArtifact(JSON.stringify(first)), { databaseUrl });
     expect(second.outcome).toBe('violation');
     expect((second.environment as Record<string, unknown>).fixture).toEqual(identity);

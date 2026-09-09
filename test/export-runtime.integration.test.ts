@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { exportRegression } from '../src/export.js';
+import { bindExportFixture } from './helpers/export.js';
 import type { RunResult } from '../src/types.js';
 
 const temporary: string[] = [];
@@ -35,9 +36,14 @@ test.each([false, true])('clean install preserves app pg 8.11.5 and bundled runt
   metadata.dependencies.pg = '^8.0.0'; lock.packages[''].dependencies.pg = '^8.0.0';
   await writeFile(join(projectRoot, 'package.json'), JSON.stringify(metadata));
   await writeFile(join(projectRoot, 'package-lock.json'), JSON.stringify(lock));
+  execute('npm', ['ci', '--ignore-scripts'], projectRoot);
   const scenarioFile = join(projectRoot, 'scenario.mjs');
-  await writeFile(scenarioFile, "import * as runtime from '@pavangupta352/interleave';export default runtime;export const runtimeUrl=import.meta.resolve('@pavangupta352/interleave');");
-  const exported = await exportRegression(inertRun, { projectRoot, scenarioFile, destination: join(root, 'ready') });
+  await writeFile(scenarioFile, existingRuntimeName
+    ? "import * as runtime from '@pavangupta352/interleave';import 'pg';export default runtime;export const runtimeUrl=import.meta.resolve('@pavangupta352/interleave');"
+    : "import pg from 'pg';export default pg;export const runtimeUrl=import.meta.resolve('pg');");
+  const runtimeRoot = new URL('../', import.meta.url).pathname;
+  const bound = await bindExportFixture(inertRun, { projectRoot, scenarioFile, runtimeRoot });
+  const exported = await exportRegression(bound, { projectRoot, scenarioFile, destination: join(root, 'ready'), runtimeRoot });
   const appLockBefore = await readFile(join(exported.destination, 'app/package-lock.json'), 'utf8');
   const runtimeLockBefore = await readFile(join(exported.destination, 'package-lock.json'), 'utf8');
   for (const [command, ...args] of exported.replay.install) execute(command, [...args, '--ignore-scripts'], exported.destination);
@@ -50,12 +56,12 @@ test.each([false, true])('clean install preserves app pg 8.11.5 and bundled runt
     const applicationModule = await import(pathToFileURL(resolve('app/scenario.mjs')));
     console.log(JSON.stringify({ appPg: app('pg/package.json').version, runtimePg: runtime('pg/package.json').version,
       appRuntime: fileURLToPath(applicationModule.runtimeUrl),
-      appHasOwnApi: ${existingRuntimeName ? "typeof applicationModule.default.default === 'function'" : "typeof applicationModule.default.exportRegression === 'function'"} }));
+      appHasOwnApi: ${existingRuntimeName ? "typeof applicationModule.default.default === 'function'" : "typeof applicationModule.default.Client === 'function'"} }));
   `], exported.destination));
   expect(observed.appPg).toBe('8.11.5');
   expect(observed.runtimePg).toBe('8.23.0');
   expect(observed.appHasOwnApi).toBe(true);
-  expect(observed.appRuntime).toBe(join(exported.destination, existingRuntimeName ? 'app/node_modules/@pavangupta352/interleave/index.js' : 'node_modules/@pavangupta352/interleave/dist/index.js'));
+  expect(observed.appRuntime).toBe(join(exported.destination, existingRuntimeName ? 'app/node_modules/@pavangupta352/interleave/index.js' : 'app/node_modules/pg/lib/index.js'));
   expect(await readFile(join(exported.destination, 'app/package-lock.json'), 'utf8')).toBe(appLockBefore);
   expect(await readFile(join(exported.destination, 'package-lock.json'), 'utf8')).toBe(runtimeLockBefore);
   expect(await readFile(join(exported.destination, 'node_modules/@pavangupta352/interleave/dist/export-source.js'), 'utf8')).not.toMatch(/from\s*["']typescript["']/);

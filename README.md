@@ -2,9 +2,9 @@
 
 **Turn intermittent Postgres races into repeatable regression tests.**
 
-Interleave runs existing application operations against real PostgreSQL and controls when their database commands are released. It is being built to discover a broken invariant, show the ordering that caused it, and keep a runnable regression after the investigation ends.
+Interleave runs existing application operations against real PostgreSQL and controls when their database commands are released. It finds invariant violations, shows the recorded command order, and retains evidence for replay and regression tests.
 
-> Development is in progress. The API, CLI, offline viewer and portable regression export run end to end. PostgreSQL fixture identity is checked during replay and reduction; source binding, broader compatibility and release qualification are still being completed. There is no stable release yet.
+> Development is in progress. The API, CLI, offline viewer and supported regression export run end to end. File replay binds application source, installed dependencies, runtime, database fixture and actor connections. Broader compatibility, historical cases and release qualification remain in progress. There is no stable release yet.
 
 ![An actual oversell: both actors read the same stock before either writes, with the released SQL and PostgreSQL result visible in the evidence report.](docs/assets/evidence-record.png)
 
@@ -30,13 +30,18 @@ The workflow is:
 
 The proxy schedules complete driver command cycles. Simple Query batches remain intact; ordinary parameterized queries retain their original protocol bytes. PostgreSQL still owns query execution, transactions and lock resumption. Server-side functions are opaque.
 
-A passing exploration means no violation was observed in the schedules actually tested. It is not proof that the application has no races. Query changes can invalidate an exact replay; guided reruns must be labeled separately.
+A passing exploration means no violation was observed in the schedules actually tested. It is not proof that the application has no races. Changed source, dependencies, fixtures or queries invalidate exact file replay; use a guided run or fresh exploration to evaluate a repair.
 
 Exact replay checks the recorded command and wait contract against captured
 starting conditions. Results are observed again: row counts, returned actor
 values and the invariant outcome can differ when application behavior depends
 on uncontrolled inputs such as randomness or external services. Reduction
 additionally requires the same invariant failure fingerprint.
+
+Each actor defaults to one physical connection. An explicit auxiliary profile
+allows queryless monitor connections while retaining one live command producer.
+See [compatibility](docs/compatibility.md) for measured PostgreSQL profiles and
+[API boundaries](docs/api.md) for source capture, pools and replay.
 
 ## Development
 
@@ -73,7 +78,7 @@ workflow. Registry installation instructions will accompany the verified release
 
 ## Related work
 
-[PostgreSQL's isolation tester](https://github.com/postgres/postgres/blob/master/src/test/isolation/README) already explores interleavings of authored SQL sessions. Interleave's proposed contribution is the complete workflow around existing application code and useful regression artifacts.
+[PostgreSQL's isolation tester](https://github.com/postgres/postgres/blob/master/src/test/isolation/README) already explores interleavings of authored SQL sessions. Interleave focuses on running existing application operations and retaining their evidence as regression artifacts.
 
 [determined](https://github.com/glideapps/determined) provides deterministic TypeScript simulation primitives. [Antithesis](https://antithesis.com/) controls a much broader execution environment. A local statement proxy has different boundaries.
 

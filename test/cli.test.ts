@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'vitest';
+import { parseCliArgs } from '../src/cli/options.js';
 
 const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 const temporary: string[] = [];
@@ -13,6 +14,11 @@ function execute(args: string[]) {
 }
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 describe('CLI arguments and scaffolding', () => {
+  test.each(['run', 'replay', 'minimize'])('source input selection is available on %s', command => {
+    const parsed = parseCliArgs([command, 'scenario.mjs', '--project-root', '/project with spaces', '--include', 'input.json', '--include', 'fixtures']);
+    expect(parsed.values['project-root']).toBe('/project with spaces');
+    expect(parsed.values.include).toEqual(['input.json', 'fixtures']);
+  });
   test('help and version need no database and JSON stays parseable', async () => {
     const help = execute(['--help', '--json']);
     expect(help.status).toBe(0); expect(help.stderr).toBe(''); expect(JSON.parse(help.stdout).help).toContain('replay');

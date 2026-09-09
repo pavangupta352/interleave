@@ -80,9 +80,14 @@ async function main(args: string[]): Promise<number> {
   if (!databaseUrl?.trim()) throw new TypeError('Set --database-url or TEST_DATABASE_URL to a dedicated PostgreSQL administrator database');
   const options: RunOptions = {
     databaseUrl, signal: controller.signal,
+    ...((values['project-root'] === undefined && values.include === undefined) ? {} : { source: {
+      ...(values['project-root'] === undefined ? {} : { projectRoot: values['project-root'] }),
+      ...(values.include === undefined ? {} : { include: values.include }),
+    } }),
     ...(values['max-steps'] === undefined ? {} : { maxSteps: Number(values['max-steps']) }),
     ...(values['timeout-ms'] === undefined ? {} : { timeoutMs: Number(values['timeout-ms']) }),
     ...(values['max-evidence-bytes'] === undefined ? {} : { maxEvidenceBytes: Number(values['max-evidence-bytes']) }),
+    ...(values['max-connections-per-actor'] === undefined ? {} : { maxConnectionsPerActor: Number(values['max-connections-per-actor']) }),
   };
   let result: RunResult | ExplorationResult | MinimizationResult;
   let run: RunResult | undefined;
@@ -115,8 +120,10 @@ async function main(args: string[]): Promise<number> {
     run = await doctor(options); result = run; code = runExitCode(run);
   } else {
     const module = await loadNeveroversell();
-    const fixture = new URL(`./cli/demo-${values.safe ? 'safe' : 'naive'}.${import.meta.url.endsWith('.ts') ? 'ts' : 'js'}`, import.meta.url);
-    run = await runScenarioFile(fileURLToPath(fixture), { ...options, ...(values.safe ? {} : { plan: [...module.NAIVE_OVERSELL_PLAN] }) });
+    const fixture = new URL(`${import.meta.url.endsWith('.ts') ? '../dist/' : './'}examples/neveroversell/demo-${values.safe ? 'safe' : 'naive'}.js`, import.meta.url);
+    run = await runScenarioFile(fileURLToPath(fixture), { ...options,
+      source: { projectRoot: fileURLToPath(new URL('../', import.meta.url)), include: ['dist/examples/neveroversell/vendor/sql'] },
+      ...(values.safe ? {} : { plan: [...module.NAIVE_OVERSELL_PLAN] }) });
     result = run; code = runExitCode(run);
   }
   if (values.out) {

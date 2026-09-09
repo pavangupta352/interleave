@@ -216,7 +216,7 @@ The inspector groups exact SQL, completion facts and observed waits under short 
 
 Native disclosures hold command identity, actor observations, and record/replay details. Their labels stay visible above thin rules; supporting evidence expands in place. Imported values render as text. The replay command is displayed and copyable, and the viewer does not execute it. A polite live status region reports selection, filtering, import, download and clipboard feedback.
 
-Record details include the captured fixture profile, digest, object and row counts, and actor startup digests. Missing identities in older records are labeled explicitly. Long digests wrap within the existing fact layout on narrow screens.
+Record details include the captured fixture profile, digest, object and row counts; source, installed dependency and runtime identities; the connection profile; and actor startup digests. Missing identities in older records are labeled explicitly. Long digests wrap within the existing fact layout on narrow screens.
 
 The only selection animation is a brief background wash (180ms). It runs only when reduced motion is not requested. Focus and result state do not depend on animation. Print styles hide interactive controls; the rendered ledger page and currently displayed details remain the print content.
 

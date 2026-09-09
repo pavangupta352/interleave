@@ -4,13 +4,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'vitest';
-import { readRunArtifact, writeRunArtifact } from '../src/artifact.js';
+import { readRunArtifact } from '../src/artifact.js';
 import { verifyRegressionExport } from '../src/export.js';
-import { runScenarioFile } from '../src/supervised.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
-const cli = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
+const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 const databaseUrl = testDatabaseUrl();
 const temporary: string[] = [];
 
@@ -46,6 +45,7 @@ async function makeApplication(root: string): Promise<string> {
   await mkdir(application);
   await writeFile(join(application, 'scenario.mjs'), `
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { Client } from 'pg';
 const increment = async ({ connectionString }) => {
   const client = new Client({ connectionString });
@@ -57,11 +57,12 @@ const increment = async ({ connectionString }) => {
 };
 export default {
   name: 'portable-export-counter',
-  async setup({ db }) { await db.query('CREATE TABLE counter (value int); INSERT INTO counter VALUES (0)'); },
+  async setup({ db }) { await db.query(await readFile(new URL('./seed.sql', import.meta.url), 'utf8')); },
   actors: { alice: increment, bob: increment },
   async invariant({ db }) { assert.equal((await db.query('SELECT value FROM counter')).rows[0].value, 2, 'both increments survive'); },
 };
 `.trimStart());
+  await writeFile(join(application, 'seed.sql'), 'CREATE TABLE counter (value int); INSERT INTO counter VALUES (0)');
   const packageJson = {
     name: 'portable-export-counter',
     version: '1.0.0',
@@ -95,18 +96,19 @@ describe('portable regression export integration', () => {
     const installApplication = await execute(npmExecutable(), ['ci', '--ignore-scripts'], application);
     expect(installApplication.code).toBe(0);
 
-    const recorded = await runScenarioFile(scenario, {
-      databaseUrl,
-      plan: ['alice', 'bob', 'alice', 'bob'],
-      timeoutMs: 20_000,
-    });
-    expect(recorded.outcome).toBe('violation');
     const artifact = join(root, 'recorded failure.json');
-    await writeRunArtifact(artifact, recorded);
+    const recording = await execute(process.execPath, [cli, 'run', scenario,
+      '--project-root', application, '--include', 'seed.sql', '--plan', 'alice,bob,alice,bob',
+      '--max-runs', '1', '--timeout-ms', '20000', '--out', artifact, '--json'], repository);
+    expect(recording.code, recording.stderr).toBe(1);
+    const recorded = await readRunArtifact(artifact);
+    expect(recorded.outcome).toBe('violation');
+    expect(recorded.environment.source?.components.runtime.mode).toBe('build');
+    expect(recorded.environment.source?.sharedPackages).toEqual([]);
 
     const destination = join(root, 'ready regression folder');
     const exported = await execute(process.execPath, [
-      '--import', import.meta.resolve('tsx'), cli,
+      cli,
       'export', scenario, artifact,
       '--project-root', application,
       '--out', destination,

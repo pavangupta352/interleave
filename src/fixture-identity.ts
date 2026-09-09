@@ -15,7 +15,7 @@ export interface FixtureIdentityOptions {
 }
 export interface FixtureIdentity {
   version: 1;
-  profile: 'postgresql16-native-v1';
+  profile: 'postgresql16-native-v1' | 'postgresql17-native-v1' | 'postgresql18-native-v1';
   algorithm: 'sha256';
   fingerprint: string;
   components: { schema: string; data: string; sequences: string; settings: string };
@@ -175,13 +175,6 @@ const schemaQueries: Record<string, string> = {
     FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
     LEFT JOIN pg_collation co ON co.oid=t.typcollation LEFT JOIN pg_namespace cn ON cn.oid=co.collnamespace
     WHERE ${userNamespace} AND t.typtype IN ('d','e','c')`,
-  collations: `SELECT n.nspname,c.collname,pg_get_userbyid(c.collowner) AS owner,c.collprovider,c.collisdeterministic,c.collencoding,
-    c.collcollate,c.collctype,c.colliculocale,c.collversion,pg_collation_actual_version(c.oid) AS actual_version
-    FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace
-    WHERE (${userNamespace}) OR c.oid IN (
-      SELECT a.attcollation FROM pg_attribute a JOIN pg_class r ON r.oid=a.attrelid
-      JOIN pg_namespace n ON n.oid=r.relnamespace WHERE ${userNamespace}
-      UNION SELECT t.typcollation FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE ${userNamespace})`,
   languages: `SELECT l.lanname,pg_get_userbyid(l.lanowner) AS owner,l.lanispl,l.lanpltrusted,
     l.lanplcallfoid::regprocedure::text AS handler,l.laninline::regprocedure::text AS inline_handler,
     l.lanvalidator::regprocedure::text AS validator,${canonicalAcl('l.lanacl')} AS acl
@@ -210,7 +203,7 @@ const unsupportedQueries: [string, string][] = [
   ['custom text search objects', `SELECT 1 FROM pg_ts_config c JOIN pg_namespace n ON n.oid=c.cfgnamespace WHERE ${userNamespace} UNION ALL SELECT 1 FROM pg_ts_dict d JOIN pg_namespace n ON n.oid=d.dictnamespace WHERE ${userNamespace} UNION ALL SELECT 1 FROM pg_ts_parser p JOIN pg_namespace n ON n.oid=p.prsnamespace WHERE ${userNamespace} UNION ALL SELECT 1 FROM pg_ts_template t JOIN pg_namespace n ON n.oid=t.tmplnamespace WHERE ${userNamespace}`],
 ];
 
-// This PG16-native profile treats reserved schemas as native catalog input. A
+// These PG16-18 native profiles treat reserved schemas as native catalog input. A
 // normal user-created object has an OID at or above FirstNormalObjectId. Reject
 // additions instead of silently treating them as unchanged server state.
 const reservedNamespace = `(n.nspname OPERATOR(pg_catalog.~) '^pg_' OR n.nspname OPERATOR(pg_catalog.=) 'information_schema')`;
@@ -312,7 +305,12 @@ export async function captureFixtureIdentity(connectionString: string, options: 
   const run = async (): Promise<FixtureIdentity> => {
     check(); await client.connect(); check();
     const version = await query<{ version: string }>("SELECT pg_catalog.current_setting('server_version_num') AS version");
-    if (!version[0]!.version.startsWith('16')) throw new FixtureIdentityError('unsupported', 'Fixture identity profile is qualified for PostgreSQL 16 only');
+    const versionMatch = /^(16|17|18)\d{4}$/.exec(version[0]!.version);
+    if (!versionMatch) throw new FixtureIdentityError('unsupported', 'Fixture identity profile is qualified for PostgreSQL 16, 17, and 18 only');
+    const major = versionMatch[1] as '16' | '17' | '18';
+    const profile = `postgresql${major}-native-v1` as FixtureIdentity['profile'];
+    const databaseLocaleColumn = major === '16' ? 'd.daticulocale' : 'd.datlocale';
+    const collationLocaleColumn = major === '16' ? 'c.colliculocale' : 'c.colllocale';
     await quiescent();
     // Even casting a builtin jsonb catalog record to text can invoke a custom
     // cast. Reject before the first serialization, while observing original GUCs.
@@ -337,7 +335,8 @@ export async function captureFixtureIdentity(connectionString: string, options: 
         WHERE s.setdatabase IN (0,(SELECT oid FROM pg_database WHERE datname=current_database()))
           AND s.setrole IN (0,(SELECT oid FROM pg_roles WHERE rolname=session_user))
     ) SELECT name,current_setting(name,true) AS setting FROM names WHERE strpos(name,'.')>0`, [startupSettingNames(startupOptions)]));
-    settings.push(await records('database-settings', `SELECT pg_encoding_to_char(d.encoding) AS encoding,d.datlocprovider,d.datcollate,d.datctype,d.daticulocale,d.datcollversion,
+    settings.push(await records('database-settings', `SELECT pg_encoding_to_char(d.encoding) AS encoding,d.datlocprovider,d.datcollate,d.datctype,
+      ${databaseLocaleColumn} AS locale,d.daticurules AS locale_rules,d.datcollversion,
       pg_database_collation_actual_version(d.oid) AS actual_collation_version,
       pg_get_userbyid(d.datdba) AS owner,
       ${canonicalAcl('d.datacl')} AS acl
@@ -359,7 +358,18 @@ export async function captureFixtureIdentity(connectionString: string, options: 
       if ((await query(`SELECT 1 FROM (${sql}) unsupported LIMIT 1`)).length) throw new FixtureIdentityError('unsupported', `Fixture identity does not yet cover ${feature}`);
     }
     const schema: string[] = [];
-    for (const [label, sql] of Object.entries(schemaQueries)) schema.push(await records(label, sql));
+    const nativeSchemaQueries = {
+      ...schemaQueries,
+      collations: `SELECT n.nspname,c.collname,pg_get_userbyid(c.collowner) AS owner,c.collprovider,c.collisdeterministic,c.collencoding,
+        c.collcollate,c.collctype,${collationLocaleColumn} AS locale,c.collicurules AS locale_rules,
+        c.collversion,pg_collation_actual_version(c.oid) AS actual_version
+        FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace
+        WHERE (${userNamespace}) OR c.oid IN (
+          SELECT a.attcollation FROM pg_attribute a JOIN pg_class r ON r.oid=a.attrelid
+          JOIN pg_namespace n ON n.oid=r.relnamespace WHERE ${userNamespace}
+          UNION SELECT t.typcollation FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE ${userNamespace})`,
+    };
+    for (const [label, sql] of Object.entries(nativeSchemaQueries)) schema.push(await records(label, sql));
     interface Relation extends QueryResultRow { schema: string; name: string; kind: string; columns: string[] }
     const relations = await query<Relation>(`SELECT n.nspname AS schema,c.relname AS name,c.relkind AS kind,
       ARRAY(SELECT a.attname::text FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum) AS columns
@@ -403,8 +413,8 @@ export async function captureFixtureIdentity(connectionString: string, options: 
     }
     await query('COMMIT'); await quiescent();
     const components = { schema: combine(schema), data: combine(data), sequences: combine(sequences), settings: combine(settings) };
-    const fingerprint = digest(JSON.stringify(['postgresql16-native-v1',components]));
-    return { version: 1, profile: 'postgresql16-native-v1', algorithm: 'sha256', fingerprint, components, counts };
+    const fingerprint = digest(JSON.stringify([profile,components]));
+    return { version: 1, profile, algorithm: 'sha256', fingerprint, components, counts };
   };
   try {
     timer = setTimeout(() => interrupt('budget-exceeded'), timeoutMs); timer.unref();

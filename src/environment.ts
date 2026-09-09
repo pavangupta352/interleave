@@ -6,6 +6,7 @@ export function environmentMatches(expected: RunResult['environment'], actual: R
   const captured = actual.fixture;
   return expected.serverVersion === actual.serverVersion
     && expected.nodeVersion === actual.nodeVersion
+    && (expected.source === undefined ? actual.source === undefined : expected.source.fingerprint === actual.source?.fingerprint)
     && fixture !== undefined && captured !== undefined
     && fixture.version === captured.version
     && fixture.profile === captured.profile

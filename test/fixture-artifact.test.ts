@@ -14,6 +14,20 @@ const artifact = (): RunResult => ({
 test('fixture identity survives strict object and JSON artifact validation', () => {
   const run = artifact(); expect(parseRunArtifact(run)).toEqual(run); expect(parseRunArtifact(JSON.stringify(run))).toEqual(run);
 });
+test.each(['postgresql16-native-v1', 'postgresql17-native-v1', 'postgresql18-native-v1'])(
+  'accepts a qualified native fixture profile: %s',
+  profile => {
+    const run = artifact();
+    (run.environment.fixture as unknown as { profile: string }).profile = profile;
+    run.environment.serverVersion = `${profile.slice('postgresql'.length, 'postgresql'.length + 2)}.1`;
+    expect(parseRunArtifact(run)).toEqual(run);
+  },
+);
+test('rejects a fixture profile that contradicts the recorded PostgreSQL major', () => {
+  const run = artifact();
+  (run.environment.fixture as unknown as { profile: string }).profile = 'postgresql18-native-v1';
+  expect(() => parseRunArtifact(run)).toThrow(/profile.*server|PostgreSQL.*major/i);
+});
 test.each([
   ['version', 2], ['profile', 'unknown-profile'], ['algorithm', 'md5'], ['fingerprint', 'not-a-hash'],
   ['components', { schema: 'a'.repeat(64), data: 'a'.repeat(64), sequences: 'a'.repeat(64), settings: 'a'.repeat(64), hidden: true }],

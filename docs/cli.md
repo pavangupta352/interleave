@@ -46,9 +46,9 @@ Use another filename or explicitly add `--force` to replace an output. The paren
 directory must exist. A search which retains no run cannot write a run artifact;
 its machine-readable result reports the budget stop and omitted runs.
 
-Exact replay is the default. Changed command identity or PostgreSQL version
-produces an incompatible result. Full fixture and source binding is being added
-before release qualification. `replay --guided` explicitly
+Exact replay is the default. Changed source, installed dependencies, runtime,
+fixture, connection profile or command identity produces an incompatible result.
+`replay --guided` explicitly
 creates separately labeled new evidence using the old actor order; it does not
 claim exact replay compatibility.
 
@@ -63,6 +63,18 @@ last verified violation separately from `attemptFailure`, which reports the
 trial outcome, reason and cleanup recovery details. Such a result exits with 2;
 it is not a completed reduction.
 
+File runs capture their local module graph and installed dependencies before
+loading the scenario, then check them again afterward. Use `--project-root <dir>`
+to choose a portable root and repeated `--include <relative-path>` arguments for
+data files read outside the import graph. Declare these paths when recording the
+failure. Replay and reduction inherit the recorded selection. See the
+[file identity contract](api.md#file-identity).
+
+`--max-connections-per-actor <1..8>` permits a bounded number of physical
+connections for each actor. The default is one. Additional live connections must
+remain queryless; a second live command producer is explicitly unsupported. Exact
+replay and reduction inherit the recorded cap.
+
 ## Inspect and retain a regression
 
 ```sh
@@ -72,8 +84,9 @@ interleave export scenario.mjs failure.interleave.json --project-root . --out re
 
 The [offline report](reports.md) opens without a server and does not execute code.
 The [regression export](regressions.md) copies explicitly selected source files,
-the package lock and the current runtime into a verified bundle. Add repeated
-`--include <path>` arguments for local imports and other required source assets.
+the package lock and the recorded built runtime into a verified bundle. The
+selected files must still match the failure record. Additional data inputs must
+be declared when recording; export inherits that selection.
 Review the printed install and replay steps; export itself does not install or
 execute the copied project. Neither command requires a database URL.
 

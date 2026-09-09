@@ -1,6 +1,10 @@
 export { defineScenario } from './scenario.js';
 export { runOnce } from './runner.js';
 export { runScenarioFile } from './supervised.js';
+export type {
+  SourceIdentity, SourceIdentityFile, SourceIdentityFiles, SourceIdentityDependency,
+  SourceIdentityPackage, SourceIdentityDependencies, SourceIdentityRuntime,
+} from './source-identity.js';
 export { explore } from './explore.js';
 export { replay } from './replay.js';
 export { minimize } from './minimize.js';

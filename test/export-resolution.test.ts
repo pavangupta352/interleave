@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { exportRegression, verifyRegressionExport } from '../src/export.js';
 import type { RunResult } from '../src/types.js';
+import { bindExportFixture } from './helpers/export.js';
 
 const temporary: string[] = [];
 function loadModule(file: string): unknown {
@@ -27,7 +28,7 @@ async function fixture(entry: string, type: 'module' | 'commonjs' = 'module') {
   await writeFile(join(projectRoot, 'package.json'), JSON.stringify({ name: 'resolution-fixture', version: '1.0.0', type }));
   await writeFile(join(projectRoot, 'package-lock.json'), JSON.stringify({ name: 'resolution-fixture', version: '1.0.0', lockfileVersion: 3, packages: { '': { name: 'resolution-fixture', version: '1.0.0' } } }));
   await writeFile(join(runtimeRoot, 'package.json'), JSON.stringify({ name: '@pavangupta352/interleave', version: '0.1.0-test', type: 'module', files: ['dist'], bin: { interleave: 'dist/cli.js' } }));
-  for (const file of ['cli.js', 'export.js', 'index.js']) await writeFile(join(runtimeRoot, 'dist', file), 'export {};');
+  for (const file of ['cli.js', 'export.js', 'index.js', 'source-identity.js']) await writeFile(join(runtimeRoot, 'dist', file), 'export {};');
   return { projectRoot, runtimeRoot, scenarioFile: join(projectRoot, entry), destination: join(root, 'export') };
 }
 afterEach(async () => { await Promise.all(temporary.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -38,7 +39,7 @@ test.each(['js', 'json'])('CJS extensionless require retains Node\'s .%s module 
   await writeFile(join(f.projectRoot, `helper.${extension}`), extension === 'js' ? 'module.exports=42;' : '42');
   await writeFile(join(f.projectRoot, 'helper.mjs'), 'export default 999;');
   expect(loadModule(f.scenarioFile)).toBe(42);
-  const exported = await exportRegression(run, f); await verifyRegressionExport(exported.destination);
+  const exported = await exportRegression(await bindExportFixture(run, f), f); await verifyRegressionExport(exported.destination);
   const copied = join(f.destination, 'app/scenario.cjs');
   expect(loadModule(copied)).toBe(42);
 });
@@ -49,7 +50,7 @@ test('ESM imports resolve percent-encoded URLs to the same decoded file after ex
   await writeFile(join(f.projectRoot, 'helper file.mjs'), 'export default 42;');
   await writeFile(join(f.projectRoot, 'helper%20file.mjs'), 'export default 999;');
   expect(loadModule(f.scenarioFile)).toBe(42);
-  const exported = await exportRegression(run, f); await verifyRegressionExport(exported.destination);
+  const exported = await exportRegression(await bindExportFixture(run, f), f); await verifyRegressionExport(exported.destination);
   expect(loadModule(join(f.destination, 'app/scenario.mjs'))).toBe(42);
 });
 
@@ -58,7 +59,7 @@ test('CJS require keeps literal percent characters rather than decoding them as 
   await writeFile(f.scenarioFile, "module.exports=require('./helper%20file.js');");
   await writeFile(join(f.projectRoot, 'helper file.js'), 'module.exports=999;');
   await writeFile(join(f.projectRoot, 'helper%20file.js'), 'module.exports=42;');
-  const exported = await exportRegression(run, f);
+  const exported = await exportRegression(await bindExportFixture(run, f), f);
   const copied = join(exported.destination, 'app/scenario.cjs');
   expect(loadModule(copied)).toBe(42);
 });
@@ -89,7 +90,7 @@ test('nested package metadata preserves the actual module type of a relative .js
   await writeFile(join(f.projectRoot, 'nested/package.json'), '{"type":"commonjs"}');
   await writeFile(join(f.projectRoot, 'nested/helper.js'), 'module.exports=42;');
   expect(loadModule(f.scenarioFile)).toBe(42);
-  const exported = await exportRegression(run, f); await verifyRegressionExport(exported.destination);
+  const exported = await exportRegression(await bindExportFixture(run, f), f); await verifyRegressionExport(exported.destination);
   expect(await readFile(join(f.destination, 'app/nested/package.json'), 'utf8')).toBe('{"type":"commonjs"}');
   expect(loadModule(join(f.destination, 'app/scenario.mjs'))).toBe(42);
 });
@@ -97,7 +98,7 @@ test('nested package metadata preserves the actual module type of a relative .js
 test('type-only TypeScript imports do not invent a runtime dependency on a missing module', async () => {
   const f = await fixture('scenario.ts');
   await writeFile(f.scenarioFile, "import type { Something } from './missing.js';export default 42;");
-  const exported = await exportRegression(run, f);
+  const exported = await exportRegression(await bindExportFixture(run, f), f);
   expect(loadModule(join(exported.destination, 'app/scenario.ts'))).toBe(42);
 });
 
@@ -123,4 +124,30 @@ test('custom require.resolve lookup paths cannot be mistaken for importer-relati
   await writeFile(join(f.projectRoot, 'other/helper.js'), 'module.exports=42;');
   expect(String(loadModule(f.scenarioFile))).toMatch(/other[/\\]helper\.js$/);
   await expect(exportRegression(run, f)).rejects.toThrow(/custom|unsupported/i);
+});
+
+test.each(['import', 'require'])('a package self-reference through %s cannot omit its local exports target', async kind => {
+  const f = await fixture(kind === 'import' ? 'scenario.mjs' : 'scenario.cjs');
+  await writeFile(join(f.projectRoot, 'package.json'), JSON.stringify({
+    name: 'resolution-fixture', version: '1.0.0', type: 'module', exports: './operation.cjs',
+  }));
+  await writeFile(f.scenarioFile, kind === 'import'
+    ? "export { default } from 'resolution-fixture';"
+    : "module.exports=require('resolution-fixture');");
+  await writeFile(join(f.projectRoot, 'operation.cjs'), 'module.exports=42;');
+  expect(loadModule(f.scenarioFile)).toBe(42);
+  await expect(exportRegression(run, f)).rejects.toThrow(/self-reference.*unsupported|unsupported.*self-reference/i);
+});
+
+test('a scoped self-reference subpath uses its nearest nested package scope', async () => {
+  const f = await fixture('scenario.mjs');
+  await mkdir(join(f.projectRoot, 'nested'));
+  await writeFile(f.scenarioFile, "export { default } from './nested/entry.mjs';");
+  await writeFile(join(f.projectRoot, 'nested/package.json'), JSON.stringify({
+    name: '@fixture/nested', type: 'module', exports: { './operation': './operation.mjs' },
+  }));
+  await writeFile(join(f.projectRoot, 'nested/entry.mjs'), "export { default } from '@fixture/nested/operation';");
+  await writeFile(join(f.projectRoot, 'nested/operation.mjs'), 'export default 42;');
+  expect(loadModule(f.scenarioFile)).toBe(42);
+  await expect(exportRegression(run, f)).rejects.toThrow(/self-reference.*unsupported|unsupported.*self-reference/i);
 });

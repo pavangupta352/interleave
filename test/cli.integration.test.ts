@@ -69,8 +69,10 @@ describe('CLI real PostgreSQL integration', () => {
     const unsafe = await execute(['demo', 'neveroversell']); expect(unsafe.code).toBe(1);
     expect(JSON.parse(unsafe.stdout).scenario).toBe('neveroversell-naive-buy-gap-0');
     expect(JSON.parse(unsafe.stdout).trace).toHaveLength(10);
+    expect(JSON.parse(unsafe.stdout).environment.source.components.source.files.some((file: { path: string }) => file.path.endsWith('/vendor/sql/001_schema.sql'))).toBe(true);
     const safe = await execute(['demo', '--safe']); expect(safe.code).toBe(0);
     expect(JSON.parse(safe.stdout).scenario).toBe('neveroversell-safe-reservations');
+    expect(JSON.parse(safe.stdout).environment.source).toBeDefined();
     expect(JSON.parse(safe.stdout).actors.map((actor: { value: string }) => actor.value).sort()).toEqual(['held', 'insufficient']);
   });
   test('SIGINT returns 130 after removing the exact owned database', async () => {

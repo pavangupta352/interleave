@@ -1,4 +1,5 @@
 import { assertScenarioName } from './scenario.js';
+import { validateSourceIdentity } from './source-schema.js';
 import type {
   ActorResult,
   ConnectionIdentity,
@@ -266,23 +267,33 @@ export function parseRunArtifact(input: unknown): RunResult {
   const environment = shape(
     field(root, 'environment', '$'),
     '$.environment',
-    ['serverVersion', 'nodeVersion', 'fixture'],
+    ['serverVersion', 'nodeVersion', 'fixture', 'source'],
     ['serverVersion', 'nodeVersion'],
   );
-  boundedString(environment.serverVersion, '$.environment.serverVersion', 1, 256);
+  const serverVersion = boundedString(environment.serverVersion, '$.environment.serverVersion', 1, 256);
   boundedString(environment.nodeVersion, '$.environment.nodeVersion', 1, 256);
-  if (hasOwn(environment, 'fixture')) validateFixtureIdentity(environment.fixture, '$.environment.fixture');
+  if (hasOwn(environment, 'fixture')) {
+    const profile = validateFixtureIdentity(environment.fixture, '$.environment.fixture');
+    const serverMajor = /^(16|17|18)(?:\.|\s|$)/.exec(serverVersion)?.[1];
+    if (!serverMajor || profile !== `postgresql${serverMajor}-native-v1`) {
+      throw new TypeError('$.environment.fixture.profile: fixture profile contradicts the recorded PostgreSQL server major');
+    }
+  }
+  if (hasOwn(environment, 'source')) validateSourceIdentity(environment.source, '$.environment.source');
 
   validateTimestamp(field(root, 'startedAt', '$'), '$.startedAt');
 
   const limits = shape(
     field(root, 'limits', '$'),
     '$.limits',
-    ['maxSteps', 'timeoutMs', 'maxEvidenceBytes'],
+    ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor'],
     ['maxSteps', 'timeoutMs'],
   );
   safeInteger(limits.maxSteps, '$.limits.maxSteps', 1);
   safeInteger(limits.timeoutMs, '$.limits.timeoutMs', 1);
+  if (hasOwn(limits, 'maxConnectionsPerActor') && safeInteger(limits.maxConnectionsPerActor, '$.limits.maxConnectionsPerActor', 1) > 8) {
+    throw new TypeError('$.limits.maxConnectionsPerActor: cannot exceed 8');
+  }
   if (hasOwn(limits, 'maxEvidenceBytes')) {
     const maxEvidenceBytes = safeInteger(limits.maxEvidenceBytes, '$.limits.maxEvidenceBytes', 1024);
     if (maxEvidenceBytes > ARTIFACT_LIMITS.maxEvidenceBytes) {
@@ -635,11 +646,13 @@ function actorId(value: unknown, path: string): string {
   return actor;
 }
 
-function validateFixtureIdentity(value: unknown, path: string): void {
+function validateFixtureIdentity(value: unknown, path: string): string {
   const keys = ['version', 'profile', 'algorithm', 'fingerprint', 'components', 'counts'];
   const fixture = shape(value, path, keys, keys);
   if (fixture.version !== 1) throw new TypeError(`${path}.version: expected fixture identity version 1`);
-  enumValue(fixture.profile, `${path}.profile`, ['postgresql16-native-v1']);
+  const profile = enumValue(fixture.profile, `${path}.profile`, [
+    'postgresql16-native-v1', 'postgresql17-native-v1', 'postgresql18-native-v1',
+  ]);
   enumValue(fixture.algorithm, `${path}.algorithm`, ['sha256']);
   fingerprintValue(fixture.fingerprint, `${path}.fingerprint`);
   const names = ['schema', 'data', 'sequences', 'settings'];
@@ -647,6 +660,7 @@ function validateFixtureIdentity(value: unknown, path: string): void {
   for (const name of names) fingerprintValue(components[name], `${path}.components.${name}`);
   const counts = shape(fixture.counts, `${path}.counts`, ['objects', 'rows', 'bytes'], ['objects', 'rows', 'bytes']);
   for (const name of ['objects', 'rows', 'bytes']) safeInteger(counts[name], `${path}.counts.${name}`, 0);
+  return profile;
 }
 
 function fingerprintValue(value: unknown, path: string): string {

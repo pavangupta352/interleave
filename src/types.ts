@@ -1,5 +1,6 @@
 import type { Client } from 'pg';
 import type { FixtureIdentity } from './fixture-identity.js';
+import type { SourceIdentity } from './source-identity.js';
 
 export type ProtocolKind = 'simple' | 'extended';
 export type TransactionStatus = 'I' | 'T' | 'E';
@@ -67,6 +68,8 @@ export interface ProxyOptions {
   onError(error: Error): void;
   maxMessageBytes?: number;
   maxBufferedBytes?: number;
+  /** Total live sessions, including queryless auxiliaries; integer 1..8, default 1. */
+  maxConnectionsPerActor?: number;
 }
 
 export interface ActorProxy {
@@ -127,15 +130,17 @@ export interface RunResult {
   actors: ActorResult[];
   failure?: Failure;
   reason?: string;
-  environment: { serverVersion: string; nodeVersion: string; fixture?: FixtureIdentity };
+  environment: { serverVersion: string; nodeVersion: string; fixture?: FixtureIdentity; source?: SourceIdentity };
   startedAt: string;
   durationMs: number;
-  limits: { maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number };
+  limits: { maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number; maxConnectionsPerActor?: number };
   cleanup: { complete: boolean; error?: string };
 }
 
 export interface RunOptions {
   databaseUrl: string;
+  /** Selected local files for supervised file runs; imported modules are also captured. */
+  source?: { projectRoot?: string; include?: string[] };
   plan?: string[];
   replay?: RunResult;
   /** @internal Bind starting conditions without requiring an identical query schedule. */
@@ -144,6 +149,8 @@ export interface RunOptions {
   maxSteps?: number;
   timeoutMs?: number;
   maxEvidenceBytes?: number;
+  /** Permit queryless auxiliary sessions; at most one live session may issue commands. */
+  maxConnectionsPerActor?: number;
   signal?: AbortSignal;
 }
 

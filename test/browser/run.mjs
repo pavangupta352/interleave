@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
-import { runOnce, renderReport } from '../../dist/index.js';
+import { runScenarioFile, renderReport } from '../../dist/index.js';
 import { loadNeveroversell } from '../../dist/cli/demo.js';
 import { checkReport } from './report-checks.mjs';
 
@@ -14,10 +15,14 @@ let server;
 let browser;
 try {
   const demo = await loadNeveroversell();
-  const artifact = await runOnce(demo.createNaiveOversellScenario(), { databaseUrl, signal: controller.signal, plan: [...demo.NAIVE_OVERSELL_PLAN] });
+  const artifact = await runScenarioFile(fileURLToPath(new URL('../../dist/examples/neveroversell/demo-naive.js', import.meta.url)), {
+    databaseUrl, signal: controller.signal, plan: [...demo.NAIVE_OVERSELL_PLAN],
+    source: { projectRoot: fileURLToPath(new URL('../../', import.meta.url)), include: ['dist/examples/neveroversell/vendor/sql'] },
+  });
   assert.equal(artifact.outcome, 'violation', artifact.reason);
   assert.equal(artifact.cleanup.complete, true);
   assert.ok(artifact.environment.fixture, 'Browser qualification must use an actual bound PostgreSQL run');
+  assert.ok(artifact.environment.source, 'Browser qualification must bind actual application and runtime files');
   const html = await renderReport(artifact);
   server = createServer((_request, response) => { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(html); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });

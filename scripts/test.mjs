@@ -13,7 +13,11 @@ if (!['all', 'unit', 'integration', 'browser'].includes(suite)) {
   console.error('[test] Expected test suite: all, unit, integration, or browser.');
   process.exit(1);
 }
-const image = 'postgres:16';
+const supportedImages = new Set(['postgres:16', 'postgres:17', 'postgres:18']);
+const image = process.env.INTERLEAVE_TEST_POSTGRES_IMAGE ?? 'postgres:16';
+const imageError = supportedImages.has(image)
+  ? undefined
+  : 'INTERLEAVE_TEST_POSTGRES_IMAGE must be exactly postgres:16, postgres:17, or postgres:18.';
 const ownerLabel = 'io.interleave.test-run';
 let managed;
 let interrupted;
@@ -138,6 +142,7 @@ async function runVitest(databaseUrl) {
 }
 
 try {
+  if (imageError) throw new Error(imageError);
   let databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.INTERLEAVE_TEST_DATABASE_URL;
   if (suite !== 'unit') {
     if (databaseUrl !== undefined && !databaseUrl.trim()) throw new Error('TEST_DATABASE_URL must be a non-empty dedicated PostgreSQL administrator URL.');

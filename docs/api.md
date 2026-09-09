@@ -34,7 +34,7 @@ async function increment({ connectionString }) {
 }
 ```
 
-Each actor may have one live physical connection at a time. Sequential reconnects receive a new connection generation. Return a JSON value only when that observation belongs in the recorded evidence. An assertion failure in the invariant produces a violation; another exception is a harness error. Rejected application operations are actor errors and do not count as invariant violations.
+Each actor defaults to one live physical connection. Set `maxConnectionsPerActor` from 2 through 8 to permit queryless auxiliary connections, such as an adapter monitor. Only one live connection may issue commands; it keeps that role until it closes, including while idle. Another live connection sending commands is an unsupported profile. Sequential reconnects receive a new connection generation. Return a JSON value only when that observation belongs in the recorded evidence. An assertion failure in the invariant produces a violation; another exception is a harness error. Rejected application operations are actor errors and do not count as invariant violations.
 
 ## Run and search
 
@@ -56,6 +56,25 @@ if (search.firstFailure) {
 
 Supervision is a lifecycle boundary for trusted code. On POSIX it terminates the worker's process group; on Windows it terminates the worker. Application-created detached processes remain the scenario's responsibility. `cleanup.complete` reports the owned database and harness resources, and failed creation recovery retains the generated database name. It is not a sandbox or a guarantee about arbitrary external effects.
 
+## File identity
+
+Before importing a scenario, the supervisor captures its literal local module graph, controlling package metadata and lockfile, actual installed dependency files and declared dependency relationships, and the Interleave runtime. It checks the same inputs after execution. Changed files prevent a completed result from being presented as bound evidence. Source and compiled runtimes have different identities.
+
+The root defaults to the nearest ancestor with a `package.json`, or the entry directory when none exists. Declare other files read by the application explicitly:
+
+```js
+const options = {
+  databaseUrl: process.env.TEST_DATABASE_URL,
+  source: { projectRoot: '/path/to/application', include: ['fixtures', 'migrations'] },
+};
+```
+
+Paths in the artifact are relative to that root. Replay can relocate the project while preserving the same source, installed package instances and runtime; it derives the root from the recorded entry path. The manifest includes file lengths and hashes, not file contents. Its default capture bounds are 10,000 files, 64 MiB total and 16 MiB per file, within the execution deadline and evidence budget.
+
+This profile supports ordinary Node resolution with literal imports. Unsupported custom loaders, computed imports, package aliases, application native addons and symbolic links fail explicitly. It does not freeze the filesystem or capture arbitrary environment variables, clocks, randomness, network responses, or undeclared external files. Declare data inputs and arrange deterministic application inputs in the scenario.
+
+An in-process scenario object cannot attest the files or closure state already loaded by its caller. Its record has no file identity. Legacy file records remain readable, but need a guided run to create new bound evidence before exact file replay. A repaired file target also needs a guided run or fresh exploration, even when its SQL is unchanged.
+
 ## Budgets and outcomes
 
 Run options require `databaseUrl`, an explicit administrator URL for a dedicated PostgreSQL test instance. Optional controls:
@@ -66,13 +85,15 @@ Run options require `databaseUrl`, an explicit administrator URL for a dedicated
 | `maxSteps` | 100 | Maximum released command cycles per run |
 | `timeoutMs` | 10,000 | Per-run execution deadline in milliseconds |
 | `maxEvidenceBytes` | 8 MiB | Recorded evidence budget per run |
+| `maxConnectionsPerActor` | 1 | Physical connection cap per actor; additional live connections must remain queryless |
+| `source` | Automatic local module graph | File targets: `{ projectRoot?, include? }` selects the portable root and additional data paths |
 | `signal` | — | Caller cancellation |
 
 Exploration additionally supports `maxRuns` (100), `totalTimeoutMs` (60,000), `maxCandidates` (10,000), `maxSearchBytes` (64 MiB), and `stopOnFailure` (true). Retained bytes count encoded result data and candidate keys, not process heap usage. `omittedRuns`, `violationCount`, and `hardFailureCount` remain visible when a completed result cannot fit the retained-data budget. A resource stop never becomes an exhausted-frontier claim.
 
 Reduction supports `maxAttempts` (100) and `totalTimeoutMs` (60,000). Its initial exact verification counts as an attempt. It keeps the last verified matching failure; `locallyMinimal` applies to deleting explicit choices under the runner's fair fallback policy. It does not mean globally shortest execution or minimal application code.
 
-Every reduction candidate must start with the verified PostgreSQL and Node.js versions and fixture identity. Fixture drift stops reduction before candidate actors start and reports an inconclusive result with a reason; the retained run remains the last compatible failure. Candidate schedules may still change the queries that application code issues.
+Every reduction candidate must start with the verified PostgreSQL and Node.js versions, fixture identity, connection profile, and captured file identity when using a file target. Input drift stops reduction before candidate actors start and reports an inconclusive result with a reason; the retained run remains the last compatible failure. Candidate schedules may still change the queries that application code issues.
 
 A hard failure during reduction stops work and adds `attemptFailure` with its
 outcome, reason and cleanup details. This summary belongs to the failed trial;
@@ -85,7 +106,7 @@ Run outcomes are `passed`, `violation`, `actor-error`, `incompatible`, `inconclu
 
 ## Replay and artifacts
 
-Exact replay requires completed evidence and cleanup. It checks the PostgreSQL and Node.js versions, starting fixture identity, actor connection startups (including connections that sent no SQL), command identity, connection generation, query fingerprints, observed lock waits and transaction state. Startup values contribute to hashes; their raw values are not copied into the connection record. File source and broader environment binding are being added before release qualification.
+Exact replay requires completed evidence and cleanup. It checks the PostgreSQL and Node.js versions, starting fixture identity, actor connection startups (including connections that sent no SQL), command identity, connection generation, query fingerprints, observed lock waits and transaction state. Startup values contribute to hashes; their raw values are not copied into the connection record. File targets additionally check their selected source, actual installed dependencies and Interleave runtime. Exact replay and reduction inherit the recorded connection profile and source selection unless explicitly overridden; changed exact inputs produce an incompatible result.
 
 Replay returns the actual new command summaries, selected actor observations and
 invariant outcome. It does not require row counts, SQLSTATEs, return values or

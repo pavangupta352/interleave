@@ -103,8 +103,21 @@ function renderShell(): void {
   addFact(info, 'Fixture profile', fixture?.profile ?? 'Not recorded in this artifact');
   if (fixture) {
     addFact(info, 'Fixture identity', fixture.fingerprint);
-    addFact(info, 'Fixture size', `${fixture.counts.objects.toLocaleString('en-US')} objects · ${fixture.counts.rows.toLocaleString('en-US')} rows`);
+    addFact(info, 'Fixture size', `${fixture.counts.objects.toLocaleString('en-US')} ${fixture.counts.objects === 1 ? 'object' : 'objects'} · ${fixture.counts.rows.toLocaleString('en-US')} ${fixture.counts.rows === 1 ? 'row' : 'rows'}`);
   }
+  const source = run.environment.source;
+  addFact(info, 'Source profile', source?.profile ?? 'Not recorded in this artifact');
+  if (source) {
+    addFact(info, 'Source identity', source.fingerprint);
+    addFact(info, 'Entry file', source.entry);
+    addFact(info, 'Declared data inputs', source.includes.length
+      ? `${source.includes.slice(0, 10).join(' · ')}${source.includes.length > 10 ? ` · ${source.includes.length - 10} more in JSON` : ''}`
+      : 'No additional paths declared');
+    addFact(info, 'Application files', `${source.components.source.fileCount.toLocaleString('en-US')} files · ${source.components.source.fingerprint}`);
+    addFact(info, 'Installed dependencies', `${source.components.dependencies.packages.length.toLocaleString('en-US')} packages · ${source.components.dependencies.fingerprint}`);
+    addFact(info, 'Harness runtime', `${source.components.runtime.mode} mode · ${source.components.runtime.fingerprint}`);
+  }
+  addFact(info, 'Connection profile', `${run.limits.maxConnectionsPerActor ?? 1} physical ${(run.limits.maxConnectionsPerActor ?? 1) === 1 ? 'connection' : 'connections'} per actor; one live command producer`);
   addFact(info, 'Actor startups', run.connections === undefined ? 'Not recorded in this artifact' : `${run.connections.length.toLocaleString('en-US')} recorded`);
   for (const connection of run.connections ?? []) addFact(info, `${connection.actor} · ${connection.connection}`, connection.fingerprint);
   recordBody.append(info);

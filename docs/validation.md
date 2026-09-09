@@ -1,7 +1,7 @@
 # Development validation
 
-This records an executed development snapshot on 9 September 2026. It does not
-qualify a stable release or every PostgreSQL driver.
+This records the executed initial development snapshot, commit `9e71b06`, on
+9 September 2026. It does not qualify a stable release or every PostgreSQL driver.
 
 | Check | Executed result |
 | --- | --- |
@@ -29,6 +29,13 @@ The README screenshot is an actual run of the unchanged unsafe `naiveBuy`
 operation with `gapMs: 0`. It is a constructed demonstration owned by this
 maintainer, not an independent historical production bug.
 
+## Later source-bound milestone
+
+The [source-bound replay qualification](qualification/source-replay-2026-09-09.md)
+records the subsequent 417-test suite, actual clean-installed replay, source and
+runtime review repairs, auxiliary connection profile, and all six browser
+configurations. It states the remaining export and compatibility limits.
+
 ## Repeating the checks
 
 With Docker available:
@@ -48,8 +55,10 @@ for lifecycle and connection details.
 
 ## Open qualification gates
 
-File source and runtime binding, PostgreSQL 17/18, additional drivers and
-extensions, three independent historical bug/fix pairs, comparative measurements
-and release/download verification remain in progress. Local passing tests do not
-establish those results. The committed CI workflow adds Linux and Node.js 22/24
-checks; its executed status is available in [GitHub Actions](https://github.com/pavangupta352/interleave/actions).
+The later [native PostgreSQL matrix](qualification/postgresql-native-matrix-2026-09-09.md)
+records PostgreSQL 16/17/18 results separately. Shared-dependency export layouts,
+additional drivers and extensions, three independent historical bug/fix pairs,
+comparative measurements and release/download verification remain in progress. Local passing tests do not
+establish those results. The initial Linux checks passed on Node.js 22.18.0 and 24.7.0 with PostgreSQL 16,
+along with all six browser configurations in [CI run 34303888866](https://github.com/pavangupta352/interleave/actions/runs/34303888866).
+The expanded PostgreSQL matrix will be recorded after it runs.

@@ -11,7 +11,9 @@ import {
 } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 import { parseRunArtifact } from './artifact.js';
+import { captureExportSourceIdentity, type SourceIdentity, type SourceIdentityFile } from './source-identity.js';
 import type { RunResult } from './types.js';
 
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
@@ -54,7 +56,7 @@ export interface RegressionManifest {
   scenario: { name: string; entry: string; sourceFingerprint: string };
   recordedRun: { path: 'run.json'; outcome: 'violation'; failureFingerprint: string };
   project: { package: 'app/package.json'; lock: 'app/package-lock.json' };
-  runtime: { package: string; name: string; version: string };
+  runtime: { package: string; name: string; version: string; fingerprint: string };
   files: RegressionFile[];
   replay: {
     install: [string, ...string[]][];
@@ -132,7 +134,8 @@ export async function exportRegression(
   await addScenarioGraph(projectRoot, scenarioPath, selected, new Set<string>(), true);
   await addSelectedFile(projectRoot, packagePath, 'app/package.json', 'package-manifest', selected);
   await addSelectedFile(projectRoot, lockPath, 'app/package-lock.json', 'dependency-lock', selected);
-  for (const include of options.include ?? []) {
+  const includes = options.include ?? validatedRun.environment.source?.includes ?? [];
+  for (const include of includes) {
     const includePath = selectedPath(projectRoot, include, 'include');
     await addInclude(projectRoot, includePath, selected);
   }
@@ -140,6 +143,13 @@ export async function exportRegression(
     selected.get('app/package.json')!.bytes,
     selected.get('app/package-lock.json')!.bytes,
   );
+  const recordedSource = requireRecordedSource(validatedRun);
+  const runtimeRoot = await ordinaryDirectory(options.runtimeRoot ?? fileURLToPath(new URL('../', import.meta.url)), 'runtimeRoot');
+  assertUnbundledRuntime(jsonObject(await readOrdinaryFile(join(runtimeRoot, 'package.json'), MAX_FILE_BYTES, runtimeRoot), 'Interleave runtime metadata'));
+  const sourceOptions = { projectRoot, include: includes };
+  const currentSource = await captureExportSourceIdentity(scenarioPath, sourceOptions, runtimeRoot);
+  assertSameSourceIdentity(recordedSource, currentSource);
+  assertRecordedApplication(recordedSource, [...selected.values()].map(file => fileRecord(file.output, file.role, file.bytes)));
 
   // mkdir claims the final pathname exclusively. POSIX rename can replace an
   // empty directory created by another writer, so it is not a no-clobber publish.
@@ -166,28 +176,22 @@ export async function exportRegression(
     const artifactBytes = Buffer.from(`${JSON.stringify(validatedRun, null, 2)}\n`, 'utf8');
     await writeGeneratedFile(staging, 'run.json', 'run-artifact', artifactBytes, fileRecords);
 
-    const runtimeRoot = await ordinaryDirectory(
-      options.runtimeRoot ?? fileURLToPath(new URL('../', import.meta.url)),
-      'runtimeRoot',
-    );
     const runtime = await packRuntime(runtimeRoot, staging);
+    verifyPackedRuntime(runtime.bytes, recordedSource, runtime);
     fileRecords.push(fileRecord(runtime.relativePath, 'interleave-runtime', runtime.bytes));
     await assertOwnership();
     await createRuntimeLock(staging, runtime, fileRecords);
+    assertSameSourceIdentity(recordedSource, await captureExportSourceIdentity(scenarioPath, sourceOptions, runtimeRoot));
 
     fileRecords.sort((left, right) => left.path.localeCompare(right.path));
     const scenarioEntry = bundlePath(projectRoot, scenarioPath);
-    const sourceFingerprint = digest(Buffer.from(JSON.stringify(
-      fileRecords
-        .filter((file) => file.path.startsWith('app/'))
-        .map(({ path, bytes, sha256 }) => ({ path, bytes, sha256 })),
-    )));
+    const sourceFingerprint = recordedSource.components.source.fingerprint;
     const replay: RegressionManifest['replay'] = {
       install: [
         ['npm', 'ci', '--prefix', 'app'],
         ['npm', 'ci'],
       ],
-      command: ['node', 'node_modules/@pavangupta352/interleave/dist/cli.js', 'replay', scenarioEntry, 'run.json'],
+      command: ['node', 'node_modules/@pavangupta352/interleave/dist/cli.js', 'replay', scenarioEntry, 'run.json', '--project-root', 'app'],
     };
     const unsigned = {
       schemaVersion: 1 as const,
@@ -200,7 +204,7 @@ export async function exportRegression(
         failureFingerprint: validatedRun.failure.fingerprint,
       },
       project: { package: 'app/package.json' as const, lock: 'app/package-lock.json' as const },
-      runtime: { package: runtime.relativePath, name: runtime.name, version: runtime.version },
+      runtime: { package: runtime.relativePath, name: runtime.name, version: runtime.version, fingerprint: recordedSource.components.runtime.fingerprint },
       files: fileRecords,
       replay,
     };
@@ -279,6 +283,15 @@ export async function verifyRegressionExport(directory: string): Promise<Regress
       || parsedRun.failure.fingerprint !== manifest.recordedRun.failureFingerprint) {
     throw new Error('Recorded run does not match the regression manifest');
   }
+  const recordedSource = requireRecordedSource(parsedRun);
+  assertRecordedIdentityHashes(recordedSource);
+  assertRecordedApplication(recordedSource, manifest.files);
+  if (manifest.scenario.entry !== `app/${recordedSource.entry}`
+      || manifest.scenario.sourceFingerprint !== recordedSource.components.source.fingerprint
+      || manifest.runtime.fingerprint !== recordedSource.components.runtime.fingerprint) {
+    throw new Error('Regression manifest does not match the recorded source/runtime identity');
+  }
+  verifyPackedRuntime(await readOrdinaryFile(join(root, manifest.runtime.package), MAX_FILE_BYTES, root), recordedSource, manifest.runtime);
   validatePackageLock(
     await readOrdinaryFile(join(root, 'app/package.json'), MAX_FILE_BYTES, root),
     await readOrdinaryFile(join(root, 'app/package-lock.json'), MAX_FILE_BYTES, root),
@@ -297,15 +310,172 @@ export async function verifyRegressionExport(directory: string): Promise<Regress
   }
   await validateLockedTree(join(root, 'app'));
   await validateLockedTree(root);
-  const sourceFingerprint = digest(Buffer.from(JSON.stringify(
-    manifest.files
-      .filter((file) => file.path.startsWith('app/'))
-      .map(({ path, bytes, sha256 }) => ({ path, bytes, sha256 })),
-  )));
-  if (sourceFingerprint !== manifest.scenario.sourceFingerprint) {
-    throw new Error('Scenario source fingerprint does not match the selected application files');
-  }
   return manifest;
+}
+
+function requireRecordedSource(run: RunResult): SourceIdentity {
+  const source = run.environment.source;
+  if (!source) throw new Error('Export requires a recorded file source identity; record the scenario with the built CLI first');
+  if (source.components.runtime.mode !== 'build') throw new Error('Source-mode recordings cannot be exported as a built runtime. Build Interleave, then record again with the built CLI (node dist/cli.js run ...)');
+  if (source.sharedPackages.length) throw new Error('Recorded application/runtime shared dependency instances cannot be preserved by separate export installations');
+  return source;
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
+}
+
+function assertSameSourceIdentity(recorded: SourceIdentity, actual: SourceIdentity): void {
+  if (stableJson(recorded) !== stableJson(actual)) throw new Error('Selected source, installed dependencies, or built runtime changed from the recorded source identity');
+}
+
+function assertRecordedApplication(source: SourceIdentity, files: RegressionFile[]): void {
+  const selected = files.filter(file => file.path.startsWith('app/'))
+    .map(({ path, bytes, sha256 }) => ({ path: path.slice(4), bytes, sha256 }))
+    .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  if (stableJson(selected) !== stableJson(source.components.source.files)) {
+    throw new Error('Copied application files do not match the recorded source manifest');
+  }
+}
+
+function assertRecordedIdentityHashes(source: SourceIdentity): void {
+  const hash = (value: unknown) => digest(Buffer.from(JSON.stringify(value)));
+  const files = (values: SourceIdentityFile[]) => {
+    const selected = values.map(({ path, bytes, sha256 }) => ({ path, bytes, sha256 }));
+    return { files: selected, fingerprint: hash(selected), fileCount: selected.length, byteCount: selected.reduce((total, file) => total + file.bytes, 0) };
+  };
+  const edge = (value: SourceIdentity['components']['dependencies']['roots'][number]) => ({
+    name: value.name,
+    ...(value.packageId === undefined ? {} : { packageId: value.packageId }),
+    ...(value.optional ? { optional: true as const } : {}),
+    ...(value.missing ? { missing: true as const } : {}),
+    ...(value.from === undefined ? {} : { from: value.from }),
+  });
+  const graph = (value: SourceIdentity['components']['dependencies']) => {
+    const roots = value.roots.map(edge);
+    const packages = value.packages.map(pkg => ({ id: pkg.id, name: pkg.name, version: pkg.version, ...files(pkg.files), dependencies: pkg.dependencies.map(edge) }));
+    return { fingerprint: hash({ roots, packages }), roots, packages,
+      fileCount: packages.reduce((total, pkg) => total + pkg.fileCount, 0), byteCount: packages.reduce((total, pkg) => total + pkg.byteCount, 0) };
+  };
+  const sourceFiles = files(source.components.source.files);
+  const dependencies = graph(source.components.dependencies);
+  const runtimeFiles = files(source.components.runtime.files);
+  const runtimeDependencies = graph(source.components.runtime.dependencies);
+  const runtime = { ...runtimeFiles, mode: source.components.runtime.mode, dependencies: runtimeDependencies,
+    fingerprint: hash({ mode: source.components.runtime.mode, files: runtimeFiles.files, dependencies: runtimeDependencies.fingerprint }),
+    fileCount: runtimeFiles.fileCount + runtimeDependencies.fileCount, byteCount: runtimeFiles.byteCount + runtimeDependencies.byteCount };
+  const selected = { entry: source.entry, includes: source.includes,
+    sharedPackages: source.sharedPackages.map(({ dependencyPackageId, runtimePackageId }) => ({ dependencyPackageId, runtimePackageId })),
+    components: { source: sourceFiles, dependencies, runtime } };
+  const expected = { version: 1, profile: 'node-source-v1', algorithm: 'sha256',
+    fingerprint: hash({ version: 1, profile: 'node-source-v1', ...selected }), ...selected,
+    fileCount: sourceFiles.fileCount + dependencies.fileCount + runtime.fileCount,
+    byteCount: sourceFiles.byteCount + dependencies.byteCount + runtime.byteCount };
+  if (stableJson(expected) !== stableJson(source)) throw new Error('Recorded source identity hashes do not match their manifests');
+}
+
+function verifyPackedRuntime(bytes: Buffer, source: SourceIdentity, runtime: { name: string; version: string }): void {
+  const archive = readRuntimeArchive(bytes);
+  const metadata = jsonObject(archive.get('package.json') ?? Buffer.alloc(0), 'Packed runtime package metadata');
+  assertUnbundledRuntime(metadata);
+  if (metadata.name !== runtime.name || metadata.version !== runtime.version) throw new Error('Packed runtime metadata does not match its bound package');
+  const selected: SourceIdentityFile[] = [];
+  for (const [path, data] of archive) {
+    const parts = path.split('/');
+    if (path === 'package.json' || (path.startsWith('dist/') && path.endsWith('.js')
+        && !parts.some(part => ['report', 'cli', 'examples', 'vendor', 'node_modules'].includes(part)))) {
+      selected.push({ path, bytes: data.length, sha256: digest(data) });
+    }
+  }
+  selected.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  if (stableJson(selected) !== stableJson(source.components.runtime.files)) {
+    throw new Error('Packed runtime archive does not contain exactly the recorded runtime implementation bytes');
+  }
+}
+
+function assertUnbundledRuntime(metadata: Record<string, unknown>): void {
+  for (const key of ['bundleDependencies', 'bundledDependencies']) {
+    const value = metadata[key];
+    if (value !== undefined && value !== false && !(Array.isArray(value) && value.length === 0)) {
+      throw new Error('Bundled runtime dependencies are unsupported by the separate-install export profile');
+    }
+  }
+}
+
+/** Bounded ordinary-file npm tar profile. Nothing is extracted or executed. */
+function readRuntimeArchive(compressed: Buffer): Map<string, Buffer> {
+  let archive: Buffer;
+  try { archive = gunzipSync(compressed, { maxOutputLength: MAX_TOTAL_BYTES }); }
+  catch { throw new Error('Packed runtime archive is invalid or exceeds the 128 MiB expanded limit'); }
+  const files = new Map<string, Buffer>();
+  const paths = new Set<string>();
+  const directories = new Set<string>();
+  let offset = 0, entries = 0;
+  let extended: Record<string, string> | undefined;
+  const field = (block: Buffer, start: number, length: number) => decodeUtf8(block.subarray(start, start + length), 'Archive header').split('\0')[0]!;
+  const number = (text: string) => {
+    const value = text.trim();
+    if (!/^[0-7]*$/.test(value)) throw new Error('Unsupported runtime archive numeric header');
+    const result = value ? Number.parseInt(value, 8) : 0;
+    if (!Number.isSafeInteger(result) || result < 0) throw new Error('Runtime archive numeric limit exceeded');
+    return result;
+  };
+  while (offset + 512 <= archive.length) {
+    const block = archive.subarray(offset, offset + 512); offset += 512;
+    if (block.every(byte => byte === 0)) {
+      if (extended || offset + 512 > archive.length || !archive.subarray(offset).every(byte => byte === 0)) throw new Error('Invalid runtime archive terminator');
+      return files;
+    }
+    if (++entries > MAX_FILES * 2) throw new Error('Runtime archive exceeds its entry limit');
+    if (field(block, 257, 6) !== 'ustar' || field(block, 263, 2) !== '00') throw new Error('Unsupported runtime archive format');
+    const checksum = [...block].reduce((total, byte, index) => total + (index >= 148 && index < 156 ? 32 : byte), 0);
+    if (number(field(block, 148, 8)) !== checksum) throw new Error('Runtime archive header checksum mismatch');
+    const type = field(block, 156, 1);
+    let size = number(field(block, 124, 12));
+    if (extended?.size !== undefined) {
+      if (!/^\d+$/.test(extended.size)) throw new Error('Invalid runtime archive extended size');
+      size = Number(extended.size);
+    }
+    if (!Number.isSafeInteger(size) || size > MAX_FILE_BYTES || offset + Math.ceil(size / 512) * 512 > archive.length) throw new Error('Runtime archive file exceeds its bounded payload');
+    const payload = archive.subarray(offset, offset + size); offset += Math.ceil(size / 512) * 512;
+    if (type === 'x') {
+      if (extended || size > 64 * 1024) throw new Error('Unsupported runtime archive extended headers');
+      extended = {};
+      let start = 0;
+      while (start < payload.length) {
+        const space = payload.indexOf(32, start);
+        if (space < 0) throw new Error('Invalid runtime archive extended header');
+        const lengthText = payload.subarray(start, space).toString('ascii');
+        const length = Number(lengthText);
+        if (!/^\d+$/.test(lengthText) || !Number.isSafeInteger(length) || length <= space - start + 1 || start + length > payload.length || payload[start + length - 1] !== 10) throw new Error('Invalid runtime archive extended header length');
+        const text = decodeUtf8(payload.subarray(space + 1, start + length - 1), 'Archive extended header');
+        const equals = text.indexOf('='); const key = text.slice(0, equals);
+        if (equals < 1 || !['path', 'size', 'mtime', 'atime', 'ctime', 'uid', 'gid', 'uname', 'gname', 'SCHILY.dev', 'SCHILY.ino', 'SCHILY.nlink'].includes(key) || Object.hasOwn(extended, key)) throw new Error('Unsupported runtime archive extended field');
+        extended[key] = text.slice(equals + 1); start += length;
+      }
+      continue;
+    }
+    if (type !== '' && type !== '0' && type !== '5') throw new Error('Runtime archive contains unsupported links or special entries');
+    const prefix = field(block, 345, 155);
+    const raw = extended?.path ?? `${prefix ? `${prefix}/` : ''}${field(block, 0, 100)}`;
+    extended = undefined;
+    const path = safeBundlePath(type === '5' ? raw.replace(/\/$/, '') : raw, 'Archive path');
+    if (!path.startsWith('package/') || paths.has(path)) throw new Error('Runtime archive contains an unsafe or duplicate package path');
+    paths.add(path);
+    const parts = path.split('/');
+    if (parts.includes('node_modules')) throw new Error('Runtime archive node_modules entries are unsupported bundled dependencies');
+    for (let index = 1; index < parts.length; index += 1) {
+      const parent = parts.slice(0, index).join('/');
+      if (files.has(parent.slice(8))) throw new Error('Runtime archive file conflicts with a parent directory');
+      directories.add(parent);
+    }
+    if (type === '5') { if (size !== 0) throw new Error('Runtime archive directory contains payload'); continue; }
+    if (directories.has(path)) throw new Error('Runtime archive file conflicts with a directory');
+    if (files.size >= MAX_FILES) throw new Error('Runtime archive exceeds its file limit');
+    files.set(path.slice(8), payload);
+  }
+  throw new Error('Runtime archive is truncated or missing its terminator');
 }
 
 async function addScenarioGraph(
@@ -321,7 +491,7 @@ async function addScenarioGraph(
   const bytes = await readOrdinaryFile(source, MAX_FILE_BYTES, root);
   selected.set(output, { source, output, role: entry ? 'scenario' : 'application-source', bytes });
   assertSelectionBounds(selected);
-  await addPackageScopes(root, source, selected);
+  const packageScope = await addPackageScopes(root, source, selected);
   if (extname(source) === '.json') return;
   const text = decodeUtf8(bytes, `Scenario source ${relative(root, source)}`);
   const { inspectSourceModule } = await import('./export-source.js');
@@ -330,6 +500,10 @@ async function addScenarioGraph(
   for (const { specifier, kind, typeOnly } of inspected.imports) {
     if (typeOnly) continue;
     if (!specifier.startsWith('.')) {
+      if (typeof packageScope?.name === 'string' && packageScope.exports !== undefined
+          && (specifier === packageScope.name || specifier.startsWith(`${packageScope.name}/`))) {
+        throw new Error(`Unsupported package self-reference ${JSON.stringify(specifier)} in ${relative(root, source)}; use a literal relative file import`);
+      }
       if (specifier.startsWith('/') || specifier.startsWith('file:') || specifier.startsWith('#')) {
         throw new Error(`Unsupported non-relative local import ${JSON.stringify(specifier)} in ${relative(root, source)}`);
       }
@@ -340,12 +514,18 @@ async function addScenarioGraph(
   }
 }
 
-async function addPackageScopes(root: string, source: string, selected: Map<string, SelectedFile>): Promise<void> {
-  for (let directory = dirname(source); directory !== root; directory = dirname(directory)) {
+async function addPackageScopes(root: string, source: string, selected: Map<string, SelectedFile>): Promise<Record<string, unknown> | undefined> {
+  let nearest: Record<string, unknown> | undefined;
+  for (let directory = dirname(source); ; directory = dirname(directory)) {
     assertInside(root, directory, 'Module package scope');
     const path = join(directory, 'package.json');
     const stats = await lstat(path).catch((error: unknown) => hasCode(error, 'ENOENT') ? undefined : Promise.reject(error));
-    if (stats) await addSelectedFile(root, path, bundlePath(root, path), 'application-source', selected);
+    if (stats) {
+      const output = bundlePath(root, path);
+      await addSelectedFile(root, path, output, 'application-source', selected);
+      nearest ??= jsonObject(selected.get(output)!.bytes, 'Module package scope');
+    }
+    if (directory === root) return nearest;
   }
 }
 
@@ -461,7 +641,7 @@ function parseManifest(bytes: Buffer): RegressionManifest {
   const scenario = exactObject(root.scenario, ['name', 'entry', 'sourceFingerprint'], 'scenario');
   const recordedRun = exactObject(root.recordedRun, ['path', 'outcome', 'failureFingerprint'], 'recordedRun');
   const project = exactObject(root.project, ['package', 'lock'], 'project');
-  const runtime = exactObject(root.runtime, ['package', 'name', 'version'], 'runtime');
+  const runtime = exactObject(root.runtime, ['package', 'name', 'version', 'fingerprint'], 'runtime');
   const replayObject = exactObject(root.replay, ['install', 'command'], 'replay');
   const entry = safeBundlePath(scenario.entry, 'scenario.entry');
   if (!entry.startsWith('app/')) throw new TypeError('scenario.entry must be inside app/');
@@ -488,7 +668,7 @@ function parseManifest(bytes: Buffer): RegressionManifest {
     ['npm', 'ci'],
   ];
   const expectedCommand: RegressionManifest['replay']['command'] = [
-    'node', 'node_modules/@pavangupta352/interleave/dist/cli.js', 'replay', entry, 'run.json',
+    'node', 'node_modules/@pavangupta352/interleave/dist/cli.js', 'replay', entry, 'run.json', '--project-root', 'app',
   ];
   if (JSON.stringify(install) !== JSON.stringify(expectedInstall)
       || JSON.stringify(replayCommand) !== JSON.stringify(expectedCommand)) {
@@ -514,6 +694,7 @@ function parseManifest(bytes: Buffer): RegressionManifest {
       package: runtimePath,
       name: requiredString(runtime.name, 'runtime.name'),
       version: requiredString(runtime.version, 'runtime.version'),
+      fingerprint: hashValue(runtime.fingerprint, 'runtime.fingerprint'),
     },
     files,
     replay: { install, command: replayCommand },
@@ -634,7 +815,7 @@ async function readOrdinaryFile(path: string, maximum = MAX_FILE_BYTES, root?: s
     await assertNoSymlinkComponents(root, path);
   }
   let handle;
-  try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW); }
+  try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
   catch (error) {
     if (hasCode(error, 'ELOOP') || hasCode(error, 'EMULTIHOP')) throw new Error(`Refusing symbolic link file: ${path}`);
     if (hasCode(error, 'ENOENT')) throw new Error(`Required file does not exist: ${path}`);
@@ -698,7 +879,7 @@ function bundlePath(root: string, source: string): string {
 
 function safeBundlePath(value: unknown, label: string): string {
   const path = requiredString(value, label);
-  if (isAbsolute(path) || path.includes('\\') || path.startsWith('/') || path.endsWith('/')
+  if (isAbsolute(path) || path.includes('\\') || path.includes(':') || /[\u0000-\u001f\u007f]/.test(path) || path.startsWith('/') || path.endsWith('/')
       || path.split('/').some((part) => !part || part === '.' || part === '..')) {
     throw new TypeError(`${label} must be a safe relative path`);
   }

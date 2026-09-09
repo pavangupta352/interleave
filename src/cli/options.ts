@@ -7,19 +7,22 @@ const definitions = {
   'database-url': { type: 'string' }, out: { type: 'string' }, plan: { type: 'string' },
   'project-root': { type: 'string' }, include: { type: 'string', multiple: true },
   'max-steps': { type: 'string' }, 'timeout-ms': { type: 'string' }, 'max-evidence-bytes': { type: 'string' },
+  'max-connections-per-actor': { type: 'string' },
   'max-runs': { type: 'string' }, 'total-timeout-ms': { type: 'string' },
   'max-candidates': { type: 'string' }, 'max-search-bytes': { type: 'string' }, 'max-attempts': { type: 'string' },
 } as const;
-const runFlags = ['database-url', 'out', 'force', 'max-steps', 'timeout-ms', 'max-evidence-bytes'];
+const runFlags = ['database-url', 'out', 'force', 'max-steps', 'timeout-ms', 'max-evidence-bytes', 'max-connections-per-actor'];
 const searchFlags = ['max-runs', 'total-timeout-ms', 'max-candidates', 'max-search-bytes', 'keep-going', 'plan'];
+const sourceFlags = ['project-root', 'include'];
 const allowed: Record<string, string[]> = {
-  init: [], run: [...runFlags, ...searchFlags],
-  replay: [...runFlags, 'guided'], minimize: [...runFlags, 'max-attempts', 'total-timeout-ms'],
+  init: [], run: [...runFlags, ...searchFlags, ...sourceFlags],
+  replay: [...runFlags, 'guided', ...sourceFlags], minimize: [...runFlags, 'max-attempts', 'total-timeout-ms', ...sourceFlags],
   doctor: [...runFlags], demo: [...runFlags, 'safe'], report: ['out', 'force'],
   export: ['out', 'project-root', 'include'],
 };
 const numbers: Record<string, [number, number]> = {
   'max-steps': [1, 100_000], 'timeout-ms': [1, 600_000], 'max-evidence-bytes': [1024, 12 * 1024 * 1024],
+  'max-connections-per-actor': [1, 8],
   'max-runs': [1, 10_000], 'total-timeout-ms': [1, 3_600_000],
   'max-candidates': [1, 100_000], 'max-search-bytes': [1024, 256 * 1024 * 1024], 'max-attempts': [1, 10_000],
 };
@@ -68,11 +71,13 @@ administrator database. Every execution creates and removes its own database.
 
 Common: --json, --help, --version
 Per run: --max-steps <n>, --timeout-ms <n>, --max-evidence-bytes <n>
+Connections: --max-connections-per-actor <1..8>; extra sessions must remain queryless
 Search: --max-runs <n>, --total-timeout-ms <n>, --max-candidates <n>,
         --max-search-bytes <n>, --plan <alice,bob,...>, --keep-going
 Reduction: --max-attempts <n>, --total-timeout-ms <n>
 
 Run/replay/minimize: --out <run.json> writes one retained run.
+Source inputs: --project-root <dir>, repeated --include <relative-path>.
 Export: --project-root <dir>, --out <new-directory>, repeated --include <path>.
 --force permits atomic replacement of run artifacts and reports. init and export never overwrite.
 Exact replay is default; --guided creates separately labeled new evidence.

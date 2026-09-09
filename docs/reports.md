@@ -34,7 +34,8 @@ it is separate from protocol completion summaries. Database result rows are not
 automatically captured. Failed cleanup and incomplete executions remain visible.
 
 **Record & replay details** includes the fixture capture profile, its digest and
-size, and recorded actor startup digests. Older development records explicitly
+size, selected file and dependency identities, runtime identity, connection profile,
+and recorded actor startup digests. Older development records explicitly
 show missing identities. These hashes identify captured inputs without displaying
 the starting rows or raw connection options.
 

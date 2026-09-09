@@ -38,10 +38,14 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   if (!upstreamUrl.hostname || !upstreamUrl.pathname.slice(1)) throw new Error('PostgreSQL upstream URL needs a host and explicit database');
   const sslMode = upstreamUrl.searchParams.get('sslmode');
   if ((sslMode && sslMode !== 'disable') || ['ssl', 'sslcert', 'sslkey', 'sslrootcert'].some(p => upstreamUrl.searchParams.has(p))) throw new Error('Unsupported profile: upstream TLS; use an explicitly plaintext disposable PostgreSQL server');
+  const maxConnections = options.maxConnectionsPerActor === undefined ? 1 : options.maxConnectionsPerActor;
+  if (!Number.isSafeInteger(maxConnections) || maxConnections < 1 || maxConnections > 8) throw new Error('maxConnectionsPerActor must be an integer between 1 and 8');
   const maxBuffered = positiveLimit(options.maxBufferedBytes, DEFAULT_BUFFER_LIMIT);
   // Validate framing limits before listening.
   new FrameDecoder('typed', options);
-  const sockets = new Set<Socket>(); let active: { shutdown(): void } | undefined;
+  interface Session { shutdown(): void; closed: Promise<void> }
+  const sockets = new Set<Socket>(); const sessions = new Set<Session>();
+  let commandOwner: Session | undefined;
   let generation = 0; let closing = false; let closePromise: Promise<void> | undefined;
   const notifyError = (error: Error): void => { try { options.onError(error); } catch { /* Consumer errors must never escape a socket event. */ } };
   const notifyEvent = (event: ProxyEvent): void => { try { options.onEvent?.(event); } catch { notifyError(new Error('Proxy event callback failed')); } };
@@ -53,7 +57,12 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   const server = net.createServer(client => {
     track(client); client.setNoDelay(true);
     if (closing) { client.destroy(); return; }
-    if (active) { rejectSocket(client, new Error('Unsupported profile: one simultaneous physical connection per actor is supported')); return; }
+    if (sessions.size >= maxConnections) {
+      rejectSocket(client, new Error(maxConnections === 1
+        ? 'Unsupported profile: one simultaneous physical connection per actor is supported'
+        : `Unsupported profile: physical connection limit per actor is ${maxConnections}`));
+      return;
+    }
     const connection = generation++; let ordinal = 0; let backendPid = 0; let startupFingerprint = '';
     let started = false; let ready = false; let negotiated = false; let terminated = false; let failed = false;
     let closed = false; let clientClosed = false; let upstreamClosed = false; let retainedBytes = 0;
@@ -72,7 +81,9 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       if (outstanding && !client.destroyed) client.end(errorResponse('Interleave actor proxy closed before command completion'));
       upstream.destroy();
     }
-    const session = { shutdown }; active = session;
+    let resolveClosed!: () => void;
+    const session: Session = { shutdown, closed: new Promise<void>(resolve => { resolveClosed = resolve; }) };
+    sessions.add(session);
     function fail(error: Error): void {
       if (failed || closed) return; failed = true; notifyError(error);
       const current = inFlight; inFlight = undefined; current?.reject(error);
@@ -152,6 +163,11 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           if (queue.length || inFlight || cycles.bufferedBytes) throw new Error('Actor disconnected with unfinished scheduled work');
           terminated = true; upstream.end(frame); continue;
         }
+        // Reserve on the first command frame, including an incomplete extended
+        // cycle. Buffered commands before ReadyForQuery reserve ownership too,
+        // but authentication and Terminate never turn an auxiliary into an owner.
+        if (commandOwner && commandOwner !== session) throw new Error('Unsupported profile: only one live command-producing connection per actor is supported; close the previous command connection before another sends commands');
+        commandOwner = session;
         const unit = cycles.accept(frame);
         if (unit) enqueue(unit);
         if (retainedBytes + cycles.bufferedBytes + frontend.bufferedBytes > maxBuffered) throw new Error('Protocol queued buffered-byte limit exceeded');
@@ -193,8 +209,10 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     function finishClose(): void {
       if (!clientClosed || !upstreamClosed) return;
       closed = true;
-      if (active === session) active = undefined;
+      sessions.delete(session);
+      if (commandOwner === session) commandOwner = undefined;
       notifyEvent({ type: 'disconnected', actor: options.actor, connection });
+      resolveClosed();
     }
     client.on('close', () => {
       clientClosed = true;
@@ -216,10 +234,13 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   for (const field of ['host', 'hostaddr', 'port']) endpoint.searchParams.delete(field);
   return { connectionString: endpoint.toString(), close(): Promise<void> {
     if (closePromise) return closePromise; closing = true;
-    closePromise = new Promise<void>(resolve => {
-      active?.shutdown();
+    closePromise = (async () => {
+      const accepted = [...sessions];
+      const listenerClosed = new Promise<void>(resolve => { server.close(() => resolve()); });
+      for (const session of accepted) session.shutdown();
       const timer = setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 100); timer.unref();
-      server.close(() => { clearTimeout(timer); resolve(); });
-    }); return closePromise;
+      try { await Promise.all([listenerClosed, ...accepted.map(session => session.closed)]); }
+      finally { clearTimeout(timer); }
+    })(); return closePromise;
   } };
 }

@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { exportRegression, verifyRegressionExport } from '../src/export.js';
 import type { RunResult } from '../src/types.js';
+import { bindExportFixture } from './helpers/export.js';
 
 const temporary: string[] = [];
 const run: RunResult = {
@@ -26,7 +27,7 @@ async function fixture() {
   await json(join(projectRoot, 'package.json'), { name: 'export-boundary', version: '1.0.0', type: 'module' });
   await json(join(projectRoot, 'package-lock.json'), { name: 'export-boundary', version: '1.0.0', lockfileVersion: 3, packages: { '': { name: 'export-boundary', version: '1.0.0' } } });
   await json(join(runtimeRoot, 'package.json'), { name: '@pavangupta352/interleave', version: '0.1.0-test', type: 'module', files: ['dist'], bin: { interleave: 'dist/cli.js' } });
-  for (const file of ['cli.js', 'export.js', 'index.js']) await fs.writeFile(join(runtimeRoot, 'dist', file), 'export {};');
+  for (const file of ['cli.js', 'export.js', 'index.js', 'source-identity.js']) await fs.writeFile(join(runtimeRoot, 'dist', file), 'export {};');
   return { root, projectRoot, runtimeRoot, scenarioFile, destination: join(root, 'result') };
 }
 afterEach(async () => { await Promise.all(temporary.splice(0).map(path => fs.rm(path, { recursive: true, force: true }))); });
@@ -36,7 +37,7 @@ test('retains valid compact and escaped static imports without interpreting comm
   await fs.writeFile(f.scenarioFile, "import{value}from'./he\\u006cper.mjs';/* import './absent.mjs'; */export{other}from'./other.mjs';export default value;");
   await fs.writeFile(join(f.projectRoot, 'helper.mjs'), 'export const value=42;');
   await fs.writeFile(join(f.projectRoot, 'other.mjs'), 'export const other=43;');
-  const exported = await exportRegression(run, f);
+  const exported = await exportRegression(await bindExportFixture(run, f), f);
   await verifyRegressionExport(exported.destination);
   const imported = await import(pathToFileURL(join(f.destination, 'app/scenario.mjs')).href);
   expect(imported.default).toBe(42); expect(imported.other).toBe(43);
@@ -55,18 +56,19 @@ test.each(['declarations', 'package records'])('rejects stale lock %s without ex
   if (missing === 'package records') {
     await json(join(f.projectRoot, 'package-lock.json'), { name: 'export-boundary', version: '1.0.0', lockfileVersion: 3, packages: { '': { name: 'export-boundary', version: '1.0.0', dependencies: { pg: '8.23.0' } } } });
   }
-  await expect(exportRegression(run, f)).rejects.toThrow(/lock|dependency|missing/i);
+  await expect(exportRegression(await bindExportFixture(run, f), f)).rejects.toThrow(/lock|dependency|missing/i);
   expect(await fs.lstat(marker).then(() => true, () => false)).toBe(false);
 });
 
 test('refuses a concurrent empty destination instead of replacing its inode', async () => {
   const f = await fixture(); const originalMkdir = fs.mkdir; const originalRename = fs.rename;
+  const bound = await bindExportFixture(run, f);
   let concurrentInode: number | undefined;
   const claim = async () => { await originalMkdir(f.destination); concurrentInode = (await fs.lstat(f.destination)).ino; };
   fs.mkdir = (async (...args: Parameters<typeof fs.mkdir>) => { if (args[0] === f.destination && concurrentInode === undefined) await claim(); return originalMkdir(...args); }) as typeof fs.mkdir;
   fs.rename = async (from, to) => { if (to === f.destination && concurrentInode === undefined) await claim(); return originalRename(from, to); };
   syncBuiltinESMExports();
-  try { await expect(exportRegression(run, f)).rejects.toThrow(/exists|overwrite/i); }
+  try { await expect(exportRegression(bound, f)).rejects.toThrow(/exists|overwrite/i); }
   finally { fs.mkdir = originalMkdir; fs.rename = originalRename; syncBuiltinESMExports(); }
   expect((await fs.lstat(f.destination)).ino).toBe(concurrentInode);
   expect(await fs.readdir(f.destination)).toEqual([]);
@@ -74,6 +76,7 @@ test('refuses a concurrent empty destination instead of replacing its inode', as
 
 test('preserves a replacement directory on failure and names the incomplete output for recovery', async () => {
   const f = await fixture(); const originalWrite = fs.writeFile; let replacement: string | undefined;
+  const bound = await bindExportFixture(run, f);
   fs.writeFile = (async (...args: Parameters<typeof fs.writeFile>) => {
     if (String(args[0]).endsWith('/app/package.json') && !replacement) {
       const output = dirname(dirname(String(args[0])));
@@ -85,7 +88,7 @@ test('preserves a replacement directory on failure and names the incomplete outp
   }) as typeof fs.writeFile;
   syncBuiltinESMExports();
   let failure: unknown;
-  try { await exportRegression(run, f); } catch (error) { failure = error; }
+  try { await exportRegression(bound, f); } catch (error) { failure = error; }
   finally { fs.writeFile = originalWrite; syncBuiltinESMExports(); }
   expect(failure).toBeInstanceOf(Error);
   expect(await fs.readFile(replacement!, 'utf8')).toBe('preserve');
@@ -94,7 +97,8 @@ test('preserves a replacement directory on failure and names the incomplete outp
 
 test('human replay commands preserve literal shell metacharacters in entry paths', async () => {
   const f = await fixture(); const scenario = join(f.projectRoot, "scenario'$(printf changed).mjs");
-  await fs.rename(f.scenarioFile, scenario); await json(join(f.root, 'run.json'), run);
+  await fs.rename(f.scenarioFile, scenario);
+  await json(join(f.root, 'run.json'), await bindExportFixture(run, { ...f, scenarioFile: scenario, runtimeRoot: new URL('../', import.meta.url).pathname }));
   const command = spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), new URL('../src/cli.ts', import.meta.url).pathname, 'export', scenario, join(f.root, 'run.json'), '--project-root', f.projectRoot, '--out', f.destination], { encoding: 'utf8', timeout: 60_000 });
   expect(command.status, command.stderr).toBe(0);
   const printed = command.stdout.trim().split('\n').at(-1)!;
@@ -104,3 +108,21 @@ test('human replay commands preserve literal shell metacharacters in entry paths
   expect(shell.status).toBe(0);
   expect(shell.stdout.split('\n')).toContain("app/scenario'$(printf changed).mjs");
 }, 60_000);
+
+test.skipIf(process.platform === 'win32')('a file replaced by a FIFO before open cannot block the offline verifier', async () => {
+  const f = await fixture(); const manifest = join(f.root, 'manifest.json'); await fs.writeFile(manifest, '{}');
+  const code = `
+    import fs from 'node:fs/promises';import {syncBuiltinESMExports}from'node:module';import{spawnSync}from'node:child_process';
+    import{verifyRegressionExport}from${JSON.stringify(new URL('../src/export.ts', import.meta.url).href)};
+    const original=fs.open;let swapped=false;
+    fs.open=async(...args)=>{if(String(args[0])===process.argv[2]&&!swapped){swapped=true;await fs.rm(process.argv[2]);const child=spawnSync('mkfifo',[process.argv[2]],{timeout:1000});if(child.status!==0)throw new Error('mkfifo failed');}return original(...args);};
+    syncBuiltinESMExports();console.log('entered verifier');
+    try{await verifyRegressionExport(process.argv[1]);process.exitCode=2;}catch(error){console.log(error.message);}
+  `;
+  const result = spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), '--input-type=module', '-e', code, f.root, manifest], {
+    encoding: 'utf8', timeout: 2500, killSignal: 'SIGKILL', env: { ...process.env, NODE_OPTIONS: '' },
+  });
+  expect(result.stdout).toContain('entered verifier');
+  expect(result.status, result.error?.message ?? result.stderr).toBe(0);
+  expect(result.stdout).toMatch(/ordinary file/i);
+});

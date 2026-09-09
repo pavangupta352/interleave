@@ -28,7 +28,7 @@ await build({ entryPoints: [join(repository, 'src/report/browser.ts')], outfile:
 await cp(join(repository, 'src/report/styles.css'), join(dist, 'report/styles.css'));
 const temporary = await mkdtemp(join(tmpdir(), 'interleave-build-'));
 try {
-  compile([join(repository, 'examples/neveroversell/scenario.ts')], {
+  compile(['scenario.ts', 'demo-naive.ts', 'demo-safe.ts'].map(file => join(repository, 'examples/neveroversell', file)), {
     ...parsed.options, rootDir: repository, outDir: temporary, declaration: false, declarationMap: false, sourceMap: false,
   });
   await mkdir(join(dist, 'examples'), { recursive: true });

@@ -18,6 +18,11 @@ export async function checkReport(page, url, artifact) {
     for (const connection of artifact.connections ?? []) {
       assert.ok(await page.locator('.record-body').getByText(connection.fingerprint, { exact: true }).count() > 0);
     }
+    if (artifact.environment.source) {
+      assert.equal(await page.locator('.record-body').getByText(artifact.environment.source.fingerprint, { exact: true }).count(), 1);
+      assert.equal(await page.locator('.record-body').getByText(artifact.environment.source.entry, { exact: true }).count(), 1);
+      assert.ok((await page.locator('.record-body').textContent()).includes(artifact.environment.source.components.runtime.fingerprint));
+    }
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Expanded record identities fit the viewport');
     await page.locator('.record-details summary').click();
     const input = page.locator('#import-file');
@@ -96,6 +101,6 @@ export async function checkReport(page, url, artifact) {
     await page.getByRole('heading', { name: originalName, exact: true }).waitFor();
     assert.deepEqual(errors, []);
     assert.deepEqual(unexpectedRequests, []);
-    return { checks: ['recorded fixture and startup identities', 'invalid schema preserved current record', 'invalid UTF-8 rejected', '16 MiB import cap', 'hostile text inert', 'download exact equality', '100-row pagination', 'keyboard page crossing', 'filtered original indices', 'empty evidence', 'no runtime errors', 'no external requests'], passed: true };
+    return { checks: ['recorded fixture, source, runtime and startup identities', 'invalid schema preserved current record', 'invalid UTF-8 rejected', '16 MiB import cap', 'hostile text inert', 'download exact equality', '100-row pagination', 'keyboard page crossing', 'filtered original indices', 'empty evidence', 'no runtime errors', 'no external requests'], passed: true };
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }

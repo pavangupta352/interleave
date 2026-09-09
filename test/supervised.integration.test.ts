@@ -1,4 +1,7 @@
 import { testDatabaseUrl } from './helpers/postgres.js';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client, escapeIdentifier } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
@@ -65,6 +68,18 @@ describe('supervised scenario integration', () => {
     expect(lifecycle.names).toHaveLength(1);
   });
 
+  test('rejects a schema-valid result sent by application code over the worker IPC channel', async () => {
+    const result = await runScenarioFile(fixture('forged-result'), { databaseUrl });
+    expect(result.outcome).toBe('harness-error');
+    expect(result.reason).toMatch(/invalid execution artifact|worker/i);
+    expect(result.scenario).toBe('forged-result.ts');
+    expect(result.environment.serverVersion).not.toBe('forged-server');
+    expect(result.environment.source).toBeDefined();
+    expect(result.cleanup.complete).toBe(true);
+    expect(parseRunArtifact(result)).toEqual(result);
+    expect(lifecycle.names).toHaveLength(1);
+  });
+
   test.each(['hung-setup', 'hung-actor'])('bounds %s with the supervisor deadline', async name => {
     const started = Date.now();
     const result = await runScenarioFile(fixture(name), { databaseUrl, timeoutMs: 1_000 });
@@ -108,18 +123,41 @@ describe('supervised scenario integration', () => {
   });
 
   test.skipIf(process.platform === 'win32')('terminates descendants after the worker finishes', async () => {
-    const result = await runScenarioFile(fixture('descendant'), { databaseUrl });
-    expect(result.outcome).toBe('passed');
-    const pid = result.actors[0]?.value as number;
-    expect(Number.isSafeInteger(pid)).toBe(true);
-    const deadline = Date.now() + 2_000;
-    let alive = true;
-    while (Date.now() < deadline) {
-      try { process.kill(pid, 0); }
-      catch { alive = false; break; }
-      await new Promise(resolve => setTimeout(resolve, 10));
+    const root = await mkdtemp(join(tmpdir(), 'interleave-supervised-descendant-'));
+    try {
+      const dependency = join(root, 'node_modules', 'spawn-helper');
+      await mkdir(dependency, { recursive: true });
+      await writeFile(join(root, 'package.json'), '{"name":"descendant-fixture","version":"1.0.0","type":"module","dependencies":{"spawn-helper":"1.0.0"}}');
+      await writeFile(join(dependency, 'package.json'), '{"name":"spawn-helper","version":"1.0.0","type":"module","main":"index.js"}');
+      await writeFile(join(dependency, 'index.js'), `
+        import { spawn } from 'node:child_process';
+        export function start() {
+          const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+          child.unref(); return child.pid;
+        }
+      `);
+      const scenario = join(root, 'scenario.mjs');
+      await writeFile(scenario, `
+        import { start } from 'spawn-helper';
+        let descendant;
+        export default { name: 'supervised-descendant', async setup() { descendant = start(); },
+          actors: { async alice() { return descendant; }, async bob() {} }, async invariant() {} };
+      `);
+      const result = await runScenarioFile(scenario, { databaseUrl, source: { projectRoot: root } });
+      expect(result.outcome).toBe('passed');
+      const pid = result.actors[0]?.value as number;
+      expect(Number.isSafeInteger(pid)).toBe(true);
+      const deadline = Date.now() + 2_000;
+      let alive = true;
+      while (Date.now() < deadline) {
+        try { process.kill(pid, 0); }
+        catch { alive = false; break; }
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      expect(alive).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
-    expect(alive).toBe(false);
   });
 
   test('preserves exact private SQL and selected observations without automatically recording logs or authentication fields', async () => {

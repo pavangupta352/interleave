@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { exportRegression, verifyRegressionExport } from '../src/export.js';
 import { HELP, parseCliArgs } from '../src/cli/options.js';
 import type { RunResult } from '../src/types.js';
+import { bindExportFixture } from './helpers/export.js';
 
 const temporary: string[] = [];
 
@@ -54,7 +55,7 @@ async function fixtureRuntime(): Promise<string> {
     bin: { interleave: 'dist/cli.js' },
     files: ['dist'],
   });
-  for (const file of ['cli.js', 'export.js', 'index.js']) {
+  for (const file of ['cli.js', 'export.js', 'index.js', 'source-identity.js']) {
     await writeFile(join(runtimeRoot, 'dist', file), 'export {};\n');
   }
   return runtimeRoot;
@@ -110,7 +111,8 @@ describe('regression export', () => {
     await mkdir(join(projectRoot, 'fixtures'));
     await writeFile(join(projectRoot, 'fixtures', 'seed.json'), '{"value":0}\n');
 
-    const exported = await exportRegression(completedViolation(), {
+    const bound = await bindExportFixture(completedViolation(), { scenarioFile, projectRoot, runtimeRoot, include: ['fixtures'] });
+    const exported = await exportRegression(bound, {
       scenarioFile,
       projectRoot,
       destination,
@@ -133,7 +135,7 @@ describe('regression export', () => {
       'runtime/pavangupta352-interleave-0.1.0-test.tgz',
     ]);
     expect(await readFile(join(destination, 'app/src/scenario.mjs'), 'utf8')).toContain("'./operation.mjs'");
-    expect(JSON.parse(await readFile(join(destination, 'run.json'), 'utf8'))).toEqual(completedViolation());
+    expect(JSON.parse(await readFile(join(destination, 'run.json'), 'utf8'))).toEqual(bound);
   });
 
   test('rejects incomplete source graphs instead of silently omitting imports', async () => {
@@ -196,7 +198,7 @@ describe('regression export', () => {
     const { projectRoot, scenarioFile } = await fixtureProject();
     const runtimeRoot = await fixtureRuntime();
     const destination = join(await temporaryDirectory('interleave tamper destination '), 'regression');
-    await exportRegression(completedViolation(), { scenarioFile, projectRoot, destination, runtimeRoot });
+    await exportRegression(await bindExportFixture(completedViolation(), { scenarioFile, projectRoot, runtimeRoot }), { scenarioFile, projectRoot, destination, runtimeRoot });
     const manifestPath = join(destination, 'manifest.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
       runtime: { package: string };

@@ -30,7 +30,8 @@ export class MinimizationVerificationError extends Error {
 export async function minimize(scenario: Scenario | string, original: RunResult, options: MinimizeOptions): Promise<MinimizationResult> {
   if (original.outcome !== 'violation' || !original.failure) throw new TypeError('Minimization requires an observed invariant failure');
   const maxAttempts = integerLimit(options.maxAttempts, 100, 10_000, 'maxAttempts');
-  const { replay: _ignoredReplay, mode: _ignoredMode, plan: _ignoredPlan, expectedEnvironment: _ignoredEnvironment, ...base } = options;
+  const { replay: _ignoredReplay, mode: _ignoredMode, plan: _ignoredPlan, expectedEnvironment: _ignoredEnvironment, ...selected } = options;
+  const base = { ...selected, maxConnectionsPerActor: options.maxConnectionsPerActor === undefined ? original.limits.maxConnectionsPerActor ?? 1 : options.maxConnectionsPerActor };
   const budget = searchBudget(options.totalTimeoutMs, options.signal);
   try {
     const verified = await replay(scenario, original, { ...base, signal: budget.signal, mode: 'replay' });

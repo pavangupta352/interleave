@@ -55,6 +55,13 @@ async function queryFromUrl(url: string, sql: string) {
 
 integration('fixture identity integration with real PostgreSQL', () => {
   afterAll(async () => { for (const owned of databases) await owned.close(); });
+  test('selects the qualified native capture profile for the actual server major', async () => {
+    const owned = await database();
+    const major = (await owned.db.query<{ major: string }>("SELECT current_setting('server_version_num')::int / 10000 AS major")).rows[0]!.major;
+    expect(['16', '17', '18']).toContain(String(major));
+    const identity = await captureFixtureIdentity(owned.connectionString);
+    expect(identity.profile).toBe(`postgresql${major}-native-v1`);
+  });
   test('fresh database names, allocation OIDs and row insertion order do not change the fixture identity', async () => {
     const first = await populated();
     const churn = await database('CREATE TABLE allocation_churn (id integer); DROP TABLE allocation_churn');
@@ -287,6 +294,27 @@ integration('fixture identity integration with real PostgreSQL', () => {
     const after=await captureFixtureIdentity(owned.connectionString);
     expect((await owned.db.query("SELECT 'a'::label < 'B'::label AS ordered")).rows).toEqual([{ ordered: true }]);
     expect(after.components.schema).not.toBe(before.components.schema);
+  });
+  test('ICU tailoring rules are retained as behavior-changing collation identity', async () => {
+    const owned = await database(`CREATE COLLATION tailored (provider=icu, locale='und', rules='&V << w <<< W')`);
+    const before = await captureFixtureIdentity(owned.connectionString);
+    await owned.db.query(`DROP COLLATION tailored; CREATE COLLATION tailored (provider=icu, locale='und', rules='&V << x <<< X')`);
+    const after = await captureFixtureIdentity(owned.connectionString);
+    expect(after.components.schema).not.toBe(before.components.schema);
+  });
+  test('virtual generated columns follow the actual server profile and retain distinct identity when supported', async () => {
+    const owned = await database();
+    const major = Number((await owned.db.query<{ major: number }>("SELECT current_setting('server_version_num')::int / 10000 AS major")).rows[0]!.major);
+    if (major !== 18) {
+      await expect(owned.db.query('CREATE TABLE generated_value(base integer, derived integer GENERATED ALWAYS AS (base * 2) VIRTUAL)')).rejects.toMatchObject({ code: '42601' });
+      return;
+    }
+    await owned.db.query('CREATE TABLE generated_value(base integer, derived integer GENERATED ALWAYS AS (base * 2) STORED); INSERT INTO generated_value(base) VALUES (4)');
+    const stored = await captureFixtureIdentity(owned.connectionString);
+    await owned.db.query('DROP TABLE generated_value; CREATE TABLE generated_value(base integer, derived integer GENERATED ALWAYS AS (base * 2) VIRTUAL); INSERT INTO generated_value(base) VALUES (4)');
+    const virtual = await captureFixtureIdentity(owned.connectionString);
+    expect((await owned.db.query('SELECT * FROM generated_value')).rows).toEqual([{ base: 4, derived: 8 }]);
+    expect(virtual.components.schema).not.toBe(stored.components.schema);
   });
   test('baseline PL/pgSQL usage privileges affect identity and anonymous block execution', async () => {
     const owned=await database();

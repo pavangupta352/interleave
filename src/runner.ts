@@ -6,6 +6,7 @@ import { defineScenario } from './scenario.js';
 import { ARTIFACT_LIMITS, parseRunArtifact, validateJsonValue } from './artifact.js';
 import { assertEvidenceEnvelope, finalizeRunEvidence } from './evidence.js';
 import { captureFixtureIdentity, FixtureIdentityError } from './fixture-identity.js';
+import type { SourceIdentity } from './source-identity.js';
 import { environmentMatches } from './environment.js';
 import type { ActorProxy, ActorResult, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
 
@@ -26,15 +27,16 @@ function limit(value: number | undefined, fallback: number, max: number, name: s
 
 /** Run real application operations once in a new, owned PostgreSQL database. */
 export async function runOnce(input: Scenario, options: RunOptions): Promise<RunResult> {
+  if (options.source) throw new TypeError('Source selection requires runScenarioFile(); a scenario object cannot attest its loaded files');
   return execute(input, options);
 }
 
 /** Used by the supervised worker; its parent retains database ownership and teardown. */
-export async function runInOwnedDatabase(input: Scenario, options: RunOptions, database: OwnedDatabase): Promise<RunResult> {
-  return execute(input, options, database);
+export async function runInOwnedDatabase(input: Scenario, options: RunOptions, database: OwnedDatabase, source?: SourceIdentity): Promise<RunResult> {
+  return execute(input, options, database, source);
 }
 
-async function execute(input: Scenario, options: RunOptions, providedDatabase?: OwnedDatabase): Promise<RunResult> {
+async function execute(input: Scenario, options: RunOptions, providedDatabase?: OwnedDatabase, source?: SourceIdentity): Promise<RunResult> {
   const scenario = defineScenario(input);
   const maxSteps = limit(options.maxSteps, 100, 100_000, 'maxSteps');
   const timeoutMs = limit(options.timeoutMs, 10_000, 600_000, 'timeoutMs');
@@ -47,6 +49,11 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const mode = options.mode ?? (options.replay ? 'replay' : 'explore');
   if (mode === 'replay' && !options.replay) throw new TypeError('replay mode requires a recorded run');
   if (options.replay) parseRunArtifact(options.replay);
+  if (options.maxConnectionsPerActor !== undefined && !Number.isSafeInteger(options.maxConnectionsPerActor)) {
+    throw new TypeError('maxConnectionsPerActor must be an integer from 1 to 8');
+  }
+  const maxConnectionsPerActor = limit(options.maxConnectionsPerActor,
+    mode === 'replay' ? options.replay!.limits.maxConnectionsPerActor ?? 1 : 1, 8, 'maxConnectionsPerActor');
   const replayConnections = new Map((options.replay?.connections ?? []).map(item => [`${item.actor}\0${item.connection}`, item]));
   const expectedEnvironment = mode === 'replay' ? options.replay!.environment : options.expectedEnvironment;
   const started = performance.now();
@@ -54,9 +61,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const result: RunResult = {
     schemaVersion: 1, scenario: scenario.name, outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
-    environment: { serverVersion: 'unknown', nodeVersion: process.version },
+    environment: { serverVersion: 'unknown', nodeVersion: process.version, ...(source ? { source } : {}) },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes }, cleanup: { complete: false },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor }, cleanup: { complete: false },
   };
   let database: OwnedDatabase | undefined = providedDatabase;
   let failure: Interrupted | undefined;
@@ -68,6 +75,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const queues = new Map(names.map(name => [name, [] as PendingUnit[]]));
   const running = new Map<string, { step: TraceStep; blocked: boolean }>();
   const pids = new Map<number, string>();
+  const connectionPids = new Map<string, number>();
   const livePids = new Set<number>();
   const waiters = new Set<() => void>();
   let lastActor: string | undefined;
@@ -119,6 +127,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     result.environment.serverVersion = database.serverVersion;
     check();
     if (mode === 'replay') {
+      if (maxConnectionsPerActor !== (options.replay!.limits.maxConnectionsPerActor ?? 1)) throw new Interrupted('incompatible', 'Replay connection profile differs from the recorded run');
       if (options.replay!.scenario !== scenario.name) throw new Interrupted('incompatible', 'Replay scenario identity changed');
       if (!options.replay!.connections) throw new Interrupted('incompatible', 'The recorded run has no actor connection identities; use a guided run to create new bound evidence');
     }
@@ -149,7 +158,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     }
     for (const actor of names) {
       const proxy = await createProxy({
-        actor, upstreamUrl: database.connectionString,
+        actor, upstreamUrl: database.connectionString, maxConnectionsPerActor,
         onUnit(unit) {
           if (finished) return;
           queues.get(actor)!.push(unit);
@@ -167,8 +176,14 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
             wake();
             return;
           }
-          if (event.type === 'connected') { pids.set(event.backendPid, actor); livePids.add(event.backendPid); }
-          else for (const pid of livePids) if (pids.get(pid) === actor) livePids.delete(pid);
+          const key = `${actor}\0${event.connection}`;
+          if (event.type === 'connected') {
+            pids.set(event.backendPid, actor); livePids.add(event.backendPid); connectionPids.set(key, event.backendPid);
+          } else {
+            const pid = connectionPids.get(key);
+            if (pid !== undefined) livePids.delete(pid);
+            connectionPids.delete(key);
+          }
           runtimeEpoch++;
           wake();
         },

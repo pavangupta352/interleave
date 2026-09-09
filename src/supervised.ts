@@ -1,15 +1,19 @@
 import { fork, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { createOwnedDatabase, OwnedDatabaseCreationError } from './database.js';
 import { parseRunArtifact } from './artifact.js';
 import { assertEvidenceEnvelope, finalizeRunEvidence } from './evidence.js';
+import { captureSourceIdentity, SourceIdentityError, type SourceIdentity } from './source-identity.js';
+import { sourceSelection } from './source-selection.js';
 import type { OwnedDatabase, RunOptions, RunResult } from './types.js';
 
 const GRACE_MS = 250;
 
 function limit(value: number | undefined, fallback: number, maximum: number, label: string): number {
-  const result = value ?? fallback;
+  const result = value === undefined ? fallback : value;
   if (!Number.isSafeInteger(result) || result < 1 || result > maximum) throw new TypeError(`${label} must be an integer from 1 to ${maximum}`);
   return result;
 }
@@ -26,6 +30,14 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   if (!['explore', 'replay', 'guided'].includes(mode)) throw new TypeError('Unknown execution mode');
   if (mode === 'replay' && !options.replay) throw new TypeError('replay mode requires a recorded run');
   if (options.replay) parseRunArtifact(options.replay);
+  const replayConnections = mode === 'replay' ? (options.replay!.limits.maxConnectionsPerActor ?? 1) : undefined;
+  const maxConnectionsPerActor = limit(
+    options.maxConnectionsPerActor === undefined ? replayConnections : options.maxConnectionsPerActor,
+    1, 8, 'maxConnectionsPerActor',
+  );
+  const connectionProfileMismatch = mode === 'replay'
+    && options.maxConnectionsPerActor !== undefined
+    && options.maxConnectionsPerActor !== replayConnections;
   if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000 || options.plan.some(actor => typeof actor !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,47}$/.test(actor) || ['constructor', 'prototype', '__proto__'].includes(actor)))) throw new TypeError('plan contains an invalid actor');
   const started = performance.now();
   const result: RunResult = {
@@ -33,7 +45,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     plan: [...(options.plan ?? [])], trace: [], actors: [],
     environment: { serverVersion: 'unknown', nodeVersion: process.version },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes }, cleanup: { complete: false },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor }, cleanup: { complete: false },
   };
   assertEvidenceEnvelope(result, maxEvidenceBytes);
   let database: OwnedDatabase | undefined;
@@ -41,22 +53,64 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   let child: ChildProcess | undefined;
   let interruption: string | undefined;
   let workerFailure: string | undefined;
+  let receivedHardFailure = false;
   let stopChild: (() => void) | undefined;
-  const interrupt = (reason: string): void => { interruption ??= reason; stopChild?.(); };
+  const captureController = new AbortController();
+  const interrupt = (reason: string): void => { interruption ??= reason; captureController.abort(); stopChild?.(); };
   const onAbort = (): void => interrupt('Execution was cancelled');
   const deadline = setTimeout(() => interrupt(`Execution exceeded its ${timeoutMs} ms deadline`), timeoutMs);
   options.signal?.addEventListener('abort', onAbort, { once: true });
   if (options.signal?.aborted) onAbort();
+  const expectedEnvironment = mode === 'replay' ? options.replay!.environment : mode === 'guided' ? undefined : options.expectedEnvironment;
+  let sourceIdentity: SourceIdentity | undefined;
+  const captureSource = () => captureSourceIdentity(resolve(scenarioFile), {
+    ...sourceSelection(scenarioFile, options.source, expectedEnvironment?.source), signal: captureController.signal,
+    timeoutMs: Math.max(1, Math.min(120_000, Math.floor(timeoutMs - (performance.now() - started)))),
+  });
+  const unbound = (reason: string): void => {
+    const hard = result.outcome === 'actor-error' || (result.outcome === 'harness-error' && result.reason !== undefined);
+    result.outcome = hard ? 'harness-error' : 'inconclusive';
+    result.reason = hard && result.reason ? `${result.reason}; ${reason}` : reason;
+    delete result.failure;
+  };
   try {
-    if (!interruption) {
+    if (!interruption && connectionProfileMismatch) {
+      result.outcome = 'incompatible';
+      result.reason = 'Replay actor connection profile differs from the recorded run';
+    } else if (!interruption && expectedEnvironment?.nodeVersion !== undefined && expectedEnvironment.nodeVersion !== process.version) {
+      result.outcome = 'incompatible';
+      result.reason = 'Replay Node.js version differs from the recorded environment';
+    } else if (!interruption && expectedEnvironment && !expectedEnvironment.source) {
+      result.outcome = 'incompatible';
+      result.reason = 'The recorded run has no file source identity; use a guided run to create new bound evidence';
+    } else if (!interruption) {
+      sourceIdentity = await captureSource();
+      if (!interruption) {
+        const sourceBytes = Buffer.byteLength(JSON.stringify(sourceIdentity));
+        if (Buffer.byteLength(JSON.stringify(result)) + sourceBytes + 512 > maxEvidenceBytes) {
+          result.outcome = 'inconclusive'; result.reason = 'Source identity exceeds the execution evidence limit'; sourceIdentity = undefined;
+        } else {
+          result.environment.source = sourceIdentity;
+          if (expectedEnvironment?.source && expectedEnvironment.source.fingerprint !== sourceIdentity.fingerprint) {
+            result.outcome = 'incompatible'; result.reason = 'Replay source, installed dependencies or Interleave runtime identity changed';
+          }
+        }
+      }
+    }
+    if (!interruption && sourceIdentity && result.outcome === 'harness-error') {
       // Never race creation against cancellation: the eventual handle owns the
       // exact generated database and must be retained for authoritative cleanup.
       database = await createOwnedDatabase(options.databaseUrl);
       result.environment.serverVersion = database.serverVersion;
+      if (expectedEnvironment && expectedEnvironment.serverVersion !== database.serverVersion) {
+        result.outcome = 'incompatible';
+        result.reason = 'Replay PostgreSQL version differs from the recorded environment';
+      }
     }
-    if (database && !interruption) {
+    if (database && !interruption && result.outcome === 'harness-error') {
       const sourceMode = import.meta.url.endsWith('.ts');
       const worker = fileURLToPath(new URL(sourceMode ? './worker.ts' : './worker.js', import.meta.url));
+      const protocolToken = randomUUID();
       const environment = { ...process.env };
       // Do not give scenario code an inherited administrator URL or libpq route.
       for (const key of Object.keys(environment)) {
@@ -78,13 +132,32 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
         let finished = false;
         stopChild = () => {
           if (grace) return;
-          if (workerChild.connected) workerChild.send({ type: 'abort' }, () => undefined);
+          if (workerChild.connected) workerChild.send({ type: 'abort', token: protocolToken }, () => undefined);
           grace = setTimeout(() => terminateGroup(workerChild), GRACE_MS);
         };
         workerChild.on('message', (message: unknown) => {
-          if (typeof message !== 'object' || message === null || !('type' in message)) { protocolFailure = true; terminateGroup(workerChild); return; }
+          if (
+            typeof message !== 'object' || message === null || !('type' in message)
+            || !('token' in message) || message.token !== protocolToken
+          ) { protocolFailure = true; terminateGroup(workerChild); return; }
           if (message.type === 'result' && 'run' in message && received === undefined) {
-            try { received = parseRunArtifact(message.run); }
+            try {
+              const candidate = parseRunArtifact(message.run);
+              if (
+                candidate.environment.serverVersion !== database!.serverVersion
+                || candidate.environment.nodeVersion !== process.version
+                || !isDeepStrictEqual(candidate.environment.source, sourceIdentity)
+              ) throw new TypeError('Worker result changed parent-owned environment identity');
+              received = {
+                ...candidate,
+                environment: {
+                  ...candidate.environment,
+                  serverVersion: database!.serverVersion,
+                  nodeVersion: process.version,
+                  source: sourceIdentity!,
+                },
+              };
+            }
             catch { protocolFailure = true; terminateGroup(workerChild); }
           } else if (message.type === 'error') {
             result.reason = 'Scenario loading or worker execution failed';
@@ -96,7 +169,11 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
           if (grace) clearTimeout(grace);
           stopChild = undefined;
           if (protocolFailure) result.reason = 'Worker returned an invalid execution artifact';
-          else if (received && code === 0 && signal === null) Object.assign(result, received);
+          else if (received && code === 0 && signal === null) {
+            Object.assign(result, received);
+            receivedHardFailure = received.outcome === 'actor-error'
+              || received.outcome === 'harness-error' || !received.cleanup.complete;
+          }
           else {
             workerFailure = `Scenario worker exited before completing${signal ? ` (${signal})` : code === null ? '' : ` (exit ${code})`}`;
             result.reason ??= workerFailure;
@@ -106,15 +183,27 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
         workerChild.once('exit', done);
         workerChild.once('error', () => { result.reason = 'Scenario worker could not be started'; terminateGroup(workerChild); done(null, null); });
         workerChild.send({
-          type: 'start', scenarioFile: resolve(scenarioFile), connectionString: database!.connectionString,
-          options: { maxSteps, timeoutMs, maxEvidenceBytes, mode, ...(options.plan ? { plan: options.plan } : {}), ...(options.replay ? { replay: options.replay } : {}), ...(options.expectedEnvironment ? { expectedEnvironment: options.expectedEnvironment } : {}) },
+          type: 'start', token: protocolToken, scenarioFile: resolve(scenarioFile), connectionString: database!.connectionString,
+          sourceIdentity,
+          options: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, mode, ...(options.plan ? { plan: options.plan } : {}), ...(options.replay ? { replay: options.replay } : {}), ...(options.expectedEnvironment ? { expectedEnvironment: options.expectedEnvironment } : {}) },
         }, error => { if (error) { result.reason = 'Could not initialize scenario worker'; terminateGroup(workerChild); } });
         if (interruption) stopChild();
       });
+      if (!interruption && sourceIdentity) {
+        try {
+          const after = await captureSource();
+          if (after.fingerprint !== sourceIdentity.fingerprint) unbound('Source, installed dependencies or Interleave runtime changed during execution; the recorded inputs could not be verified');
+        } catch (error) {
+          unbound(error instanceof SourceIdentityError ? `Source identity could not be verified after execution: ${error.message}` : 'Source identity could not be verified after execution');
+        }
+      }
     }
   } catch (error) {
     if (error instanceof OwnedDatabaseCreationError) creationFailure = error;
-    result.reason = creationFailure?.message ?? 'Could not prepare or supervise the scenario database and worker';
+    if (error instanceof SourceIdentityError) {
+      result.outcome = error.kind === 'io' ? 'harness-error' : 'inconclusive';
+      result.reason = error.message;
+    } else result.reason = creationFailure?.message ?? 'Could not prepare or supervise the scenario database and worker';
   } finally {
     clearTimeout(deadline);
     options.signal?.removeEventListener('abort', onAbort);
@@ -122,7 +211,14 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     // processes remain the trusted scenario's responsibility; Windows kills only the worker.
     if (child) terminateGroup(child);
     if (interruption) {
-      result.outcome = 'inconclusive'; result.reason = workerFailure ? `${interruption}; ${workerFailure}` : interruption; delete result.failure;
+      if (receivedHardFailure) {
+        result.outcome = 'harness-error';
+        result.reason = [...new Set([result.reason, interruption, workerFailure].filter(value => value !== undefined))].join('; ');
+      } else {
+        result.outcome = 'inconclusive';
+        result.reason = workerFailure ? `${interruption}; ${workerFailure}` : interruption;
+      }
+      delete result.failure;
     }
     result.cleanup = { complete: false };
     if (creationFailure) {

@@ -53,7 +53,9 @@ export function inspectSourceModule(source: string, fileName: string): { imports
     }
     if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && ts.isIdentifier(node.expression)
       && ['eval', 'Function'].includes(node.expression.text)) unsupported.add('Dynamically generated code');
-    if (ts.isPropertyAccessExpression(node) && ['require', 'dlopen', '_load', 'register', 'registerHooks', 'createRequire'].includes(node.name.text)) {
+    const loaderMembers = ['require', 'dlopen', '_load', 'register', 'registerHooks', 'createRequire', 'eval', 'Function'];
+    if ((ts.isPropertyAccessExpression(node) && loaderMembers.includes(node.name.text))
+      || (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && loaderMembers.includes(node.argumentExpression.text))) {
       unsupported.add('Custom code/module loader');
     }
     if (ts.isIdentifier(node) && ['require', 'eval', 'Function'].includes(node.text)) {
