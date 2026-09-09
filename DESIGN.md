@@ -206,6 +206,8 @@ Outcome labels have compact, lightly tinted backgrounds and semibold written sta
 
 Commands are full-cell buttons within a ruled table. Each shows a two-line SQL preview and compact protocol/completion metadata. Selected commands use the blue wash and inset outline; the step number also strengthens. Selection is exposed through `aria-pressed`, and each command identifies the inspector it controls.
 
+Accessible command names retain step, actor and SQL while also naming the protocol, any separate stage, completion or error, and recorded wait count. This keeps those outcomes available during keyboard and screen-reader navigation, including when a command records both an error and waits.
+
 Arrow keys and Home/End navigate the filtered order, including across the 100-command page boundary. The keyboard sequence uses one command tab stop at a time. Previous and Next controls show whether traversal is available and reveal the next page's opening command when used. Selecting a command updates the inspector and a polite status message.
 
 ### Inspector and SQL field

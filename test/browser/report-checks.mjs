@@ -91,6 +91,31 @@ export async function checkReport(page, url, artifact) {
     await page.getByRole('button', { name: 'Clear filters' }).click();
     assert.equal(await page.locator('.command').count(), 100);
 
+    const statuses = structuredClone(long);
+    statuses.scenario = 'Browser qualification: command status names'; statuses.outcome = 'inconclusive';
+    statuses.trace = statuses.trace.slice(0, 4);
+    statuses.trace[0].completion = { transactionStatus: 'E', commandTags: [], rowCount: 0, error: { code: '40P01', message: 'Deadlock detected' } };
+    statuses.trace[0].waits = [{ pid: 101, blockerPids: [102], waitEventType: 'Lock', waitEvent: 'transactionid' }];
+    statuses.trace[1].waits = Array.from({ length: 2 }, () => ({ pid: 102, blockerPids: [101], waitEventType: 'Lock', waitEvent: 'transactionid' }));
+    delete statuses.trace[2].completion; delete statuses.trace[2].completedAt;
+    statuses.trace[3].completion.rowCount = 0;
+    await upload('statuses.json', statuses);
+    await page.getByRole('heading', { name: statuses.scenario, exact: true }).waitFor();
+    const namedStatuses = [
+      ['error and observed wait', /^Step 1, alice: SELECT 0\b.*Error.*40P01.*1 wait observation/],
+      ['completion and observed waits', /^Step 2, bob: SELECT 1\b.*1 row\b.*2 wait observations/],
+      ['incomplete command', /^Step 3, alice: SELECT 2\b.*Incomplete/],
+      ['zero-row completion', /^Step 4, bob: SELECT 3\b.*0 rows/],
+    ];
+    const matchedStatuses = [];
+    for (const [status, name] of namedStatuses) matchedStatuses.push({ status, matches: await page.getByRole('button', { name }).count() });
+    assert.deepEqual(matchedStatuses, namedStatuses.map(([status]) => ({ status, matches: 1 })), 'Accessible command names expose recorded status alongside step, actor and SQL');
+    const failedCommand = page.getByRole('button', { name: namedStatuses[0][1] });
+    await failedCommand.focus(); await failedCommand.press('ArrowDown');
+    assert.equal(await page.locator('.command[aria-pressed="true"]').getAttribute('data-step'), '1');
+    assert.equal(await page.locator('.command[data-step="1"]').evaluate(element => element === document.activeElement), true);
+    assert.equal(await page.locator('.sql-full').textContent(), statuses.trace[1].sql);
+
     const empty = structuredClone(artifact);
     empty.outcome = 'inconclusive'; empty.trace = []; empty.actors = []; empty.plan = []; delete empty.failure;
     empty.reason = 'Stopped before recording a command';
@@ -101,7 +126,7 @@ export async function checkReport(page, url, artifact) {
     await page.getByRole('heading', { name: originalName, exact: true }).waitFor();
     assert.deepEqual(errors, []);
     assert.deepEqual(unexpectedRequests, []);
-    return { checks: ['recorded fixture, source, runtime and startup identities', 'invalid schema preserved current record', 'invalid UTF-8 rejected', '16 MiB import cap', 'hostile text inert', 'download exact equality', '100-row pagination', 'keyboard page crossing', 'filtered original indices', 'empty evidence', 'no runtime errors', 'no external requests'], passed: true };
+    return { checks: ['recorded fixture, source, runtime and startup identities', 'invalid schema preserved current record', 'invalid UTF-8 rejected', '16 MiB import cap', 'hostile text inert', 'download exact equality', '100-row pagination', 'keyboard page crossing', 'filtered original indices', 'accessible command outcomes and keyboard selection', 'empty evidence', 'no runtime errors', 'no external requests'], passed: true };
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }
 
@@ -116,6 +141,7 @@ export async function checkStagedReport(page, url, artifact, legacy) {
     await page.getByRole('heading', { name: artifact.scenario, exact: true }).waitFor();
     const prefix = artifact.trace.find(step => step.completion?.kind === 'metadata' && step.completion.result === 'described');
     assert.ok(prefix);
+    assert.equal(await page.locator(`.command[data-step="${prefix.index}"]`).and(page.getByRole('button', { name: /Describe.*Metadata received/ })).count(), 1, 'A description release is identifiable as metadata in its accessible name');
     await page.locator(`.command[data-step="${prefix.index}"]`).click();
     const inspector = page.locator('#inspector');
     assert.equal(await inspector.getByText('Description only', { exact: true }).count(), 1);
@@ -126,6 +152,7 @@ export async function checkStagedReport(page, url, artifact, legacy) {
     assert.ok((await inspector.textContent()).includes('before parameter values are sent'));
     const execution = artifact.trace.find(step => step.actor === prefix.actor && step.connection === prefix.connection && step.prefixOrdinal === prefix.ordinal);
     assert.ok(execution);
+    assert.equal(await page.locator(`.command[data-step="${execution.index}"]`).and(page.getByRole('button', { name: /Execute.*\d+ rows?/ })).count(), 1, 'The linked execution exposes its stage and completion in its accessible name');
     await page.locator(`.command[data-step="${execution.index}"]`).click();
     assert.equal(await inspector.getByText('Rows affected / returned', { exact: true }).count(), 1);
     await inspector.locator('.identity summary').click();
@@ -151,6 +178,6 @@ export async function checkStagedReport(page, url, artifact, legacy) {
     const chunks = []; for await (const chunk of stream) chunks.push(chunk);
     assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString()), artifact);
     assert.deepEqual(errors, []); assert.deepEqual(requests, []);
-    return { checks: ['real description metadata', 'no invented ready status', 'linked execution identity', 'mobile overflow', 'invalid stage rejected', 'legacy and staged imports', 'exact staged download', 'no errors or external requests'], passed: true };
+    return { checks: ['real description metadata', 'accessible description and execution outcomes', 'no invented ready status', 'linked execution identity', 'mobile overflow', 'invalid stage rejected', 'legacy and staged imports', 'exact staged download', 'no errors or external requests'], passed: true };
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }

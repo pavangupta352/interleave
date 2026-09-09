@@ -36,6 +36,16 @@ function shortSql(value: string): string { return value.replace(/\s+/g, ' ').tri
 function stageLabel(step: TraceStep): string {
   return ({ complete: 'Complete query', describe: 'Describe', execute: 'Execute', recover: 'Recover' })[step.stage ?? 'complete'];
 }
+function commandLabels(step: TraceStep): { protocol: string; stage?: string; completion: string; waits?: string } {
+  return {
+    protocol: step.protocol === 'extended' ? step.stage && step.stage !== 'complete' ? 'Extended stage' : 'Extended cycle' : 'Simple query',
+    ...(step.stage && step.stage !== 'complete' ? { stage: stageLabel(step) } : {}),
+    completion: step.completion?.error ? `Error · ${step.completion.error.code}`
+      : step.completion?.kind === 'metadata' ? 'Metadata received'
+        : step.completion ? `${step.completion.rowCount} ${step.completion.rowCount === 1 ? 'row' : 'rows'}` : 'Incomplete',
+    ...(step.waits.length ? { waits: `${step.waits.length} wait ${step.waits.length === 1 ? 'observation' : 'observations'}` } : {}),
+  };
+}
 function setRun(value: RunResult, command: string | null): void {
   run = value; replayCommand = command; actors = actorNames(run); query = ''; actorFilter = ''; page = 0;
   selected = run.trace.find(step => step.completion?.error || step.waits.length)?.index ?? 0;
@@ -158,17 +168,17 @@ function updateLedger(): void {
       for (const actor of actors) {
         const cell = node('td', actor === step.actor ? 'actor-cell active-cell' : 'actor-cell vacant-cell');
         if (actor === step.actor) {
+          const evidenceLabels = commandLabels(step);
           const command = button('', () => selectStep(step.index), 'command'); command.dataset.step = String(step.index); command.tabIndex = step.index === focusIndex ? 0 : -1;
-          command.setAttribute('aria-pressed', String(step.index === selected)); command.setAttribute('aria-label', `Step ${step.index + 1}, ${step.actor}: ${shortSql(step.sql).slice(0, 160)}`);
+          command.setAttribute('aria-pressed', String(step.index === selected)); command.setAttribute('aria-label', `Step ${step.index + 1}, ${step.actor}: ${shortSql(step.sql).slice(0, 160)}. ${[evidenceLabels.stage, evidenceLabels.protocol, evidenceLabels.completion, evidenceLabels.waits].filter(Boolean).join('. ')}`);
           command.setAttribute('aria-controls', 'inspector');
           command.append(node('span', 'mobile-actor', step.actor), node('code', 'sql-preview', shortSql(step.sql)));
           const summary = node('span', 'command-summary');
-          summary.append(node('span', 'protocol', step.protocol === 'extended' ? step.stage && step.stage !== 'complete' ? 'Extended stage' : 'Extended cycle' : 'Simple query'));
+          summary.append(node('span', 'protocol', evidenceLabels.protocol));
           if (step.completion?.error) summary.append(node('span', 'command-error', step.completion.error.code));
-          else if (step.waits.length) summary.append(node('span', 'command-wait', `${step.waits.length} wait ${step.waits.length === 1 ? 'observation' : 'observations'}`));
-          else if (step.completion?.kind === 'metadata') summary.append(node('span', undefined, 'Metadata received'));
-          else summary.append(node('span', undefined, step.completion ? `${step.completion.rowCount} ${step.completion.rowCount === 1 ? 'row' : 'rows'}` : 'Incomplete'));
-          if (step.stage && step.stage !== 'complete') summary.prepend(node('span', undefined, stageLabel(step)));
+          else if (evidenceLabels.waits) summary.append(node('span', 'command-wait', evidenceLabels.waits));
+          else summary.append(node('span', undefined, evidenceLabels.completion));
+          if (evidenceLabels.stage) summary.prepend(node('span', undefined, evidenceLabels.stage));
           command.append(summary); command.addEventListener('keydown', navigate); cell.append(command);
         }
         row.append(cell);
