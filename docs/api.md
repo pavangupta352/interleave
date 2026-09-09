@@ -34,7 +34,11 @@ async function increment({ connectionString }) {
 }
 ```
 
-Each actor defaults to one live physical connection. Set `maxConnectionsPerActor` from 2 through 8 to permit queryless auxiliary connections, such as an adapter monitor. Only one live connection may issue commands; it keeps that role until it closes, including while idle. Another live connection sending commands is an unsupported profile. Sequential reconnects receive a new connection generation. Return a JSON value only when that observation belongs in the recorded evidence. An assertion failure in the invariant produces a violation; another exception is a harness error. Rejected application operations are actor errors and do not count as invariant violations.
+Each actor defaults to one admitted PostgreSQL connection. Set `maxConnectionsPerActor` from 2 through 8 to permit queryless auxiliary connections, such as an adapter monitor. Only one live connection may issue commands; it keeps that role until it closes, including while idle. Another live connection sending commands is an unsupported profile. Sequential reconnects receive a new connection generation.
+
+A client can finish closing before the proxy receives both socket-close notifications. During confirmed shutdown, one prospective TCP client may wait with bounded, uninterpreted data. It receives no connection generation or startup identity, and opens no upstream connection, until the old frontend and backend sockets have both closed. A disconnected waiting client is discarded. Further waiting clients and connections beyond the cap while existing sessions are live remain unsupported.
+
+Return a JSON value only when that observation belongs in the recorded evidence. An assertion failure in the invariant produces a violation; another exception is a harness error. Rejected application operations are actor errors and do not count as invariant violations.
 
 ## Run and search
 
@@ -103,7 +107,7 @@ Run options require `databaseUrl`, an explicit administrator URL for a dedicated
 | `maxSteps` | 100 | Maximum released stages per run; whole cycles count once, staged metadata and continuation count separately |
 | `timeoutMs` | 10,000 | Per-run execution deadline in milliseconds |
 | `maxEvidenceBytes` | 8 MiB | Recorded evidence budget per run |
-| `maxConnectionsPerActor` | 1 | Physical connection cap per actor; additional live connections must remain queryless |
+| `maxConnectionsPerActor` | 1 | Admitted PostgreSQL connection cap per actor; additional live connections must remain queryless |
 | `protocolProfile` | `sync-cycle-v1` | Whole cycles, or explicit `describe-flush-v1` metadata and continuation stages |
 | `fixtureProfile` | `native` | Native PostgreSQL 16/17/18 capture, or explicit `postgresql17-pgvector0.8.6-v1` on its qualified server and extension |
 | `source` | Automatic local module graph | File targets: `{ projectRoot?, include? }` selects the portable root and additional data paths |

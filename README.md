@@ -42,7 +42,7 @@ Open `failure.html` to inspect the order, SQL, completions and observed lock wai
 
 ## Use your application
 
-Define setup, two to eight named concurrent operations, and an invariant. Each operation receives a proxy URL and uses its existing driver and queries. Close its clients in `finally`; each actor defaults to one live physical connection.
+Define setup, two to eight named concurrent operations, and an invariant. Each operation receives a proxy URL and uses its existing driver and queries. Close its clients in `finally`; each actor defaults to one admitted PostgreSQL connection.
 
 The [library API](docs/api.md) and [CLI guide](docs/cli.md) cover the workflow:
 
