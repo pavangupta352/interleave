@@ -176,10 +176,11 @@ function qualificationContext(source, env) {
   assert(env.GITHUB_REPOSITORY === 'pavangupta352/interleave' && /^\d+$/.test(env.GITHUB_RUN_ID ?? '') && /^\d+$/.test(env.GITHUB_RUN_ATTEMPT ?? ''), 'Invalid GitHub qualification context');
   assert(source.tag && env.GITHUB_REF === `refs/tags/${source.tag}` && env.GITHUB_SHA === source.commit, 'GitHub run does not match the selected version tag commit');
   let needs; try { needs = JSON.parse(env.INTERLEAVE_RELEASE_NEEDS); } catch { throw new Error('Required CI job conclusions are missing'); }
-  for (const job of ['postgres', 'pgvector', 'browser']) assert(needs?.[job]?.result === 'success', `Required CI job family did not succeed: ${job}`);
+  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', browser: 'success' };
+  for (const [job, result] of Object.entries(jobFamilies)) assert(needs?.[job]?.result === result, `Required CI job family did not succeed: ${job}`);
   return { kind: 'github-actions-needs', runUrl: `https://github.com/pavangupta352/interleave/actions/runs/${env.GITHUB_RUN_ID}/attempts/${env.GITHUB_RUN_ATTEMPT}`,
-    commit: source.commit, jobFamilies: { postgres: 'success', pgvector: 'success', browser: 'success' },
-    scope: 'Existing nine-job matrix using its own source checkouts and builds. Candidate archive acceptance here is the installed smoke only.' };
+    commit: source.commit, jobFamilies,
+    scope: 'Required PostgreSQL, pgvector, managed CLI and browser CI jobs using their own source checkouts and builds. Candidate archive acceptance here is the installed smoke only.' };
 }
 
 export async function prepareRelease({ repository = repositoryDefault, ref, tag, out, archive, signal, qualificationEnvironment = {} }) {

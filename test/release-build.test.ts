@@ -106,6 +106,39 @@ test('requires an existing exact version tag and rejects moving branch input', a
   await expect(prepareRelease({ repository: f.repository, tag: 'v9.9.9', out: join(f.root, 'wrong version') })).rejects.toThrow(/tag.*version/i);
 }, 10_000);
 
+test.each([undefined, 'failure', 'cancelled', 'skipped'])('rejects a tagged CI release with managed result %s before inspecting or building the archive', async result => {
+  const f = await fixture(); const tag = `v${f.version}`;
+  await execFile('git', ['-C', f.repository, 'tag', tag]);
+  const out = join(f.root, 'unqualified'); const archive = join(f.root, 'must not inspect.tgz');
+  await writeFile(archive, 'invalid archive that must not be read before CI qualification');
+  const qualificationEnvironment = {
+    GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'pavangupta352/interleave', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2',
+    GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: f.ref,
+    INTERLEAVE_RELEASE_NEEDS: JSON.stringify({ postgres: { result: 'success' }, pgvector: { result: 'success' }, browser: { result: 'success' },
+      ...(result === undefined ? {} : { managed: { result } }) }),
+  };
+  await expect(prepareRelease({ repository: f.repository, tag, out, archive, qualificationEnvironment }))
+    .rejects.toThrow('Required CI job family did not succeed: managed');
+  await expect(fs.lstat(out)).rejects.toMatchObject({ code: 'ENOENT' });
+}, 10_000);
+
+test('records all required CI job families in the verified tagged release manifest', async () => {
+  const f = await fixture(); const tag = `v${f.version}`;
+  await execFile('git', ['-C', f.repository, 'tag', tag]);
+  const out = join(f.root, 'qualified candidate');
+  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', browser: 'success' };
+  const qualificationEnvironment = {
+    GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'pavangupta352/interleave', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2',
+    GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: f.ref,
+    INTERLEAVE_RELEASE_NEEDS: JSON.stringify(Object.fromEntries(Object.entries(jobFamilies).map(([job, result]) => [job, { result }]))),
+  };
+  const manifest = await prepareRelease({ repository: f.repository, tag, out, qualificationEnvironment });
+  expect(manifest.qualification).toMatchObject({ kind: 'github-actions-needs', commit: f.ref, jobFamilies,
+    runUrl: 'https://github.com/pavangupta352/interleave/actions/runs/123/attempts/2' });
+  expect((await verifyPreparedAssets(out)).qualification).toEqual(manifest.qualification);
+  expect(manifest.acceptance.database).toBe('not-run');
+}, 45_000);
+
 test('rejects a source module omitted by the build and package, including its maps and declaration', async () => {
   const f = await fixture(); await mkdir(join(f.repository, 'src'));
   await writeFile(join(f.repository, 'src/needed.ts'), 'export const needed = true;\n');

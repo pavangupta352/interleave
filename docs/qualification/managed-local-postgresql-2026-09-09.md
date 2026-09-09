@@ -72,6 +72,15 @@ then passed 52 tests in three files, followed by all three final supervisor
 signal cases. Typecheck and build passed. These are separately executed scopes,
 not a claim that every final combined release job has run.
 
+Release preparation also now requires and records the managed CI family alongside
+PostgreSQL, pgvector and browser jobs. Five new regressions first failed: four
+non-successful or missing managed conclusions reached archive inspection, and a
+successful tagged fixture omitted managed coverage from its manifest. After the
+fix, all 77 release preparation/build tests and typecheck passed. The successful
+fixture exercised real clean builds, packing, installed smoke and manifest
+verification with a simulated CI context; it does not establish an actual GitHub
+run or installed database qualification for that fixture.
+
 ## Archive and cleanup identity
 
 Both newly prepared archives were installed with npm scripts disabled. Every one
