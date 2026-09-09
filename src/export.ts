@@ -14,6 +14,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseRunArtifact } from './artifact.js';
 import { assertCompletedRun } from './completed-run.js';
+import { missingReplayIdentity } from './replay-readiness.js';
 import { captureExportSourceIdentity, type SourceIdentity, type SourceIdentityFile } from './source-identity.js';
 import type { RunResult } from './types.js';
 
@@ -360,6 +361,8 @@ function requireRecordedSource(run: RunResult): SourceIdentity {
   const source = run.environment.source;
   if (!source) throw new Error('Export requires a recorded file source identity; record the scenario with the built CLI first');
   if (source.components.runtime.mode !== 'build') throw new Error('Source-mode recordings cannot be exported as a built runtime. Build Interleave, then record again with the built CLI (node dist/cli.js run ...)');
+  const missing = missingReplayIdentity(run);
+  if (missing) throw new TypeError(`Regression export requires exact-ready evidence: ${missing}`);
   return source;
 }
 

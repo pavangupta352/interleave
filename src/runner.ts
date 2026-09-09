@@ -11,6 +11,7 @@ import type { SourceIdentity } from './source-identity.js';
 import { environmentMatches } from './environment.js';
 import { resolveProtocolProfile } from './protocol-profile.js';
 import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile.js';
+import { missingReplayIdentity } from './replay-readiness.js';
 import type { ActorProxy, ActorResult, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
 
 class Interrupted extends Error {
@@ -133,6 +134,10 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
 
   try {
     check();
+    if (mode === 'replay') {
+      const missing = missingReplayIdentity(options.replay!);
+      if (missing) throw new Interrupted('incompatible', missing);
+    }
     if (mode === 'replay' && protocolProfile !== recordedProtocol) throw new Interrupted('incompatible', 'Replay protocol profile differs from the recorded run');
     if (expectedEnvironment?.fixture && fixtureProfile !== recordedFixtureProfile(expectedEnvironment.fixture)) {
       throw new Interrupted('incompatible', 'Replay fixture profile differs from the recorded run');
@@ -144,7 +149,6 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     if (mode === 'replay') {
       if (maxConnectionsPerActor !== (options.replay!.limits.maxConnectionsPerActor ?? 1)) throw new Interrupted('incompatible', 'Replay connection profile differs from the recorded run');
       if (options.replay!.scenario !== scenario.name) throw new Interrupted('incompatible', 'Replay scenario identity changed');
-      if (!options.replay!.connections) throw new Interrupted('incompatible', 'The recorded run has no actor connection identities; use a guided run to create new bound evidence');
     }
     if (expectedEnvironment) {
       if (expectedEnvironment.serverVersion !== database.serverVersion) throw new Interrupted('incompatible', 'Replay PostgreSQL version differs from the recorded environment');

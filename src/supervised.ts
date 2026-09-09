@@ -11,6 +11,7 @@ import { captureSourceIdentity, SourceIdentityError, type SourceIdentity } from 
 import { sourceSelection } from './source-selection.js';
 import { resolveProtocolProfile } from './protocol-profile.js';
 import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile.js';
+import { missingReplayIdentity } from './replay-readiness.js';
 import type { OwnedDatabase, RunOptions, RunResult } from './types.js';
 
 const GRACE_MS = 250;
@@ -37,6 +38,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     if (mode === 'replay') assertCompletedRun(recorded);
   }
   const recordedProtocol = options.replay?.limits.protocolProfile ?? 'sync-cycle-v1';
+  const missingIdentity = mode === 'replay' ? missingReplayIdentity(options.replay!) : undefined;
   const protocolProfile = resolveProtocolProfile(options.protocolProfile, mode === 'replay' ? recordedProtocol : undefined);
   const protocolProfileMismatch = mode === 'replay' && protocolProfile !== recordedProtocol;
   const expectedEnvironment = mode === 'replay' ? options.replay!.environment : mode === 'guided' ? undefined : options.expectedEnvironment;
@@ -86,7 +88,10 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     delete result.failure;
   };
   try {
-    if (!interruption && fixtureProfileMismatch) {
+    if (!interruption && missingIdentity) {
+      result.outcome = 'incompatible';
+      result.reason = missingIdentity;
+    } else if (!interruption && fixtureProfileMismatch) {
       result.outcome = 'incompatible';
       result.reason = 'Replay fixture profile differs from the recorded run';
     } else if (!interruption && protocolProfileMismatch) {
