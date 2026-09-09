@@ -1,0 +1,39 @@
+{
+  "classification": "owned constructed compatibility workload",
+  "measuredAt": "2026-09-09",
+  "environment": {
+    "node": "v24.7.0",
+    "npm": "11.5.1",
+    "platform": "linux/arm64",
+    "image": "pgvector/pgvector:0.8.6-pg17-bookworm",
+    "imageDigest": "sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f",
+    "serverVersion": "17.11 (Debian 17.11-1.pgdg12+2)",
+    "pgvectorVersion": "0.8.6",
+    "nodePostgresVersion": "8.23.0",
+    "pghybridVersion": "0.1.4"
+  },
+  "recorded": {
+    "outcome": "passed",
+    "durationMs": 245.78958300000002,
+    "plan": ["first", "second"],
+    "traceSteps": 2,
+    "queryFingerprint": "998b1addf1a7d69f8229b26ec3b1f6bf3e84383629a4cf8fe910a2672f9678bc",
+    "fixture": {
+      "profile": "postgresql17-pgvector0.8.6-v1",
+      "fingerprint": "ff76ddf63676ed952bfa4138afbc2b2426177e54ee3a6c09505e36e805ec7be2",
+      "components": {
+        "schema": "08735cb7ceb3be63f5818ff046fabdc60f72a30fca3715e2725b9fc34795fa8b",
+        "data": "15804106c575384bb6ba42c99ed699bfed54640d24ec90bf79c28029c3469581",
+        "sequences": "aa580bcb8aad01eae27098b189917b3a7e47e773de2ee7c7d27593ed93b8d81e",
+        "settings": "e5692ed55046601591485c934511a977d0bf0ad45e0be922dfae79c03a91dbbf"
+      },
+      "counts": { "objects": 978, "rows": 12, "bytes": 320221 }
+    },
+    "actorResults": [
+      ["Termination for convenience", "Renewal pricing", "Renewal terms"],
+      ["Termination for convenience", "Renewal pricing", "Renewal terms"]
+    ],
+    "cleanupComplete": true
+  },
+  "qualificationBoundary": "One measured forPg read workload; values are evidence, not a performance benchmark or qualification of other adapters, indexes, versions, or platforms."
+}
