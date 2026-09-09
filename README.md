@@ -61,7 +61,7 @@ Search defaults to FIFO; an optional seed selects pending prefixes deterministic
 
 ## Tested scope
 
-The [compatibility matrix](docs/compatibility.md) covers PostgreSQL 16/17/18 with node-postgres 8.23.0 and Node.js 22.18.0/24.7.0 CI runs. Postgres.js 3.4.9 has an [explicit profile](examples/postgresjs/README.md) for parameterized queries. The [pghybrid example](examples/pghybrid/README.md) qualifies its pinned `forPg` read path on PostgreSQL 17 with pgvector 0.8.6, including installed-package exact replay.
+The [compatibility matrix](docs/compatibility.md) covers PostgreSQL 16/17/18 with node-postgres 8.23.0 and Node.js 22.18.0/24.7.0 CI runs. Postgres.js 3.4.9 has an [explicit profile](examples/postgresjs/README.md) for parameterized queries. The [pghybrid example](examples/pghybrid/README.md) qualifies all four pinned public search adapters on PostgreSQL 17 with pgvector 0.8.6, including installed-package exact replay and documented caller shutdown limits.
 
 The proxy preserves protocol bytes. PostgreSQL owns statement execution and lock resumption. SQL batches remain intact; server-side functions are opaque. Unsupported protocol and fixture features fail explicitly. Clocks, randomness and external services remain uncontrolled. The [architecture](docs/architecture/specification.md) and [validation records](docs/validation.md) detail these boundaries and remaining work.
 

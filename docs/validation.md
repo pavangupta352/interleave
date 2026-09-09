@@ -1,10 +1,18 @@
 # Development validation
 
-The local integrated replay and cleanup hardening qualification passed **754 native
-tests in 56 files**, plus **ten pgvector checks**, build and type checks. See the
-[hardening record](qualification/replay-release-hardening-2026-09-09.md) for its
-exact source and scope. The earlier
-[seeded-search record](qualification/seeded-search-2026-09-09.md) remains available.
+At commit `eda7290`, local integrated qualification passed **766 native tests in
+57 files** on PostgreSQL 16.13, plus **288 integration tests in 36 files** on
+PostgreSQL 17.11 with pgvector 0.8.6 available. The second run included native
+fixtures and all 30 vector checks; it was not a vector-only selection. Both ran
+under Node.js 24.7.0. Locked installation, type checking and the build passed;
+the owned vector container was removed and independently confirmed absent.
+
+The [adapter qualification](qualification/pghybrid-adapters-2026-09-09.md) records
+the focused 30-check runs on Node.js 22 and 24. The [canonical package workflow](qualification/canonical-package-workflow-2026-09-09.md)
+records installed CLI, offline export replay and browser acceptance for the
+earlier exact `4b589db` archive. The [hardening record](qualification/replay-release-hardening-2026-09-09.md)
+and earlier
+[seeded-search record](qualification/seeded-search-2026-09-09.md) remain available.
 The [compatibility page](compatibility.md) links completed CI matrices and exact
 driver, server and extension profiles. The earlier snapshots below retain their
 original dates and results; their then-open limits are historical.
@@ -69,6 +77,7 @@ for lifecycle and connection details.
 The [native PostgreSQL matrix](qualification/postgresql-native-matrix-2026-09-09.md),
 [Postgres.js profile](qualification/postgresjs-describe-flush-2026-09-09.md),
 [pgvector/pghybrid workload](qualification/postgresql17-pgvector-pghybrid-2026-09-09.md)
+with its [four public adapters](qualification/pghybrid-adapters-2026-09-09.md),
 and supported [shared regression installation](regressions.md) now have executed
 qualification. Their documented boundaries still apply.
 

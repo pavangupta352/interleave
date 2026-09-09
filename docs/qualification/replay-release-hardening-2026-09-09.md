@@ -62,3 +62,19 @@ entry points and child-process cancellation. The
 [release preparation guide](../releasing.md) explains the separate canonical-archive
 acceptance and publication steps. These results do not qualify a stable tag,
 registry download, historical comparison or a future source revision.
+
+## Follow-up and published matrix
+
+Commit `4b589db` adds four release-output recovery regressions and clearer CI scope
+wording. Late write, cancellation, final-verification and directory-replacement
+failures preserve the partial output and identify it explicitly. The 72 release
+checks passed locally in 15.02 seconds, with type checking and an independent
+review of both repairs.
+
+The [subsequent CI run](https://github.com/pavangupta352/interleave/actions/runs/34322912399)
+qualified exact commit `4b589dbac81eeef7bdabf461b105dc9bb29113b6`: all six native
+PostgreSQL/Node combinations passed 758 tests in 56 files, both vector jobs passed
+ten tests in three files, and all six browser/viewport combinations passed their
+12 legacy and eight staged checks. Each job reported removal of its owned test
+server. The tag-only assets job was skipped, as expected for a main-branch push.
+This source matrix is separate from canonical-package acceptance and publication.

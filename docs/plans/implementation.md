@@ -81,7 +81,7 @@ Files: `src/report/*`, `docs/assets/*`, `DESIGN.md`, `.impeccable/*`, `test/brow
 Files: `examples/*`, `test/compatibility/*`, `eval/*`, `docs/{compatibility,validation}.md`.
 
 - [x] Import pinned neveroversell naiveBuy unchanged, gapMs=0; force overselling, replay, then exercise the actual safe API. Preserve license and distinguish owned demo from historical defect.
-- [ ] Exercise real pghybrid queries using its qualifying adapters and record actual driver/database versions. Test pools, prepared statements, transaction errors/retries and cancellation for every advertised profile.
+- [x] Exercise real pghybrid queries using its qualifying adapters and record actual driver/database versions. Test pools, prepared statements, transaction errors/retries and cancellation for every advertised profile. The [adapter qualification](../qualification/pghybrid-adapters-2026-09-09.md) covers all four public factories and their supported callers; separate native and Postgres.js records cover driver transactions and preparation. Early Postgres.js type-discovery shutdown is explicitly limited to supervised containment.
 - [x] Qualify PostgreSQL 16/17/18 and Node 22/24 in CI; do not expand support claims from one passing driver query. The [compatibility matrix](../compatibility.md) links the completed full-suite jobs and separate driver/extension qualification.
 - [ ] Pin three independent historical application bugs and their actual fixes; retain business logic. Run real regressions and compare ordinary concurrency, manual barriers and Postgres isolation baselines.
 - [ ] Record repeated replay counts, durations, setup work, reduction, missed cases and harness-induced failures. Keep unrun participant studies explicitly unrun.
@@ -90,7 +90,7 @@ Files: `examples/*`, `test/compatibility/*`, `eval/*`, `docs/{compatibility,vali
 
 Files: `.github/*`, `README.md`, `LICENSE`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `docs/*`, `scripts/*`.
 
-- [ ] Review protocol/scheduler/resource cleanup and artifact trust boundaries; resolve every material finding with a regression test.
+- [x] Review protocol/scheduler/resource cleanup and artifact trust boundaries; resolve every material finding with a regression test. The [hardening qualification](../qualification/replay-release-hardening-2026-09-09.md) records the integrated repairs and subsequent full matrix; final product/release review remains separate below.
 - [ ] Build README around one executable quickstart and actual recorded failure, clear comparison, API/CLI docs, limitations and source attribution. Verify every documented command from an installed package.
 - [ ] Create public GitHub repository under verified owner, configure CI and publish reviewed commits with correct author. Attach authentic demo/report assets and evidence-based launch materials.
 - [ ] Release only tested source: run matrix, package content/security checks, clean install/execution, tagged-source checks and public download/hash verification.
@@ -99,4 +99,4 @@ Files: `.github/*`, `README.md`, `LICENSE`, `CONTRIBUTING.md`, `SECURITY.md`, `C
 
 ## Current status
 
-The engine, database lifecycle, supervised CLI/API, source-bound replay, seeded exploration, portable exports and offline viewer are implemented. The full native PostgreSQL 16/17/18 × Node.js 22/24 matrix, explicit Postgres.js profile, and pinned pghybrid forPg / pgvector workload have executed qualification. Independent reviews have driven regression fixes for protocol state, replay identity, reduction, cleanup and export. Broader application adapter/lifecycle qualification, three historical cases and comparative baselines, final product review and release checks remain open. Checked items record completed acceptance work; unchecked items remain release gates.
+The engine, database lifecycle, supervised CLI/API, source-bound replay, seeded exploration, portable exports and offline viewer are implemented. The full native PostgreSQL 16/17/18 × Node.js 22/24 matrix, explicit Postgres.js profile, and all four pinned pghybrid public adapters have executed qualification. The [exact development candidate](../qualification/canonical-package-workflow-2026-09-09.md) completed installed CLI, offline export replay and browser checks on the recorded environments. Independent reviews have driven regression fixes for protocol state, replay identity, reduction, cleanup and export. Three historical cases and comparative baselines, final product review and release checks remain open. Checked items record completed acceptance work; unchecked items remain release gates.

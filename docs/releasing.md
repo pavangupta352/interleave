@@ -28,6 +28,11 @@ actually ran. Read the manifest's acceptance scope: these installed checks do no
 execute PostgreSQL scenarios. The complete user workflow still requires acceptance
 against the same archive.
 
+The [September 9 candidate qualification](qualification/canonical-package-workflow-2026-09-09.md)
+records that later installed database workflow for one exact archive on Node.js
+22.18.0 and 24.7.0, including offline export installation and exact replay. It
+does not establish acceptance for a future candidate.
+
 To check a supplied archive against a fresh pair of builds, use its path with
 `--archive` and choose another new output directory. To prepare an existing version
 tag, replace `--ref` with `--tag vX.Y.Z`; the tag must match both package and lockfile

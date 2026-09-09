@@ -21,8 +21,8 @@ Interleave is in development. No stable version has been released.
   transaction and wait evidence, validated imports and original JSON downloads.
 - Use the CLI to initialize scenarios, explore, replay, minimize, report, export,
   check the environment and run the pinned unsafe/safe neveroversell example.
-- Run the pinned pghybrid `forPg` compatibility example from source or the compiled
-  package, including file-bound exact replay.
+- Run the pinned pghybrid public search adapters with node-postgres, Postgres.js,
+  Drizzle and Kysely callers, including installed source-bound exact replay.
 
 ### Qualified profiles
 
@@ -33,6 +33,10 @@ Interleave is in development. No stable version has been released.
 - PostgreSQL 17.11 and pgvector 0.8.6 through the explicit fixture profile,
   including the pinned pghybrid 0.1.4 search workload.
 - Desktop and mobile offline reports in Chromium, Firefox and WebKit.
+- The exact development candidate's installed CLI workflow on Node.js 22 and 24:
+  scaffold, record, exact replay, reduction, report, export and offline replay.
+  See the [candidate qualification](docs/qualification/canonical-package-workflow-2026-09-09.md)
+  for the archive identity and execution limits.
 
 See [compatibility](docs/compatibility.md) for completed CI results and exact
 environment records, and [validation](docs/validation.md) for development evidence.
