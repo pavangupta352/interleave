@@ -93,6 +93,37 @@ The post-routing native runs likewise removed
 `interleave-test-fbbb11aa-505e-433a-aa1f-d3761ad4fe2b`, and
 `interleave-test-b78f5d6a-81de-476f-b814-5f1ddea71c89`.
 
+## Built package and source-bound replay
+
+A separate installed-package check packs Interleave, installs that tarball in a
+fresh application, and copies its compiled pghybrid scenario and complete vendor
+directory. The built CLI records the two public searches with the explicit
+pgvector profile and a source selection that includes the vendor licenses. It
+then exactly replays that file in a fresh owned database, requiring matching
+source/runtime, fixture, query and actor-result identities and complete cleanup.
+No TypeScript loader or source checkout is required by this installed workflow.
+
+The one-run exploration retains a passing run but exits 4 because another
+schedule remains beyond the selected budget; its exact replay exits 0. The test
+checks that distinction instead of treating a budget stop as a failed invariant.
+The combined eight vector-catalog checks, original programmatic workload and
+packaged workflow passed ten tests in three files in 3.53 seconds on the same
+local Node.js 24.7.0 / PostgreSQL 17.11 / pgvector 0.8.6 combination. The owned
+container was removed after verification. These timings are observations, not a
+benchmark.
+
+Independent static review matched the original archive, all nine extracted
+files, both source maps, all twelve fixture rows and MIT licenses to the pinned
+upstream checkout. A committed provenance test retains the archive and compiled
+input hashes as regression checks.
+
+Final integration of the archive compatibility repair and packaged example
+passed 584 native tests in 48 files (114.31 seconds), build and type checks, and
+the ten vector tests in three files (5.27 seconds). Native checks used PostgreSQL
+16.13; the separate vector checks used the PostgreSQL 17.11 image above and
+removed their owned container. Package inspection retained 245 files, including
+the compiled example and original notices, and no private development files.
+
 ## Qualification boundary
 
 The pgvector profile is explicit; the native profiles continue to reject vector

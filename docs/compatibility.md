@@ -12,7 +12,11 @@ The server major is part of the fixture fingerprint. Strict replay therefore can
 
 The qualification covers Interleave's native, extension-free fixture profile and its plaintext PostgreSQL protocol proxy using node-postgres 8.23.0. It exercises disposable database ownership and cleanup, schema/data/sequence/settings capture, queryless and reconnect startup binding, simple and ordinary extended query cycles, prepared statements, transaction errors, waits, replay, reduction, supervision, export, and the neveroversell example against each real server major.
 
-The native fixture profile permits the built-in `plpgsql` extension. Other extensions, foreign relations, custom casts/operators, custom range/base types, temporary fixture state, logical replication configuration, and the other explicitly unsupported catalog features fail closed. Drivers other than node-postgres have separate qualification gates and are not covered by this matrix. The complete suite also passed all six PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0 jobs at commit `af8593d5231f5e2c647315a819df74c59ff7f709`, alongside the Chromium, Firefox, and WebKit desktop/mobile report checks. See the [completed CI run](https://github.com/pavangupta352/interleave/actions/runs/34310660849).
+The native fixture profile permits the built-in `plpgsql` extension. Other extensions, foreign relations, custom casts/operators, custom range/base types, temporary fixture state, logical replication configuration, and the other explicitly unsupported catalog features fail closed. Drivers other than node-postgres have separate qualification gates and are not covered by this matrix. At commit `49393e9ebb273adc62eb3769c78b8d3c175673b0`, all six PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0 full-suite jobs passed, along with both PostgreSQL 17 / pgvector 0.8.6 catalog jobs and Chromium, Firefox and WebKit desktop/mobile reports. This matrix includes the Postgres.js protocol checks; the later pghybrid workload has its own dated local evidence below. See the [completed nine-job CI run](https://github.com/pavangupta352/interleave/actions/runs/34315129295).
+
+PostgreSQL 17 renamed the catalog locale fields used by fixture capture from `daticulocale`/`colliculocale` to `datlocale`/`colllocale`. Interleave selects the fields by verified server major and retains a stable semantic `locale` field in its canonical input. It also includes ICU tailoring rules because they can change comparison behavior. See the official [PostgreSQL 17 release notes](https://www.postgresql.org/docs/17/release-17.html), [PostgreSQL 16 collation catalog](https://www.postgresql.org/docs/16/catalog-pg-collation.html), and [PostgreSQL 18 database catalog](https://www.postgresql.org/docs/18/catalog-pg-database.html).
+
+PostgreSQL 18 virtual generated columns are covered by schema and logical row identity. The qualification verifies that otherwise equivalent stored and virtual generated columns have different schema identities while their application-visible values are captured. See the official [PostgreSQL 18 generated-column documentation](https://www.postgresql.org/docs/18/ddl-generated-columns.html).
 
 ## PostgreSQL 17 with pgvector 0.8.6
 
@@ -30,9 +34,8 @@ search recorded and exactly replayed through Interleave. See the
 [pgvector and pghybrid qualification record](qualification/postgresql17-pgvector-pghybrid-2026-09-09.md)
 and the [self-contained pghybrid example](../examples/pghybrid/README.md).
 
-PostgreSQL 17 renamed the catalog locale fields used by fixture capture from `daticulocale`/`colliculocale` to `datlocale`/`colllocale`. Interleave selects the fields by verified server major and retains a stable semantic `locale` field in its canonical input. It also includes ICU tailoring rules because they can change comparison behavior. See the official [PostgreSQL 17 release notes](https://www.postgresql.org/docs/17/release-17.html), [PostgreSQL 16 collation catalog](https://www.postgresql.org/docs/16/catalog-pg-collation.html), and [PostgreSQL 18 database catalog](https://www.postgresql.org/docs/18/catalog-pg-database.html).
-
-PostgreSQL 18 virtual generated columns are covered by schema and logical row identity. The qualification verifies that otherwise equivalent stored and virtual generated columns have different schema identities while their application-visible values are captured. See the official [PostgreSQL 18 generated-column documentation](https://www.postgresql.org/docs/18/ddl-generated-columns.html).
+Vector must be installed in `public` and owned by the capture role. Catalog
+identity does not attest the installed server binary.
 
 ## Running the database matrix
 
@@ -48,23 +51,6 @@ INTERLEAVE_TEST_POSTGRES_IMAGE=pgvector/pgvector:0.8.6-pg17-bookworm npm run tes
 
 The dated, immutable image identities and measured test results are in the [native PostgreSQL qualification record](qualification/postgresql-native-matrix-2026-09-09.md).
 
-## Explicit protocol and extension profiles
-
-Postgres.js 3.4.9 parameterized queries use the opt-in `describe-flush-v1`
-protocol. Real Parse/Describe/Flush metadata and later Bind/Execute/Sync work
-have separate release gates and schema-version-2 evidence. Cached prepared
-queries can still use a complete-cycle release. See the [driver qualification
-record](qualification/postgresjs-describe-flush-2026-09-09.md) and
-[runnable example](../examples/postgresjs/README.md), including the required
-driver shutdown listener for interrupted transactions. This qualification is
-separate from the earlier native CI result above.
-
-The separate fixture profile `postgresql17-pgvector0.8.6-v1` requires PostgreSQL
-17 and vector 0.8.6 in `public`, owned by the capture role. It checks the complete
-qualified extension member inventory, catalog definitions and effective
-settings before capturing application rows. The native profile keeps rejecting
-the extension. Catalog identity does not attest the installed server binary.
-
 Run the explicit vector tests with:
 
 ```sh
@@ -75,3 +61,13 @@ Native jobs exclude files ending in `.pgvector.integration.test.ts`; the selecte
 vector profile runs them against an extension-capable server. Setting an image
 while supplying `TEST_DATABASE_URL` selects the tests but does not change that
 server: it must already provide the stated PostgreSQL and extension versions.
+
+## Postgres.js protocol profile
+
+Postgres.js 3.4.9 parameterized queries use the opt-in `describe-flush-v1`
+protocol. Real Parse/Describe/Flush metadata and later Bind/Execute/Sync work
+have separate release gates and schema-version-2 evidence. Cached prepared
+queries can still use a complete-cycle release. See the [driver qualification
+record](qualification/postgresjs-describe-flush-2026-09-09.md) and
+[runnable example](../examples/postgresjs/README.md), including the required
+driver shutdown listener for interrupted transactions.

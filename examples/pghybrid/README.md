@@ -1,6 +1,6 @@
 # pghybrid compatibility workload
 
-This example runs the published `pghybrid` 0.1.4 `forPg` API through Interleave
+This example runs the pinned `pghybrid` 0.1.4 `forPg` API through Interleave
 against PostgreSQL 17 and pgvector 0.8.6. It creates twelve document rows, then
 two actors independently run the same hybrid search for `renewal notice period`.
 Each actor returns, in order:
@@ -26,7 +26,7 @@ From the Interleave repository root, with Docker running:
 
 ```sh
 INTERLEAVE_TEST_POSTGRES_IMAGE=pgvector/pgvector:0.8.6-pg17-bookworm \
-  node scripts/test.mjs integration --run test/pghybrid.pgvector.integration.test.ts
+  npm run test:integration -- pghybrid
 ```
 
 The test harness creates an owned container on a random loopback port and removes
@@ -38,6 +38,28 @@ The reusable scenario is in [`scenario.ts`](scenario.ts). Every actor creates a
 real `pg.Pool` with `max: 1`, calls `forPg(pool, config).search(...)`, and closes
 the pool in `finally`. The scenario contains the fixture DDL and rows; it does not
 copy or replace the library's generated search SQL.
+
+## Run the installed package
+
+The package also ships a compiled scenario and its exact vendor files. In a
+fresh application where Interleave is already installed:
+
+```sh
+npm install --save-exact pg@8.23.0
+cp node_modules/@pavangupta352/interleave/dist/examples/pghybrid/scenario.js scenario.mjs
+cp -R node_modules/@pavangupta352/interleave/dist/examples/pghybrid/vendor vendor
+npx interleave run scenario.mjs --fixture-profile postgresql17-pgvector0.8.6-v1 --include vendor --plan first,second --max-runs 1 --out record.json
+npx interleave replay scenario.mjs record.json --out replay.json
+```
+
+Set `TEST_DATABASE_URL` to a dedicated PostgreSQL 17 administrator endpoint with
+pgvector 0.8.6 available. The CLI uses that server; it does not provision a
+container. The one-run search above saves a passing record but exits 4 because
+alternative schedules remain beyond its chosen budget. Exact replay exits 0
+when the recorded execution passes. It inherits the fixture profile and source
+selection, including the vendor files and their licenses. No TypeScript loader
+is needed. The packaged integration test executes this workflow from a fresh
+tarball installation.
 
 ## Pinned package and license
 

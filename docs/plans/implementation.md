@@ -64,7 +64,7 @@ Files: `src/{index,cli,artifact,export}.ts`, `test/{cli,artifact,export}.test.ts
 
 - [x] Design CLI commands `init`, `run`, `replay`, `minimize`, `report`, `doctor` and `demo` around the same public API; test exit statuses for every outcome and malformed option.
 - [x] Validate replay schema with bounded arrays/strings and exact version handling. Reject corrupt/tampered reports, traversal and executable imports. Preserve private SQL disclosure boundaries.
-- [ ] Export an explicitly selected scenario and lockfile with hashes and setup instructions; install the package in a separate directory and reproduce the original failure using the exported regression.
+- [x] Export an explicitly selected scenario and lockfile with hashes and setup instructions; install the package in a separate directory and reproduce the original failure using the exported regression. Both separate and shared application/runtime layouts have installed offline replay coverage; see the [regression guide](../regressions.md).
 - [x] Verify Ctrl-C cleanup, file-write atomicity, overwrite controls, paths with spaces, help and actionable driver/protocol/DB errors.
 
 ### 5. Visual evidence explorer
@@ -82,7 +82,7 @@ Files: `examples/*`, `test/compatibility/*`, `eval/*`, `docs/{compatibility,vali
 
 - [x] Import pinned neveroversell naiveBuy unchanged, gapMs=0; force overselling, replay, then exercise the actual safe API. Preserve license and distinguish owned demo from historical defect.
 - [ ] Exercise real pghybrid queries using its qualifying adapters and record actual driver/database versions. Test pools, prepared statements, transaction errors/retries and cancellation for every advertised profile.
-- [ ] Qualify PostgreSQL 16/17/18 and Node 22/24 in CI; do not expand support claims from one passing driver query.
+- [x] Qualify PostgreSQL 16/17/18 and Node 22/24 in CI; do not expand support claims from one passing driver query. The [compatibility matrix](../compatibility.md) links the completed full-suite jobs and separate driver/extension qualification.
 - [ ] Pin three independent historical application bugs and their actual fixes; retain business logic. Run real regressions and compare ordinary concurrency, manual barriers and Postgres isolation baselines.
 - [ ] Record repeated replay counts, durations, setup work, reduction, missed cases and harness-induced failures. Keep unrun participant studies explicitly unrun.
 

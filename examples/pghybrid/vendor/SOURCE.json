@@ -15,6 +15,8 @@
     "js/src/search.ts": "47f043b152125b55969ccec8d0fcdad8f9e36dfdfd8577a7eae101053541b09f",
     "js/src/sql.ts": "260ae4aae2b561ec184248f33930801599a56d0945131f5fc5c9a60dd90812e0",
     "js/src/config.ts": "33d781096a32d130626129ec3477a0ddfd22c26153a0fcce37d49248ca79a789",
+    "js/src/textquery.ts": "6d3ed9b2a161ada138d86b6e83039e7dfdcbbb847665be73d5029b004c286bc2",
+    "js/test/adapters.test.ts": "fabe002fa425e1770d6a980b8e25049fe2cef28ed66925836c6ef7ff16f4d4c2",
     "pghybrid-0.1.4.tgz": "6e5783cbc6496c74d47b213ab166668cf2929a0e80e5831b8abcf521d0b117c9",
     "../package-lock.json": "4025b2bfdf108ac10e40d16d2d1589b3b4d8c778d96f12b68dfff3b296bc7cb6"
   },

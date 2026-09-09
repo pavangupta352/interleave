@@ -30,6 +30,10 @@ The workflow is:
 
 The proxy schedules complete driver command cycles. Simple Query batches remain intact; ordinary parameterized queries retain their original protocol bytes. PostgreSQL still owns query execution, transactions and lock resumption. Server-side functions are opaque.
 
+Postgres.js parameterized queries have an explicit profile that separately gates
+statement description and execution, using real PostgreSQL metadata. The default
+complete-cycle profile stays unchanged. See the [tested profiles](docs/compatibility.md).
+
 A passing exploration means no violation was observed in the schedules actually tested. It is not proof that the application has no races. Changed source, dependencies, fixtures or queries invalidate exact file replay; use a guided run or fresh exploration to evaluate a repair.
 
 Exact replay checks the recorded command and wait contract against captured
@@ -82,7 +86,7 @@ workflow. Registry installation instructions will accompany the verified release
 
 [determined](https://github.com/glideapps/determined) provides deterministic TypeScript simulation primitives. [Antithesis](https://antithesis.com/) controls a much broader execution environment. A local statement proxy has different boundaries.
 
-[neveroversell](https://github.com/pavangupta352/neveroversell) supplies an owned unsafe/safe workload for development. Its deliberately unsafe benchmark is not a historical production defect. [pghybrid](https://github.com/pavangupta352/pghybrid) is a planned real-library compatibility workload; it is not a scheduler dependency.
+[neveroversell](https://github.com/pavangupta352/neveroversell) supplies an owned unsafe/safe workload for development. Its deliberately unsafe benchmark is not a historical production defect. The [pghybrid example](examples/pghybrid/README.md) runs the pinned library's actual hybrid search API on PostgreSQL 17 with pgvector 0.8.6, including installed-package exact replay. It is a compatibility workload; Interleave does not depend on pghybrid.
 
 ## License
 
