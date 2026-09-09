@@ -1,4 +1,5 @@
 import { constants } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { access, lstat, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -468,6 +469,25 @@ describe('parseRunArtifact', () => {
 });
 
 describe('run artifact file IO', () => {
+  test.skipIf(process.platform === 'win32')('rejects a named pipe without waiting for a writer', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'interleave-artifact-pipe-'));
+    const path = join(directory, 'run.json');
+    try {
+      const created = spawnSync('mkfifo', [path], { encoding: 'utf8' });
+      expect(created.status, created.stderr).toBe(0);
+      const checked = spawnSync(process.execPath, [
+        '--import', import.meta.resolve('tsx'), '--input-type=module', '-e',
+        `const {readRunArtifact}=await import(process.argv[1]);
+         try { await readRunArtifact(process.argv[2]); process.exitCode=1; }
+         catch(error) { console.log(error.message); }`,
+        new URL('../src/artifact.ts', import.meta.url).href, path,
+      ], { encoding: 'utf8', timeout: 5_000, maxBuffer: 16_384 });
+      expect(checked.error).toBeUndefined();
+      expect(checked.status, checked.stderr).toBe(0);
+      expect(checked.stdout).toMatch(/ordinary file/);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
   test('round trips a validated artifact through a path containing spaces', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'interleave artifacts '));
     const path = join(directory, 'failure run.json');

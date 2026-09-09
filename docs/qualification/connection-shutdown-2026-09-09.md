@@ -20,4 +20,4 @@ Additional real transaction tests exercise opposing row updates that produce Pos
 
 The deadlock assertions deliberately do not select a victim: PostgreSQL makes that decision. The retry repeats the complete transaction, as described in PostgreSQL's [deadlock documentation](https://www.postgresql.org/docs/18/explicit-locking.html#LOCKING-DEADLOCKS) and [serialization failure guidance](https://www.postgresql.org/docs/18/mvcc-serialization-failure-handling.html).
 
-The full Node.js 22/24 and PostgreSQL 16/17/18 CI result is tracked separately in the repository's workflow history. A local result does not substitute for that matrix.
+The subsequent [CI run at commit `af8593d5231f5e2c647315a819df74c59ff7f709`](https://github.com/pavangupta352/interleave/actions/runs/34310660849) passed all six PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0 jobs and the separate browser job. Each database job performs a locked installation, type checks, the complete real-database suite, a production build, and package inspection.

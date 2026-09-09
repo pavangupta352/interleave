@@ -16,7 +16,7 @@ export async function readRunArtifact(path: string): Promise<RunResult> {
 
   let handle;
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (error) {
     if (isErrorCode(error, 'ELOOP') || isErrorCode(error, 'EMULTIHOP')) {
       throw new Error(`Refusing to read symbolic link run artifact: ${path}`);
