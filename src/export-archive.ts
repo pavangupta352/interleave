@@ -67,7 +67,7 @@ export function readRuntimeArchive(compressed: Buffer): Map<string, Buffer> {
     if (!path.startsWith('package/') || paths.has(path)) throw new Error('Runtime archive contains an unsafe or duplicate package path');
     paths.add(path);
     const parts = path.split('/');
-    if (parts.includes('node_modules')) throw new Error('Runtime archive node_modules entries are unsupported bundled dependencies');
+    if (parts[1] === 'node_modules') throw new Error('Package-root archive node_modules entries are unsupported bundled dependencies');
     for (let index = 1; index < parts.length; index += 1) {
       const parent = parts.slice(0, index).join('/');
       if (files.has(parent.slice(8))) throw new Error('Runtime archive file conflicts with a parent directory');

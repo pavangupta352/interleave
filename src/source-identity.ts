@@ -419,7 +419,9 @@ async function dependencyGraph(requests: DependencyRequest[], state: CaptureStat
     await walk(directory!, directory!, state, async path => {
       if (extname(path) === '.node' && !(component === 'runtime' && allowRuntimeNative)) unsupported('Native addons are unsupported by source identity');
       files.push(record(portable(directory!, path), await state.read(directory!, path)));
-    }, path => !path.split('/').includes('node_modules'));
+    // Only the package-root installation directory belongs to the separate
+    // dependency graph. Nested package-owned fixtures remain actual file inputs.
+    }, path => path.split('/')[0] !== 'node_modules');
     Object.assign(node, fileComponent(files));
     for (const child of declaredDependencies(metadata, directory!)) node.dependencies.push(await edge(child, depth + 1));
     return { name: request.name, packageId: id, ...(request.optional ? { optional: true as const } : {}) };

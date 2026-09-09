@@ -187,11 +187,14 @@ manifest, and recorded source/runtime evidence. The manifest is not a signature 
 establish who created or trusted the source.
 
 Bundled runtime dependencies are outside this installation profile: nonempty or
-enabled `bundleDependencies`/`bundledDependencies` declarations and every archive
-path containing a `node_modules` component are rejected. Ordinary dependency
-directories are created later by npm using the selected installation profile. File reads
-also reject special files, including FIFOs, without waiting for another process
-to open them.
+enabled `bundleDependencies`/`bundledDependencies` declarations and package-root
+`node_modules` archive paths are rejected. Nested ordinary package-owned files,
+such as a dependency's `test/fixtures/node_modules` data, are preserved and hashed
+with the rest of that package; they are not silently omitted. Interleave's own
+`src` and `dist` trees still reject nested `node_modules` dependency shadows.
+Managed dependency directories are created later by npm using the selected
+installation profile. File reads reject symbolic links and special files,
+including FIFOs, without waiting for another process to open them.
 
 ## Folder layout
 

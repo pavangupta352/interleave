@@ -162,7 +162,7 @@ test('empty or disabled runtime bundling declarations preserve ordinary export b
   await expect(verifyRegressionExport(result.destination)).resolves.toMatchObject({ kind: 'interleave-regression' });
 });
 
-test.each(['node_modules/driver/index.js', 'dist/node_modules/driver/index.js'])('offline verification rejects an injected %s despite updated archive and lock integrity hashes', async injected => {
+test.each(['node_modules/driver/index.js', 'dist/node_modules/driver/index.js', 'src/node_modules/driver/index.js', 'dist/protocol/node_modules/driver/index.js'])('offline verification rejects an injected %s despite updated archive and lock integrity hashes', async injected => {
   const f = await fixture(); await exportRegression(await bindExportFixture(inert, f), f);
   const manifest = JSON.parse(await readFile(join(f.destination, 'manifest.json'), 'utf8'));
   const path = join(f.destination, manifest.runtime.package);

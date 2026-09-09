@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, expect, test } from 'vitest';
 import { captureSourceIdentity, SourceIdentityError } from '../src/source-identity.js';
+import { validateSourceIdentity } from '../src/source-schema.js';
 
 const roots: string[] = [];
 async function temporary() { const root = await realpath(await mkdtemp(join(tmpdir(), 'interleave source identity '))); roots.push(root); return root; }
@@ -67,6 +68,53 @@ test('captures modified installed dependencies, scoped packages, nested duplicat
   expect(after.components.source.fingerprint).toBe(before.components.source.fingerprint);
   const copied = await temporary(); await cp(root, copied, { recursive: true });
   expect((await captureSourceIdentity(join(copied, 'scenario.mjs'))).fingerprint).toBe(after.fingerprint);
+});
+
+test('binds package-owned files beneath nested node_modules directories, with actual Node behavior', async () => {
+  const root = await project(), driver = await dependency(root, 'driver');
+  await writeFile(join(root, 'scenario.cjs'), "console.log(require('driver'));");
+  await mkdir(join(driver, 'test/node_modules/fixture'), { recursive: true });
+  await writeFile(join(driver, 'index.js'), "module.exports=require('./test/entry.js');");
+  await writeFile(join(driver, 'test/entry.js'), "module.exports=require('fixture');");
+  const nested = join(driver, 'test/node_modules/fixture/index.js');
+  await writeFile(nested, 'module.exports=41;');
+  const entry = join(root, 'scenario.cjs'); expect(executeCommonJs(entry)).toBe('41');
+  const before = await captureSourceIdentity(entry); validateSourceIdentity(before);
+  const first = before.components.dependencies.packages.find(pkg => pkg.name === 'driver')!;
+  expect(first.files.find(file => file.path === 'test/node_modules/fixture/index.js')?.sha256).toBe(createHash('sha256').update(await readFile(nested)).digest('hex'));
+  await writeFile(nested, 'module.exports=42;'); expect(executeCommonJs(entry)).toBe('42');
+  const after = await captureSourceIdentity(entry); validateSourceIdentity(after);
+  expect(after.components.dependencies.fingerprint).not.toBe(before.components.dependencies.fingerprint);
+  expect(after.fingerprint).not.toBe(before.fingerprint);
+});
+
+test('keeps package-root managed dependencies separate from nested package-owned data', async () => {
+  const root = await project(), driver = await dependency(root, 'driver', '1.0.0', { child: '1.0.0' });
+  await dependency(driver, 'child'); await writeFile(join(root, 'scenario.mjs'), "import 'driver';");
+  await mkdir(join(driver, 'fixtures/node_modules'), { recursive: true });
+  await writeFile(join(driver, 'fixtures/node_modules/value.json'), '{"value":41}');
+  const captured = await captureSourceIdentity(join(root, 'scenario.mjs')); validateSourceIdentity(captured);
+  const pkg = captured.components.dependencies.packages.find(item => item.name === 'driver')!;
+  expect(pkg.files.some(file => file.path.startsWith('node_modules/'))).toBe(false);
+  expect(pkg.files.some(file => file.path === 'fixtures/node_modules/value.json')).toBe(true);
+  expect(captured.components.dependencies.packages.find(item => item.name === 'child')!.files.map(file => file.path)).toEqual(['index.js', 'package.json']);
+});
+
+test('retains special-file, symbolic-link, native and byte limits in newly included package-owned directories', async () => {
+  const root = await project(), driver = await dependency(root, 'driver');
+  await writeFile(join(root, 'scenario.mjs'), "import 'driver';");
+  const nested = join(driver, 'fixtures/node_modules'); await mkdir(nested, { recursive: true });
+  await symlink(join(driver, 'index.js'), join(nested, 'linked.js'));
+  await expect(captureSourceIdentity(join(root, 'scenario.mjs'))).rejects.toMatchObject({ kind: 'unsupported' });
+  await rm(join(nested, 'linked.js')); await writeFile(join(nested, 'addon.node'), Buffer.from([1]));
+  await expect(captureSourceIdentity(join(root, 'scenario.mjs'))).rejects.toMatchObject({ kind: 'unsupported' });
+  await rm(join(nested, 'addon.node'));
+  const before = await captureSourceIdentity(join(root, 'scenario.mjs'));
+  await writeFile(join(nested, 'large.bin'), Buffer.alloc(4096));
+  await expect(captureSourceIdentity(join(root, 'scenario.mjs'), { maxBytes: before.byteCount + 2048 })).rejects.toMatchObject({ kind: 'budget' });
+  await rm(join(nested, 'large.bin'));
+  const fifo = spawnSync('mkfifo', [join(nested, 'pipe')], { encoding: 'utf8' }); expect(fifo.status, fifo.stderr).toBe(0);
+  await expect(captureSourceIdentity(join(root, 'scenario.mjs'))).rejects.toMatchObject({ kind: 'unsupported' });
 });
 
 function executeCommonJs(file: string): string {

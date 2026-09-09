@@ -428,6 +428,9 @@ function verifyPackedRuntime(bytes: Buffer, source: SourceIdentity, runtime: { n
   const selected: SourceIdentityFile[] = [];
   for (const [path, data] of archive) {
     const parts = path.split('/');
+    if (['src', 'dist'].includes(parts[0]!) && parts.includes('node_modules')) {
+      throw new Error('Packed Interleave runtime src/dist node_modules entries are unsupported dependency shadows');
+    }
     if (path === 'package.json' || (path.startsWith('dist/') && path.endsWith('.js')
         && !parts.some(part => ['report', 'cli', 'examples', 'vendor', 'node_modules'].includes(part)))) {
       selected.push({ path, bytes: data.length, sha256: digest(data) });
