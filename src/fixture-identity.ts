@@ -1,5 +1,18 @@
 import { createHash } from 'node:crypto';
 import { Client, escapeIdentifier, type QueryResultRow } from 'pg';
+import {
+  PGVECTOR_EXTENSION_VERSION,
+  PGVECTOR_FIXTURE_PROFILE,
+  PGVECTOR_MEMBER_COUNT,
+  PGVECTOR_MEMBER_INVENTORY_SHA256,
+  PGVECTOR_SETTING_CONTRACT_SHA256,
+  pgvectorContractDigests,
+  pgvectorContractQueries,
+  pgvectorMemberInventorySql,
+  pgvectorMembership,
+  pgvectorSettingContractSql,
+  pgvectorSettingNames,
+} from './vector-catalog.js';
 
 export type FixtureIdentityErrorCode = 'unsupported' | 'budget-exceeded' | 'not-quiescent' | 'aborted' | 'database-error';
 export type FixtureIdentityProfile = 'native' | 'postgresql17-pgvector0.8.6-v1';
@@ -16,6 +29,12 @@ export interface FixtureIdentityOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
 }
+export type FixtureIdentityProfile = 'native' | typeof PGVECTOR_FIXTURE_PROFILE;
+export type ResolvedFixtureIdentityProfile =
+  | 'postgresql16-native-v1'
+  | 'postgresql17-native-v1'
+  | 'postgresql18-native-v1'
+  | typeof PGVECTOR_FIXTURE_PROFILE;
 export interface FixtureIdentity {
   version: 1;
   profile: ResolvedFixtureIdentityProfile;
@@ -255,6 +274,10 @@ const userCreatedReservedObjects = `
  * This is fixture provenance, not application-source or server-binary attestation.
  */
 export async function captureFixtureIdentity(connectionString: string, options: FixtureIdentityOptions = {}): Promise<FixtureIdentity> {
+  const requestedProfile = options.profile ?? 'native';
+  if (requestedProfile !== 'native' && requestedProfile !== PGVECTOR_FIXTURE_PROFILE) {
+    throw new TypeError(`profile must be native or ${PGVECTOR_FIXTURE_PROFILE}`);
+  }
   const maxObjects = limit(options.maxObjects, 10_000, 100_000, 'maxObjects');
   const maxRows = limit(options.maxRows, 100_000, 1_000_000, 'maxRows');
   const maxBytes = limit(options.maxBytes, 64 * 1024 * 1024, 1024 * 1024 * 1024, 'maxBytes');
@@ -311,21 +334,83 @@ export async function captureFixtureIdentity(connectionString: string, options: 
     const versionMatch = /^(16|17|18)\d{4}$/.exec(version[0]!.version);
     if (!versionMatch) throw new FixtureIdentityError('unsupported', 'Fixture identity profile is qualified for PostgreSQL 16, 17, and 18 only');
     const major = versionMatch[1] as '16' | '17' | '18';
-    const profile = `postgresql${major}-native-v1` as FixtureIdentity['profile'];
+    if (requestedProfile === PGVECTOR_FIXTURE_PROFILE && major !== '17') {
+      throw new FixtureIdentityError('unsupported', `${PGVECTOR_FIXTURE_PROFILE} requires PostgreSQL 17`);
+    }
+    const profile = requestedProfile === PGVECTOR_FIXTURE_PROFILE
+      ? PGVECTOR_FIXTURE_PROFILE
+      : `postgresql${major}-native-v1` as FixtureIdentity['profile'];
+    const vectorProfile = profile === PGVECTOR_FIXTURE_PROFILE;
     const databaseLocaleColumn = major === '16' ? 'd.daticulocale' : 'd.datlocale';
     const collationLocaleColumn = major === '16' ? 'c.colliculocale' : 'c.colllocale';
     await quiescent();
     // Even casting a builtin jsonb catalog record to text can invoke a custom
     // cast. Reject before the first serialization, while observing original GUCs.
-    if ((await query('SELECT 1 FROM pg_catalog.pg_cast WHERE oid OPERATOR(pg_catalog.>=) 16384 LIMIT 1')).length) {
+    const customCastSql = vectorProfile
+      ? `SELECT 1 FROM pg_catalog.pg_cast c WHERE c.oid OPERATOR(pg_catalog.>=) 16384 AND NOT (${pgvectorMembership.cast}) LIMIT 1`
+      : 'SELECT 1 FROM pg_catalog.pg_cast WHERE oid OPERATOR(pg_catalog.>=) 16384 LIMIT 1';
+    if ((await query(customCastSql)).length) {
       throw new FixtureIdentityError('unsupported', 'Fixture identity does not yet cover custom casts');
     }
     if ((await query(`SELECT 1 FROM (${userCreatedReservedObjects}) reserved_object LIMIT 1`)).length) {
       throw new FixtureIdentityError('unsupported', 'Fixture identity does not cover user-created objects in reserved PostgreSQL schemas');
     }
-    const settings = [await records('effective-settings', 'SELECT name,setting,unit FROM pg_catalog.pg_settings')];
-    // Original actor-equivalent defaults above are evidence; normalize only this capture connection.
-    await query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const vectorSchema: string[] = [];
+    if (vectorProfile) {
+      const extension = await query<{
+        extname: string; extversion: string; schema: string; extrelocatable: boolean;
+        configuration_is_null: boolean; conditions_is_null: boolean; owner: string;
+      }>(`SELECT e.extname,e.extversion,n.nspname AS schema,e.extrelocatable,
+        e.extconfig IS NULL AS configuration_is_null,e.extcondition IS NULL AS conditions_is_null,
+        CASE WHEN e.extowner OPERATOR(pg_catalog.=) (SELECT oid FROM pg_catalog.pg_roles WHERE rolname OPERATOR(pg_catalog.=) CURRENT_USER)
+          THEN '$current_user' ELSE pg_catalog.pg_get_userbyid(e.extowner) END AS owner
+        FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid OPERATOR(pg_catalog.=) e.extnamespace
+        WHERE e.extname OPERATOR(pg_catalog.=) 'vector'`);
+      if (extension.length !== 1 || extension[0]!.extversion !== PGVECTOR_EXTENSION_VERSION
+        || extension[0]!.schema !== 'public' || extension[0]!.extrelocatable !== true
+        || extension[0]!.configuration_is_null !== true || extension[0]!.conditions_is_null !== true
+        || extension[0]!.owner !== '$current_user') {
+        throw new FixtureIdentityError('unsupported', `${PGVECTOR_FIXTURE_PROFILE} requires the exact vector 0.8.6 extension in public owned by the capture role`);
+      }
+      const inventory = await query(pgvectorMemberInventorySql);
+      const canonicalInventory = JSON.stringify(inventory.map(row => JSON.stringify(row)).sort());
+      account(Buffer.byteLength(canonicalInventory), inventory.length);
+      if (inventory.length !== PGVECTOR_MEMBER_COUNT || hash(canonicalInventory) !== PGVECTOR_MEMBER_INVENTORY_SHA256) {
+        throw new FixtureIdentityError('unsupported', 'pgvector extension member inventory differs from the qualified 0.8.6 profile');
+      }
+    }
+    let settings: string[];
+    if (vectorProfile) {
+      // Validate the built-in catalog contract before asking the server to load extension code.
+      await query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const originalPath = (await query<{ search_path: string }>("SELECT pg_catalog.current_setting('search_path') AS search_path"))[0]!.search_path;
+      await query("SELECT pg_catalog.set_config('search_path','pg_catalog',true)");
+      for (const [label, sql] of Object.entries(pgvectorContractQueries)) {
+        const contractLabel = `pgvector-${label.replaceAll('_', '-')}`;
+        const contractDigest = await records(contractLabel, sql);
+        if (contractDigest !== pgvectorContractDigests[label]!) {
+          throw new FixtureIdentityError('unsupported', `pgvector ${label.replaceAll('_', ' ')} catalog contract differs from the qualified 0.8.6 profile`);
+        }
+        vectorSchema.push(contractDigest);
+      }
+      await query("LOAD '$libdir/vector'");
+      const settingContract = await records('pgvector-setting-definitions', pgvectorSettingContractSql);
+      if (settingContract !== PGVECTOR_SETTING_CONTRACT_SHA256) {
+        throw new FixtureIdentityError('unsupported', 'pgvector setting catalog contract differs from the qualified 0.8.6 profile');
+      }
+      await query("SELECT pg_catalog.set_config('search_path',$1,true)", [originalPath]);
+      settings = [settingContract, await records('effective-settings', 'SELECT name,setting,unit FROM pg_catalog.pg_settings')];
+      const vectorSettings = await query<{ name: string }>(`SELECT name FROM pg_catalog.pg_settings
+        WHERE name OPERATOR(pg_catalog.=) ANY($1::pg_catalog.text[]) ORDER BY name COLLATE "C"`, [[...pgvectorSettingNames]]);
+      if (vectorSettings.length !== pgvectorSettingNames.length
+        || vectorSettings.some((row, index) => row.name !== [...pgvectorSettingNames].sort()[index])) {
+        throw new FixtureIdentityError('unsupported', 'pgvector effective setting inventory differs from the qualified 0.8.6 profile');
+      }
+    } else {
+      settings = [await records('effective-settings', 'SELECT name,setting,unit FROM pg_catalog.pg_settings')];
+      // Original actor-equivalent defaults above are evidence; normalize only this capture connection.
+      await query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    }
     await query("SELECT set_config('statement_timeout',$1,true), set_config('lock_timeout',$1,true)", [String(Math.max(1, Math.floor(timeoutMs - (performance.now() - started))))]);
     await query("SET LOCAL search_path=pg_catalog; SET LOCAL timezone='UTC'; SET LOCAL datestyle='ISO, YMD'; SET LOCAL intervalstyle='postgres'; SET LOCAL extra_float_digits=3; SET LOCAL bytea_output='hex'; SET LOCAL lc_monetary='C'; SET LOCAL row_security=off");
     // pg_settings omits custom placeholders. Read the resolved pg 8.23 startup
@@ -357,12 +442,28 @@ export async function captureFixtureIdentity(connectionString: string, options: 
       SELECT pg_get_userbyid(m.roleid) AS role,pg_get_userbyid(m.member) AS member,
       pg_get_userbyid(m.grantor) AS grantor,m.admin_option,m.inherit_option,m.set_option
       FROM pg_auth_members m JOIN relevant p ON p.id=m.member`));
-    for (const [feature, sql] of unsupportedQueries) {
+    const pgvectorUnsupportedQueries: [string, string][] = vectorProfile ? [
+      ['extensions other than plpgsql and vector 0.8.6', "SELECT 1 FROM pg_catalog.pg_extension WHERE extname NOT IN ('plpgsql','vector')"],
+      ['custom range or base types', `SELECT 1 FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n ON n.oid OPERATOR(pg_catalog.=) t.typnamespace WHERE ${userNamespace} AND t.typtype NOT IN ('c','d','e') AND NOT (t.typelem OPERATOR(pg_catalog.<>) 0 AND t.typlen OPERATOR(pg_catalog.=) -1) AND NOT (${pgvectorMembership.type})`],
+      ['custom aggregates or procedural languages other than SQL and PL/pgSQL', `SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid OPERATOR(pg_catalog.=) p.pronamespace JOIN pg_catalog.pg_language l ON l.oid OPERATOR(pg_catalog.=) p.prolang WHERE ${userNamespace} AND (p.prokind NOT IN ('f','p') OR l.lanname NOT IN ('sql','plpgsql')) AND NOT (${pgvectorMembership.procedure})`],
+      ['custom casts', `SELECT 1 FROM pg_catalog.pg_cast c WHERE c.oid OPERATOR(pg_catalog.>=) 16384 AND NOT (${pgvectorMembership.cast})`],
+      ['custom operators', `SELECT 1 FROM pg_catalog.pg_operator o JOIN pg_catalog.pg_namespace n ON n.oid OPERATOR(pg_catalog.=) o.oprnamespace WHERE ${userNamespace} AND NOT (${pgvectorMembership.operator})`],
+      ['custom operator classes', `SELECT 1 FROM pg_catalog.pg_opclass o JOIN pg_catalog.pg_namespace n ON n.oid OPERATOR(pg_catalog.=) o.opcnamespace WHERE ${userNamespace} AND NOT (${pgvectorMembership.operatorClass})`],
+      ['custom operator families', `SELECT 1 FROM pg_catalog.pg_opfamily o JOIN pg_catalog.pg_namespace n ON n.oid OPERATOR(pg_catalog.=) o.opfnamespace WHERE ${userNamespace} AND NOT (${pgvectorMembership.operatorFamily})`],
+      ['custom access methods', `SELECT 1 FROM pg_catalog.pg_am am WHERE am.oid OPERATOR(pg_catalog.>=) 16384 AND NOT (${pgvectorMembership.accessMethod})`],
+      ...unsupportedQueries.filter(([feature]) => ![
+        'extensions other than plpgsql', 'custom range or base types',
+        'custom aggregates or procedural languages other than SQL and PL/pgSQL', 'custom casts',
+        'custom operators', 'custom operator classes/families',
+      ].includes(feature)),
+    ] : unsupportedQueries;
+    for (const [feature, sql] of pgvectorUnsupportedQueries) {
       if ((await query(`SELECT 1 FROM (${sql}) unsupported LIMIT 1`)).length) throw new FixtureIdentityError('unsupported', `Fixture identity does not yet cover ${feature}`);
     }
-    const schema: string[] = [];
+    const schema: string[] = [...vectorSchema];
     const nativeSchemaQueries = {
       ...schemaQueries,
+      ...(vectorProfile ? { functions: `${schemaQueries.functions} AND NOT (${pgvectorMembership.procedure})` } : {}),
       collations: `SELECT n.nspname,c.collname,pg_get_userbyid(c.collowner) AS owner,c.collprovider,c.collisdeterministic,c.collencoding,
         c.collcollate,c.collctype,${collationLocaleColumn} AS locale,c.collicurules AS locale_rules,
         c.collversion,pg_collation_actual_version(c.oid) AS actual_version

@@ -62,6 +62,11 @@ integration('fixture identity integration with real PostgreSQL', () => {
     const identity = await captureFixtureIdentity(owned.connectionString);
     expect(identity.profile).toBe(`postgresql${major}-native-v1`);
   });
+  test('requires PostgreSQL 17 and the exact vector extension for the pgvector profile', async () => {
+    const owned = await database();
+    await expect(captureFixtureIdentity(owned.connectionString, { profile: 'postgresql17-pgvector0.8.6-v1' }))
+      .rejects.toMatchObject({ code: 'unsupported' });
+  });
   test('fresh database names, allocation OIDs and row insertion order do not change the fixture identity', async () => {
     const first = await populated();
     const churn = await database('CREATE TABLE allocation_churn (id integer); DROP TABLE allocation_churn');

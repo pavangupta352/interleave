@@ -13,11 +13,11 @@ if (!['all', 'unit', 'integration', 'browser'].includes(suite)) {
   console.error('[test] Expected test suite: all, unit, integration, or browser.');
   process.exit(1);
 }
-const supportedImages = new Set(['postgres:16', 'postgres:17', 'postgres:18']);
+const supportedImages = new Set(['postgres:16', 'postgres:17', 'postgres:18', 'pgvector/pgvector:0.8.6-pg17-bookworm']);
 const image = process.env.INTERLEAVE_TEST_POSTGRES_IMAGE ?? 'postgres:16';
 const imageError = supportedImages.has(image)
   ? undefined
-  : 'INTERLEAVE_TEST_POSTGRES_IMAGE must be exactly postgres:16, postgres:17, or postgres:18.';
+  : 'INTERLEAVE_TEST_POSTGRES_IMAGE must be exactly postgres:16, postgres:17, postgres:18, or pgvector/pgvector:0.8.6-pg17-bookworm.';
 const ownerLabel = 'io.interleave.test-run';
 let managed;
 let interrupted;
