@@ -3,10 +3,10 @@ import { Pool } from 'pg';
 import { forPg } from './vendor/pghybrid/dist/index.js';
 import type { Scenario } from '../../src/types.js';
 
-const QUERY = 'renewal notice period';
-const EMBEDDING = [1, 0, 0, 0, 0, 0, 0, 0];
-const EXPECTED_TITLES = ['Termination for convenience', 'Renewal pricing', 'Renewal terms'];
-const CONFIG = {
+export const QUERY = 'renewal notice period';
+export const EMBEDDING = [1, 0, 0, 0, 0, 0, 0, 0];
+export const EXPECTED_TITLES = ['Termination for convenience', 'Renewal pricing', 'Renewal terms'];
+export const CONFIG = {
   table: 'adapter_fixture',
   textColumn: 'content',
   vectorColumn: 'embedding',

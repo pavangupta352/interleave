@@ -31,6 +31,7 @@ try {
   compile([
     ...['scenario.ts', 'demo-naive.ts', 'demo-safe.ts'].map(file => join(repository, 'examples/neveroversell', file)),
     join(repository, 'examples/pghybrid/scenario.ts'),
+    join(repository, 'examples/pghybrid/adapters.ts'),
   ], {
     ...parsed.options, rootDir: repository, outDir: temporary, declaration: false, declarationMap: false, sourceMap: false,
   });
