@@ -272,7 +272,7 @@ const userCreatedReservedObjects = `
  * This is fixture provenance, not application-source or server-binary attestation.
  */
 export async function captureFixtureIdentity(connectionString: string, options: FixtureIdentityOptions = {}): Promise<FixtureIdentity> {
-  const requestedProfile = options.profile ?? 'native';
+  const requestedProfile = options.profile === undefined ? 'native' : options.profile;
   if (requestedProfile !== 'native' && requestedProfile !== PGVECTOR_FIXTURE_PROFILE) {
     throw new TypeError(`profile must be native or ${PGVECTOR_FIXTURE_PROFILE}`);
   }

@@ -13,7 +13,8 @@ if (!['all', 'unit', 'integration', 'browser'].includes(suite)) {
   console.error('[test] Expected test suite: all, unit, integration, or browser.');
   process.exit(1);
 }
-const supportedImages = new Set(['postgres:16', 'postgres:17', 'postgres:18', 'pgvector/pgvector:0.8.6-pg17-bookworm']);
+const pgvectorImage = 'pgvector/pgvector:0.8.6-pg17-bookworm';
+const supportedImages = new Set(['postgres:16', 'postgres:17', 'postgres:18', pgvectorImage]);
 const image = process.env.INTERLEAVE_TEST_POSTGRES_IMAGE ?? 'postgres:16';
 const imageError = supportedImages.has(image)
   ? undefined
@@ -124,7 +125,11 @@ async function cleanupTestServer() {
 
 async function runVitest(databaseUrl) {
   checkInterrupted();
-  const env = { ...process.env, INTERLEAVE_TEST_SUITE: suite };
+  const env = {
+    ...process.env,
+    INTERLEAVE_TEST_SUITE: suite,
+    INTERLEAVE_TEST_FIXTURE_PROFILE: image === pgvectorImage ? 'postgresql17-pgvector0.8.6-v1' : 'native',
+  };
   if (databaseUrl) { env.TEST_DATABASE_URL = databaseUrl; env.INTERLEAVE_TEST_DATABASE_URL = databaseUrl; }
   const entry = suite === 'browser' ? resolve(repository, 'test/browser/run.mjs')
     : fileURLToPath(new URL('./vitest.mjs', import.meta.resolve('vitest/package.json')));

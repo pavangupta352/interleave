@@ -55,6 +55,12 @@ async function queryFromUrl(url: string, sql: string) {
 
 integration('fixture identity integration with real PostgreSQL', () => {
   afterAll(async () => { for (const owned of databases) await owned.close(); });
+
+  test('rejects an explicit null profile instead of treating it as the native default', async () => {
+    await expect(captureFixtureIdentity('not-a-database-url', {
+      profile: null,
+    } as unknown as Parameters<typeof captureFixtureIdentity>[1])).rejects.toThrow(/profile must be native/);
+  });
   test('selects the qualified native capture profile for the actual server major', async () => {
     const owned = await database();
     const major = (await owned.db.query<{ major: string }>("SELECT current_setting('server_version_num')::int / 10000 AS major")).rows[0]!.major;
