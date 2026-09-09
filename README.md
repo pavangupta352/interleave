@@ -1,93 +1,76 @@
 # Interleave
 
-**Turn intermittent Postgres races into repeatable regression tests.**
+Find a Postgres race in real application code, then keep the failing order as a regression test.
 
-Interleave runs existing application operations against real PostgreSQL and controls when their database commands are released. It finds invariant violations, shows the recorded command order, and retains evidence for replay and regression tests.
+Interleave runs your concurrent operations against real PostgreSQL through a local proxy. You supply setup and an invariant; it controls command release order and records the evidence for replay.
 
-> Development is in progress. The API, CLI, offline viewer and supported regression export run end to end. File replay binds application source, installed dependencies, runtime, database fixture and actor connections. Broader compatibility, historical cases and release qualification remain in progress. There is no stable release yet.
+![Recorded neveroversell failure: two buyers read the same stock before either writes. The report shows the released SQL, PostgreSQL completion, and violated capacity invariant.](docs/assets/evidence-record.png)
 
-![An actual oversell: both actors read the same stock before either writes, with the released SQL and PostgreSQL result visible in the evidence report.](docs/assets/evidence-record.png)
+This actual run of [neveroversell's unchanged unsafe operation](examples/neveroversell/README.md) sold the last unit twice, with its optional delay set to zero. It is an owned demonstration, not a historical production defect.
 
-An actual PostgreSQL run of the unchanged `neveroversell` unsafe operation, with
-its optional delay set to zero. Both buyers read one available seat before either
-writes. The recorded invariant catches two purchases against a capacity of one.
+The library, CLI, offline viewer and supported regression exports are implemented. Development and release qualification continue; there is no stable release yet. Start from this checkout.
 
-## The problem
+## Try the oversell example
 
-Two workers read the same row. Both decide they can claim it. Both proceed.
-
-Running a test concurrently does not guarantee that the critical reads happen before either write. A successful run may simply have missed the ordering that exposes the bug.
-
-The workflow is:
-
-1. Define disposable database setup, concurrent application operations and an invariant.
-2. Give each operation a local proxy connection URL, keeping its existing queries and driver.
-3. Explore a bounded set of command orders against actual PostgreSQL.
-4. Inspect the statements, completion summaries and observed lock waits behind a violation.
-5. Reduce the ordering instructions and retain a verified replay fixture.
-
-## What the scheduler controls
-
-The proxy schedules complete driver command cycles. Simple Query batches remain intact; ordinary parameterized queries retain their original protocol bytes. PostgreSQL still owns query execution, transactions and lock resumption. Server-side functions are opaque.
-
-Postgres.js parameterized queries have an explicit profile that separately gates
-statement description and execution, using real PostgreSQL metadata. The default
-complete-cycle profile stays unchanged. See the [tested profiles](docs/compatibility.md).
-
-A passing exploration means no violation was observed in the schedules actually tested. It is not proof that the application has no races. Changed source, dependencies, fixtures or queries invalidate exact file replay; use a guided run or fresh exploration to evaluate a repair.
-
-Exact replay checks the recorded command and wait contract against captured
-starting conditions. Results are observed again: row counts, returned actor
-values and the invariant outcome can differ when application behavior depends
-on uncontrolled inputs such as randomness or external services. Reduction
-additionally requires the same invariant failure fingerprint.
-
-Each actor defaults to one physical connection. An explicit auxiliary profile
-allows queryless monitor connections while retaining one live command producer.
-See [compatibility](docs/compatibility.md) for measured PostgreSQL profiles and
-[API boundaries](docs/api.md) for source capture, pools and replay.
-
-## Development
-
-The project targets Node.js 22.18+ and PostgreSQL. The initial driver qualification uses node-postgres. Current implementation work and acceptance gates are described in the [plan](docs/plans/implementation.md) and [architecture specification](docs/architecture/specification.md).
+Use Node.js 22.18+ and a running Docker engine:
 
 ```sh
+git clone https://github.com/pavangupta352/interleave.git
+cd interleave
 npm ci
-npm run typecheck
-npm test
+npm test -- test/neveroversell.integration.test.ts
 ```
 
-`npm test` runs every unit and integration test. With Docker running, it starts an official `postgres:16` container on a dynamically assigned loopback port, waits for health, and removes that exact container and its anonymous volumes when tests finish, fail, or are interrupted. The first run may download the image.
+The test passes by reproducing the oversell, replaying it three times, and checking the original safe reservation API.
 
-Use `npm run test:unit` to run all unit tests without Docker or PostgreSQL. Use `npm run test:integration` for integration files only. Extra arguments reach Vitest unchanged, for example `npm test -- test/neveroversell.integration.test.ts`.
+The npm pretest step builds Interleave. By default, the harness starts an owned `postgres:16` container on a random loopback port and removes it and its volumes after completion, failure or interruption. The first run may download the image. An explicit `TEST_DATABASE_URL` uses your dedicated test server instead and leaves it running.
 
-For desktop and mobile report checks in Chromium, Firefox and WebKit, install the browser runtimes with `npx playwright install --with-deps chromium firefox webkit`, then run `npm run test:browser`. These checks generate evidence from a real PostgreSQL execution and use the same disposable-server lifecycle.
+## Record and inspect a failure
 
-To use an existing server, set `TEST_DATABASE_URL` to a **dedicated test PostgreSQL administrator database** with permission to create and drop databases, then run the same commands. Tests create and drop uniquely named `interleave_` databases; the harness leaves your supplied server running. The legacy `INTERLEAVE_TEST_DATABASE_URL` variable is accepted when `TEST_DATABASE_URL` is absent. There is no default connection to an existing local server. Direct `npx vitest run` integration runs require an explicit URL; the npm commands provision Docker when no URL is supplied.
+Set `TEST_DATABASE_URL` to the administrator URL of a **dedicated PostgreSQL test server** with permission to create and drop databases. The CLI uses that server and creates and cleans up a uniquely named database for each execution.
 
-Build the development CLI with `npm run build`, then run `node dist/cli.js --help`.
-With `TEST_DATABASE_URL` set as described above, try:
+With that variable set, use the CLI built by the quickstart:
 
 ```sh
 node dist/cli.js demo neveroversell --out failure.interleave.json
-# The deliberately unsafe demo exits 1 because it reproduces an oversell.
+# Exit 1 is expected: the unsafe operation violates the invariant.
 node dist/cli.js report failure.interleave.json --out failure.html
 node dist/cli.js demo neveroversell --safe
 ```
 
-Open `failure.html` locally to inspect the recorded order. Follow the
-[CLI guide](docs/cli.md), [library API](docs/api.md), [offline report guide](docs/reports.md)
-and [portable regression guide](docs/regressions.md) for the complete implemented
-workflow. Registry installation instructions will accompany the verified release.
+Open `failure.html` to inspect the order, SQL, completions and observed lock waits. The [report](docs/reports.md) works offline without executing application code. Output files must be new, or explicitly replaced with `--force`. Review evidence before sharing: SQL, errors and selected actor observations can contain private data.
 
-## Related work
+## Use your application
 
-[PostgreSQL's isolation tester](https://github.com/postgres/postgres/blob/master/src/test/isolation/README) already explores interleavings of authored SQL sessions. Interleave focuses on running existing application operations and retaining their evidence as regression artifacts.
+Define setup, two to eight named concurrent operations, and an invariant. Each operation receives a proxy URL and uses its existing driver and queries. Close its clients in `finally`; each actor defaults to one live physical connection.
 
-[determined](https://github.com/glideapps/determined) provides deterministic TypeScript simulation primitives. [Antithesis](https://antithesis.com/) controls a much broader execution environment. A local statement proxy has different boundaries.
+The [library API](docs/api.md) and [CLI guide](docs/cli.md) cover the workflow:
 
-[neveroversell](https://github.com/pavangupta352/neveroversell) supplies an owned unsafe/safe workload for development. Its deliberately unsafe benchmark is not a historical production defect. The [pghybrid example](examples/pghybrid/README.md) runs the pinned library's actual hybrid search API on PostgreSQL 17 with pgvector 0.8.6, including installed-package exact replay. It is a compatibility workload; Interleave does not depend on pghybrid.
+| Operation | What it does |
+| --- | --- |
+| `explore` / `run` | Try bounded actor-choice prefixes and retain observed violations |
+| `replay` | Check the recorded command and wait contract against captured starting conditions |
+| `minimize` | Remove ordering instructions while reproducing the same invariant failure |
+| `report` / `export` | Inspect the evidence offline or package a supported scenario for regression replay |
+
+Prefer scenario files for supervised execution and source identity. Exact file replay checks source, installed dependencies, runtime, fixture and actor connections. After a repair, use a guided rerun or fresh exploration. Exact replay observes results again; row counts, actor values and the invariant outcome can differ. Reduction separately requires the same failure fingerprint and reports local minimality under the runner's fallback policy.
+
+Search defaults to FIFO; an optional seed selects pending prefixes deterministically when observations match. Run, time, step and retention limits remain visible, including partial evidence. Keep the artifact for exact replay: a seed does not control external inputs, and a passing bounded search does not prove race freedom.
+
+[Portable exports](docs/regressions.md) preserve the artifact, selected source, package lock and matching built runtime. Supported shared installations bundle exact dependency archives for offline installation. Byte verification and a successful clean-install replay are separate checks.
+
+## Tested scope
+
+The [compatibility matrix](docs/compatibility.md) covers PostgreSQL 16/17/18 with node-postgres 8.23.0 and Node.js 22.18.0/24.7.0 CI runs. Postgres.js 3.4.9 has an [explicit profile](examples/postgresjs/README.md) for parameterized queries. The [pghybrid example](examples/pghybrid/README.md) qualifies its pinned `forPg` read path on PostgreSQL 17 with pgvector 0.8.6, including installed-package exact replay.
+
+The proxy preserves protocol bytes. PostgreSQL owns statement execution and lock resumption. SQL batches remain intact; server-side functions are opaque. Unsupported protocol and fixture features fail explicitly. Clocks, randomness and external services remain uncontrolled. The [architecture](docs/architecture/specification.md) and [validation records](docs/validation.md) detail these boundaries and remaining work.
+
+## Development and related work
+
+`npm test` runs the native unit and integration suites; `npm run test:unit` needs neither PostgreSQL nor Docker. See [contributing](CONTRIBUTING.md) for local checks and the [implementation plan](docs/plans/implementation.md) for remaining acceptance work.
+
+[PostgreSQL's isolation tester](https://github.com/postgres/postgres/blob/master/src/test/isolation/README) already explores interleavings of authored SQL sessions. Interleave focuses on existing application operations and their replay evidence. [determined](https://github.com/glideapps/determined) provides deterministic TypeScript simulation primitives; [Antithesis](https://antithesis.com/) controls a broader execution environment.
 
 ## License
 
-MIT © Pavan Gupta. Reused third-party source retains its own attribution and notices.
+[MIT](LICENSE) © Pavan Gupta. Vendored application source and bundled dependencies retain their own [neveroversell](examples/neveroversell/vendor/LICENSE), [pghybrid](examples/pghybrid/vendor/LICENSE) and other required license notices.
