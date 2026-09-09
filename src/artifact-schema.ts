@@ -482,8 +482,14 @@ function validateMetadataCompletion(value: unknown, path: string): MetadataCompl
 
 function validateStageSequence(trace: TraceStep[], complete: boolean): void {
   const cycles = new Map<string, { next: number; prefix?: TraceStep; previous?: TraceStep }>();
+  const actorCycles = new Map<string, { connection: number; completedAt?: number }>();
   for (const step of trace) {
     const path = `$.trace[${step.index}]`;
+    const active = actorCycles.get(step.actor);
+    if (active?.completedAt !== undefined && active.completedAt <= step.releasedAt) actorCycles.delete(step.actor);
+    else if (active && active.connection !== step.connection) {
+      throw new TypeError(`${path}.connection: another command connection cannot enter an actor's open staged cycle`);
+    }
     const key = `${step.actor}\0${step.connection}`;
     const state = cycles.get(key) ?? { next: 0 };
     if (state.previous && (state.previous.completedAt === undefined || state.previous.completedAt > step.releasedAt)) {
@@ -502,11 +508,23 @@ function validateStageSequence(trace: TraceStep[], complete: boolean): void {
       if (metadata?.kind !== 'metadata') throw new TypeError(`${path}: prefix requires a completed metadata stage`);
       const required = metadata.result === 'error' ? 'recover' : 'execute';
       if (step.stage !== required) throw new TypeError(`${path}.stage: prefix metadata requires ${required}`);
+      if (step.stage === 'recover' && metadata.result === 'error' && step.completion?.kind === 'ready') {
+        if (step.completion.transactionStatus === 'T') throw new TypeError(`${path}.completion.transactionStatus: Sync-only error recovery cannot leave a healthy transaction open`);
+        const error = step.completion.error;
+        if (error && (error.code !== metadata.error.code || error.message !== metadata.error.message)) {
+          throw new TypeError(`${path}.completion.error: retained recovery error must match its metadata prefix`);
+        }
+      }
+      actorCycles.set(step.actor, { connection: step.connection,
+        ...(step.completedAt === undefined ? {} : { completedAt: step.completedAt }) });
       delete state.prefix;
       state.next++;
     } else {
       if (state.prefix) throw new TypeError(`${path}: an open describe cycle requires its continuation`);
-      if (step.stage === 'describe') state.prefix = step;
+      if (step.stage === 'describe') {
+        state.prefix = step;
+        actorCycles.set(step.actor, { connection: step.connection });
+      }
       else state.next++;
     }
     if (complete && !step.completion) throw new TypeError(`${path}: completed execution requires every released stage to complete`);

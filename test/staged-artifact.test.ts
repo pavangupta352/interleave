@@ -59,6 +59,42 @@ describe('staged run artifacts', () => {
     expect(parseRunArtifact(run)).toBe(run);
   });
 
+  test('accepts a new command connection only after the staged cycle completes', () => {
+    const run = stagedRun();
+    run.connections.push({ actor: 'reader', connection: 1, fingerprint: 'd'.repeat(64) });
+    run.trace.push({ ...run.trace[1], index: 2, ordinal: 0, connection: 1, backendPid: 102,
+      cycle: 0, stage: 'complete', releasedAt: 4, completedAt: 5 });
+    delete run.trace[2].prefixOrdinal;
+    expect(parseRunArtifact(run)).toBe(run);
+  });
+
+  test.each(['metadata', 'execution', 'unfinished execution'])('rejects a second command connection during %s', phase => {
+    const run = stagedRun(); run.limits.maxConnectionsPerActor = 2;
+    run.connections.push({ actor: 'reader', connection: 1, fingerprint: 'd'.repeat(64) });
+    const other = { ...run.trace[1], ordinal: 0, connection: 1, backendPid: 102, cycle: 0, stage: 'complete' };
+    delete other.prefixOrdinal;
+    if (phase === 'metadata') {
+      Object.assign(other, { index: 1, releasedAt: 2, completedAt: 3 });
+      run.trace[1].index = 2; run.trace.splice(1, 0, other);
+    } else {
+      Object.assign(other, { index: 2, releasedAt: 3, completedAt: 4 }); run.trace.push(other);
+      if (phase === 'unfinished execution') { run.outcome = 'inconclusive'; delete run.trace[1].completion; delete run.trace[1].completedAt; }
+    }
+    expect(() => parseRunArtifact(run)).toThrow(/connection.*staged cycle/);
+  });
+
+  test.each(['SQLSTATE', 'message', 'transaction state'])('rejects contradictory Sync-only recovery %s', changed => {
+    const run = stagedRun();
+    run.trace[0].completion = { kind: 'metadata', result: 'error', error: { code: '42601', message: 'syntax error' } };
+    run.trace[1].stage = 'recover';
+    run.trace[1].completion = { kind: 'ready', transactionStatus: 'I', commandTags: [], rowCount: 0, error: { code: '42601', message: 'syntax error' } };
+    expect(parseRunArtifact(run)).toBe(run);
+    if (changed === 'SQLSTATE') run.trace[1].completion.error.code = '23505';
+    else if (changed === 'message') run.trace[1].completion.error.message = 'different error';
+    else run.trace[1].completion.transactionStatus = 'T';
+    expect(() => parseRunArtifact(run)).toThrow(/recovery/);
+  });
+
   test.each([
     ['missing profile', (r: any) => { delete r.limits.protocolProfile; }],
     ['wrong profile', (r: any) => { r.limits.protocolProfile = 'sync-cycle-v1'; }],
