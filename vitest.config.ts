@@ -10,6 +10,7 @@ export default defineConfig({
     exclude: [
       ...(process.env.INTERLEAVE_TEST_SUITE === 'unit' ? [integrationPattern] : []),
       ...(!pgvectorProfile ? [pgvectorPattern] : []),
+      ...(process.env.INTERLEAVE_TEST_MANAGED_POSTGRES !== '1' ? ['test/**/*.managed.integration.test.ts'] : []),
     ],
     testTimeout: 20_000,
     hookTimeout: 20_000,

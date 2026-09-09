@@ -7,7 +7,8 @@ import { minimize, MinimizationVerificationError } from './minimize.js';
 import { readRunArtifact, writeRunArtifact } from './artifact.js';
 import { writeReport } from './report.js';
 import { runScenarioFile } from './supervised.js';
-import { HELP, parseCliArgs } from './cli/options.js';
+import { HELP, POSTGRES_IMAGES, parseCliArgs } from './cli/options.js';
+import { withManagedPostgres } from './cli/managed-postgres.js';
 import { explorationExitCode, minimizationExitCode, runExitCode } from './cli/status.js';
 import { doctor } from './cli/doctor.js';
 import { initializeProject } from './cli/init.js';
@@ -19,6 +20,13 @@ import type { FixtureIdentityProfile } from './fixture-identity.js';
 const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
 const controller = new AbortController();
 let signal: NodeJS.Signals | undefined;
+let stderrFailed = false, stdoutFailed = false;
+const outputFailure = (): void => { controller.abort(); process.exitCode = signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 2; };
+// A pipe can fail asynchronously after write() returns. Keep these handlers for
+// the process lifetime so even a late progress failure cannot bypass cleanup.
+process.stderr.on('error', () => { stderrFailed = true; outputFailure(); });
+process.stdout.on('error', () => { stdoutFailed = true; outputFailure(); });
+const diagnostic = (message: string): void => { if (!stderrFailed) process.stderr.write(message); };
 const onInterrupt = (): void => { signal ??= 'SIGINT'; controller.abort(); };
 const onTerminate = (): void => { signal ??= 'SIGTERM'; controller.abort(); };
 process.on('SIGINT', onInterrupt);
@@ -26,14 +34,14 @@ process.on('SIGTERM', onTerminate);
 let json = process.argv.slice(2).includes('--json');
 try {
   const code = await main(process.argv.slice(2));
-  process.exitCode = signal ? signal === 'SIGINT' ? 130 : 143 : code;
+  process.exitCode = signal ? signal === 'SIGINT' ? 130 : 143 : stderrFailed || stdoutFailed ? 2 : code;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'Command failed';
   const code = signal ? signal === 'SIGINT' ? 130 : 143
     : error instanceof MinimizationVerificationError && error.outcome === 'incompatible' ? 3
     : error instanceof MinimizationVerificationError && error.outcome === 'inconclusive' ? 4 : 2;
-  if (json) process.stdout.write(`${JSON.stringify({ error: { message }, exitCode: code })}\n`);
-  else process.stderr.write(`interleave: ${message}\n`);
+  if (json && !stdoutFailed) process.stdout.write(`${JSON.stringify({ error: { message }, exitCode: code })}\n`);
+  else diagnostic(`interleave: ${message}\n`);
   process.exitCode = code;
 } finally {
   process.removeListener('SIGINT', onInterrupt);
@@ -81,65 +89,79 @@ async function main(args: string[]): Promise<number> {
     if (positionals.length > 1 || (positionals[0] !== undefined && positionals[0] !== 'neveroversell')) throw new TypeError('Usage: interleave demo [neveroversell] [--safe]');
   } else if (positionals.length !== expected) throw new TypeError(`Invalid arguments for ${command}; run interleave --help for usage`);
   const databaseUrl = values['database-url'] ?? process.env.TEST_DATABASE_URL;
-  if (!databaseUrl?.trim()) throw new TypeError('Set --database-url or TEST_DATABASE_URL to a dedicated PostgreSQL administrator database');
-  const options: RunOptions = {
-    databaseUrl, signal: controller.signal,
-    ...((values['project-root'] === undefined && values.include === undefined) ? {} : { source: {
-      ...(values['project-root'] === undefined ? {} : { projectRoot: values['project-root'] }),
-      ...(values.include === undefined ? {} : { include: values.include }),
-    } }),
-    ...(values['max-steps'] === undefined ? {} : { maxSteps: Number(values['max-steps']) }),
-    ...(values['timeout-ms'] === undefined ? {} : { timeoutMs: Number(values['timeout-ms']) }),
-    ...(values['max-evidence-bytes'] === undefined ? {} : { maxEvidenceBytes: Number(values['max-evidence-bytes']) }),
-    ...(values['max-connections-per-actor'] === undefined ? {} : { maxConnectionsPerActor: Number(values['max-connections-per-actor']) }),
-    ...(values['protocol-profile'] === undefined ? {} : { protocolProfile: values['protocol-profile'] as ProtocolProfile }),
-    ...(values['fixture-profile'] === undefined ? {} : { fixtureProfile: values['fixture-profile'] as FixtureIdentityProfile }),
-  };
-  let result: RunResult | ExplorationResult | MinimizationResult;
-  let run: RunResult | undefined;
-  let code: number;
-  if (command === 'run') {
-    const search = await explore(positionals[0]!, {
-      ...options,
-      ...(parsed.plan === undefined ? {} : { plan: parsed.plan }),
-      ...(values['max-runs'] === undefined ? {} : { maxRuns: Number(values['max-runs']) }),
-      ...(values['total-timeout-ms'] === undefined ? {} : { totalTimeoutMs: Number(values['total-timeout-ms']) }),
-      ...(values['max-candidates'] === undefined ? {} : { maxCandidates: Number(values['max-candidates']) }),
-      ...(values['max-search-bytes'] === undefined ? {} : { maxSearchBytes: Number(values['max-search-bytes']) }),
-      ...(values.strategy === undefined ? {} : { strategy: values.strategy as ExplorationStrategy }),
-      ...(values.seed === undefined ? {} : { seed: Number(values.seed) }),
-      ...(values['keep-going'] ? { stopOnFailure: false } : {}),
-    });
-    result = search; run = search.firstFailure ?? search.runs.at(-1); code = explorationExitCode(search);
-  } else if (command === 'replay' || command === 'minimize') {
-    const original = await readRunArtifact(positionals[1]!);
-    if (command === 'replay') {
-      run = await replay(positionals[0]!, original, { ...options, ...(values.guided ? { mode: 'guided' as const } : {}) });
-      result = run; code = runExitCode(run);
-    } else {
-      const reduced = await minimize(positionals[0]!, original, {
+  if (values.docker && process.env.TEST_DATABASE_URL?.trim()) throw new TypeError('--docker cannot be combined with TEST_DATABASE_URL; unset it or omit --docker');
+  if (!values.docker && !databaseUrl?.trim()) throw new TypeError('Use --docker, or set --database-url or TEST_DATABASE_URL to a dedicated PostgreSQL administrator database');
+  const completed = values.docker
+    ? await withManagedPostgres({
+      image: values['postgres-image'] ?? (values['fixture-profile'] === 'postgresql17-pgvector0.8.6-v1' ? POSTGRES_IMAGES[3] : POSTGRES_IMAGES[0]),
+      signal: controller.signal, onProgress: message => { diagnostic(message + '\n'); },
+    }, executeDatabase)
+    : await executeDatabase(databaseUrl!);
+  if (stderrFailed || stdoutFailed) throw new Error('Could not write command output or PostgreSQL progress; owned resource cleanup has finished');
+  const details = command === 'doctor' && !('explored' in completed.result) && !('reducedChoices' in completed.result)
+    ? `\nNode.js: ${completed.result.environment.nodeVersion}\nPostgreSQL: ${completed.result.environment.serverVersion}\nFixture: ${completed.result.environment.fixture?.profile ?? 'unavailable'}` : '';
+  output(completed.result, describe(completed.result) + details);
+  return signal ? signal === 'SIGINT' ? 130 : 143 : completed.code;
+
+  async function executeDatabase(databaseUrl: string) {
+    const options: RunOptions = {
+      databaseUrl, signal: controller.signal,
+      ...((values['project-root'] === undefined && values.include === undefined) ? {} : { source: {
+        ...(values['project-root'] === undefined ? {} : { projectRoot: values['project-root'] }),
+        ...(values.include === undefined ? {} : { include: values.include }),
+      } }),
+      ...(values['max-steps'] === undefined ? {} : { maxSteps: Number(values['max-steps']) }),
+      ...(values['timeout-ms'] === undefined ? {} : { timeoutMs: Number(values['timeout-ms']) }),
+      ...(values['max-evidence-bytes'] === undefined ? {} : { maxEvidenceBytes: Number(values['max-evidence-bytes']) }),
+      ...(values['max-connections-per-actor'] === undefined ? {} : { maxConnectionsPerActor: Number(values['max-connections-per-actor']) }),
+      ...(values['protocol-profile'] === undefined ? {} : { protocolProfile: values['protocol-profile'] as ProtocolProfile }),
+      ...(values['fixture-profile'] === undefined ? {} : { fixtureProfile: values['fixture-profile'] as FixtureIdentityProfile }),
+    };
+    let result: RunResult | ExplorationResult | MinimizationResult;
+    let run: RunResult | undefined;
+    let code: number;
+    if (command === 'run') {
+      const search = await explore(positionals[0]!, {
         ...options,
-        ...(values['max-attempts'] === undefined ? {} : { maxAttempts: Number(values['max-attempts']) }),
+        ...(parsed.plan === undefined ? {} : { plan: parsed.plan }),
+        ...(values['max-runs'] === undefined ? {} : { maxRuns: Number(values['max-runs']) }),
         ...(values['total-timeout-ms'] === undefined ? {} : { totalTimeoutMs: Number(values['total-timeout-ms']) }),
+        ...(values['max-candidates'] === undefined ? {} : { maxCandidates: Number(values['max-candidates']) }),
+        ...(values['max-search-bytes'] === undefined ? {} : { maxSearchBytes: Number(values['max-search-bytes']) }),
+        ...(values.strategy === undefined ? {} : { strategy: values.strategy as ExplorationStrategy }),
+        ...(values.seed === undefined ? {} : { seed: Number(values.seed) }),
+        ...(values['keep-going'] ? { stopOnFailure: false } : {}),
       });
-      result = reduced; run = reduced.run; code = minimizationExitCode(reduced);
+      result = search; run = search.firstFailure ?? search.runs.at(-1); code = explorationExitCode(search);
+    } else if (command === 'replay' || command === 'minimize') {
+      const original = await readRunArtifact(positionals[1]!);
+      if (command === 'replay') {
+        run = await replay(positionals[0]!, original, { ...options, ...(values.guided ? { mode: 'guided' as const } : {}) });
+        result = run; code = runExitCode(run);
+      } else {
+        const reduced = await minimize(positionals[0]!, original, {
+          ...options,
+          ...(values['max-attempts'] === undefined ? {} : { maxAttempts: Number(values['max-attempts']) }),
+          ...(values['total-timeout-ms'] === undefined ? {} : { totalTimeoutMs: Number(values['total-timeout-ms']) }),
+        });
+        result = reduced; run = reduced.run; code = minimizationExitCode(reduced);
+      }
+    } else if (command === 'doctor') {
+      run = await doctor(options); result = run; code = runExitCode(run);
+    } else {
+      const module = await loadNeveroversell();
+      const fixture = new URL(`${import.meta.url.endsWith('.ts') ? '../dist/' : './'}examples/neveroversell/demo-${values.safe ? 'safe' : 'naive'}.js`, import.meta.url);
+      run = await runScenarioFile(fileURLToPath(fixture), { ...options,
+        source: { projectRoot: fileURLToPath(new URL('../', import.meta.url)), include: ['dist/examples/neveroversell/vendor/sql'] },
+        ...(values.safe ? {} : { plan: [...module.NAIVE_OVERSELL_PLAN] }) });
+      result = run; code = runExitCode(run);
     }
-  } else if (command === 'doctor') {
-    run = await doctor(options); result = run; code = runExitCode(run);
-  } else {
-    const module = await loadNeveroversell();
-    const fixture = new URL(`${import.meta.url.endsWith('.ts') ? '../dist/' : './'}examples/neveroversell/demo-${values.safe ? 'safe' : 'naive'}.js`, import.meta.url);
-    run = await runScenarioFile(fileURLToPath(fixture), { ...options,
-      source: { projectRoot: fileURLToPath(new URL('../', import.meta.url)), include: ['dist/examples/neveroversell/vendor/sql'] },
-      ...(values.safe ? {} : { plan: [...module.NAIVE_OVERSELL_PLAN] }) });
-    result = run; code = runExitCode(run);
+    if (values.out) {
+      if (run) await writeRunArtifact(values.out, run, { overwrite: values.force ?? false });
+      else if (!json) diagnostic('No retained execution was available to write; inspect the search budget result.\n');
+    }
+    return { result, code };
   }
-  if (values.out) {
-    if (run) await writeRunArtifact(values.out, run, { overwrite: values.force ?? false });
-    else if (!json) process.stderr.write('No retained execution was available to write; inspect the search budget result.\n');
-  }
-  output(result, describe(result));
-  return signal ? signal === 'SIGINT' ? 130 : 143 : code;
 }
 
 function output(value: unknown, human: string): void {

@@ -39,6 +39,7 @@
     "test": "node scripts/test.mjs all",
     "test:unit": "node scripts/test.mjs unit",
     "test:integration": "node scripts/test.mjs integration",
+    "test:managed": "npm run build && node scripts/test-managed.mjs",
     "check": "npm run typecheck && npm test",
     "test:browser": "npm run build && node scripts/test.mjs browser",
     "pretest": "npm run build",

@@ -5,6 +5,7 @@ const definitions = {
   help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
   json: { type: 'boolean' }, force: { type: 'boolean' }, guided: { type: 'boolean' },
   safe: { type: 'boolean' }, 'keep-going': { type: 'boolean' },
+  docker: { type: 'boolean' }, 'postgres-image': { type: 'string' },
   'database-url': { type: 'string' }, out: { type: 'string' }, plan: { type: 'string' },
   'project-root': { type: 'string' }, include: { type: 'string', multiple: true },
   'runtime-archive': { type: 'string' }, 'dependency-archive': { type: 'string', multiple: true },
@@ -16,7 +17,8 @@ const definitions = {
   strategy: { type: 'string' }, seed: { type: 'string' },
   'max-candidates': { type: 'string' }, 'max-search-bytes': { type: 'string' }, 'max-attempts': { type: 'string' },
 } as const;
-const runFlags = ['database-url', 'out', 'force', 'max-steps', 'timeout-ms', 'max-evidence-bytes', 'max-connections-per-actor', 'protocol-profile', 'fixture-profile'];
+const runFlags = ['database-url', 'docker', 'postgres-image', 'out', 'force', 'max-steps', 'timeout-ms', 'max-evidence-bytes', 'max-connections-per-actor', 'protocol-profile', 'fixture-profile'];
+export const POSTGRES_IMAGES = ['postgres:16', 'postgres:17', 'postgres:18', 'pgvector/pgvector:0.8.6-pg17-bookworm'] as const;
 const searchFlags = ['max-runs', 'total-timeout-ms', 'max-candidates', 'max-search-bytes', 'keep-going', 'plan', 'strategy', 'seed'];
 const sourceFlags = ['project-root', 'include'];
 const allowed: Record<string, string[]> = {
@@ -49,6 +51,10 @@ export function parseCliArgs(args: string[]) {
     }
   }
   if (parsed.values.force && !parsed.values.out) throw new TypeError('--force requires --out');
+  if (parsed.values['postgres-image'] !== undefined && !parsed.values.docker) throw new TypeError('--postgres-image requires --docker');
+  if (parsed.values['postgres-image'] !== undefined && !POSTGRES_IMAGES.includes(parsed.values['postgres-image'] as typeof POSTGRES_IMAGES[number])) throw new TypeError('--postgres-image must be a qualified PostgreSQL image: ' + POSTGRES_IMAGES.join(', '));
+  if (parsed.values.docker && parsed.values['database-url'] !== undefined) throw new TypeError('--docker cannot be combined with --database-url');
+  if (parsed.values['fixture-profile'] === 'postgresql17-pgvector0.8.6-v1' && parsed.values['postgres-image'] !== undefined && parsed.values['postgres-image'] !== POSTGRES_IMAGES[3]) throw new TypeError('The pgvector fixture profile requires its matching pgvector image');
   if (parsed.values['protocol-profile'] !== undefined && !['sync-cycle-v1', 'describe-flush-v1'].includes(parsed.values['protocol-profile'])) {
     throw new TypeError('--protocol-profile must be sync-cycle-v1 or describe-flush-v1');
   }
@@ -82,8 +88,13 @@ Usage:
   interleave doctor [options]
   interleave demo [neveroversell] [--safe] [options]
 
-Database: --database-url <url> or TEST_DATABASE_URL must name a dedicated test
-administrator database. Every execution creates and removes its own database.
+Database: --docker starts and removes an owned local PostgreSQL server (Docker
+required; first use may download its image). Or --database-url <url> or
+TEST_DATABASE_URL must name a dedicated test administrator database.
+Every execution creates and removes its own database. Do not combine both routes.
+Managed image: --postgres-image <image> requires --docker; choose postgres:16
+(native default), postgres:17, postgres:18, or pgvector/pgvector:0.8.6-pg17-bookworm.
+The explicit pgvector fixture profile defaults to that vector image.
 
 Common: --json, --help, --version
 Per run: --max-steps <n>, --timeout-ms <n>, --max-evidence-bytes <n>
@@ -105,6 +116,6 @@ Exact replay is default; --guided creates separately labeled new evidence.
 Artifacts preserve private SQL and selected observations, which may be sensitive.
 
 Exit codes: 0 checked success; 1 violation; 2 usage/actor/harness error;
-3 incompatible replay; 4 inconclusive or exhausted safety budget; 130 SIGINT.
+3 incompatible replay; 4 inconclusive or exhausted safety budget; 130 SIGINT; 143 SIGTERM.
 Reports are standalone offline HTML; opening or writing one does not execute a scenario.
 `;

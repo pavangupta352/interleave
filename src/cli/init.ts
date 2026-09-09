@@ -41,17 +41,31 @@ Install dependencies with npm install. No packages have been installed automatic
 This scaffold requests Interleave ${version}; if that development version is not
 published, install a locally built package tarball with npm install /path/to/interleave.tgz.
 
-Set TEST_DATABASE_URL to a dedicated PostgreSQL administrator database where
-Interleave may create and drop its own generated databases. Then run:
+With Docker installed and running, start a disposable local server and run:
 
-    npm run race
+    npm run race -- --docker
+
+The first use may download the PostgreSQL image. Each command removes its owned
+server before returning. Alternatively, set TEST_DATABASE_URL to a dedicated
+PostgreSQL administrator database where Interleave may create and drop its own
+generated databases, then run npm run race without --docker. Do not combine them.
 
 The example deliberately contains a lost-update race. A detected invariant
 violation exits 1 and is saved in failure.interleave.json. Replay it with:
 
-    npx interleave replay scenario.mjs failure.interleave.json
+    npx interleave replay scenario.mjs failure.interleave.json --docker
 
-Outputs refuse replacement; select another --out path or explicitly use --force.
+Create and open an offline report:
+
+    npx interleave report failure.interleave.json --out report.html
+
+Omit --docker from replay when using the dedicated TEST_DATABASE_URL route.
+To intentionally replace the scenario's previous saved run:
+
+    npm run race -- --docker --force
+
+Outputs refuse replacement by default. The race script already supplies --out;
+use --force for intentional replacement instead of adding another --out option.
 Scenarios are trusted executable code. Artifacts contain private SQL and selected
 observations; review them before sharing. Passing sampled schedules is not proof
 of race freedom.
@@ -82,5 +96,5 @@ of race freedom.
     if (created.length) throw new Error(`init did not finish.${retained}`, { cause: error });
     throw error;
   }
-  return { directory: target, files: Object.keys(contents), nextSteps: ['Install dependencies with npm install (or install a local Interleave tarball).', 'Set TEST_DATABASE_URL to a dedicated test administrator database.', 'Run npm run race.'] };
+  return { directory: target, files: Object.keys(contents), nextSteps: ['Install dependencies with npm install (or install a local Interleave tarball).', 'With Docker running, use npm run race -- --docker; first use may download PostgreSQL.', 'Or set TEST_DATABASE_URL to a dedicated test administrator database and use npm run race.', 'A detected violation exits 1. Create its report with npx interleave report failure.interleave.json --out report.html.'] };
 }

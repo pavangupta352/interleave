@@ -13,7 +13,10 @@ export async function doctor(options: RunOptions): Promise<RunResult> {
   };
   return runOnce({
     name: 'interleave-doctor',
-    async setup({ db }) { assert.match((await db.query('SELECT current_database() AS name')).rows[0].name, /^interleave_[a-f0-9]+$/); },
+    async setup({ db }) {
+      assert.match((await db.query('SELECT current_database() AS name')).rows[0].name, /^interleave_[a-f0-9]+$/);
+      if (options.fixtureProfile === 'postgresql17-pgvector0.8.6-v1') await db.query('CREATE EXTENSION vector');
+    },
     actors: { alice: query(1), bob: query(2) },
     async invariant({ results }) { assert.deepEqual(results.map(result => result.value), [1, 2]); },
   }, options);
