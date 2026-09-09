@@ -24,6 +24,10 @@ function node<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string,
 function button(text: string, action: () => void, className = 'button'): HTMLButtonElement {
   const result = node('button', className, text); result.type = 'button'; result.addEventListener('click', action); return result;
 }
+function evidenceText<K extends 'p' | 'pre'>(tag: K, className: string | undefined, text: string, label: string): HTMLElementTagNameMap[K] {
+  const result = node(tag, className, text); result.tabIndex = 0;
+  result.setAttribute('role', 'region'); result.setAttribute('aria-label', label); return result;
+}
 function announce(message: string, error = false): void {
   const status = document.querySelector<HTMLElement>('#status');
   if (!status) return;
@@ -49,6 +53,7 @@ function commandLabels(step: TraceStep): { protocol: string; stage?: string; com
 function setRun(value: RunResult, command: string | null): void {
   run = value; replayCommand = command; actors = actorNames(run); query = ''; actorFilter = ''; page = 0;
   selected = run.trace.find(step => step.completion?.error || step.waits.length)?.index ?? 0;
+  page = Math.floor(selected / PAGE_SIZE);
   document.title = `${run.scenario} · Interleave`;
   renderShell(); updateLedger(); renderInspector();
 }
@@ -69,7 +74,7 @@ function renderShell(): void {
   const outcome = node('span', `outcome ${run.outcome}`, labels[run.outcome]);
   heading.append(title, outcome);
   const subtitle = run.failure?.message ?? run.reason ?? (run.outcome === 'passed' ? 'The invariant held in this recorded execution.' : 'Inspect the recorded execution and its limits below.');
-  const text = node('p', 'summary-message', subtitle);
+  const text = evidenceText('p', 'summary-message', subtitle, 'Execution outcome message');
   const metadata = node('div', 'metadata');
   for (const value of [`${run.trace.length.toLocaleString('en-US')} ${run.schemaVersion === 2 ? 'releases' : 'commands'}`, `${actors.length} actors`, `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
   const cleanup = node('span', run.cleanup.complete ? 'cleanup-complete' : 'cleanup-incomplete', run.cleanup.complete ? 'Cleanup complete' : 'Cleanup incomplete'); metadata.append(cleanup);
@@ -224,6 +229,8 @@ function navigate(event: KeyboardEvent): void {
 function addFact(list: HTMLDListElement, label: string, value: string): void { const group = node('div'); group.append(node('dt', undefined, label), node('dd', undefined, value)); list.append(group); }
 function renderInspector(): void {
   const inspector = document.querySelector<HTMLElement>('#inspector')!;
+  const identityOpen = inspector.querySelector<HTMLDetailsElement>('.identity')?.open ?? false;
+  const observationsOpen = inspector.querySelector<HTMLDetailsElement>('.observations')?.open ?? false;
   const step = run.trace[selected];
   document.querySelector('#selection-label')!.textContent = step ? `Selected: step ${step.index + 1} · ${step.actor}` : 'No command selected';
   (document.querySelector('#inspect-selection') as HTMLButtonElement).disabled = !step;
@@ -259,7 +266,7 @@ function renderInspector(): void {
       addFact(facts, 'Transaction', ({ I: 'Idle', T: 'In transaction', E: 'Failed transaction' })[step.completion.transactionStatus]);
     }
     addFact(facts, 'Released', formatMs(step.releasedAt)); if (step.completedAt !== undefined) addFact(facts, 'Completed', formatMs(step.completedAt));
-    completion.append(facts); if (step.completion?.error) completion.append(node('pre', 'error-message', step.completion.error.message)); contents.push(completion);
+    completion.append(facts); if (step.completion?.error) completion.append(evidenceText('pre', 'error-message', step.completion.error.message, 'PostgreSQL error message')); contents.push(completion);
     const waits = node('section', 'inspector-section'); waits.append(node('h3', undefined, 'Observed waits'));
     if (!step.waits.length) waits.append(node('p', 'detail-note', 'No scheduler wait observation was recorded for this command.'));
     for (const wait of step.waits) {
@@ -268,7 +275,7 @@ function renderInspector(): void {
       item.append(node('p', undefined, `Blocked by ${blockerActors.join(', ')} (backend ${wait.blockerPids.join(', ')}).`)); waits.append(item);
     }
     contents.push(waits);
-    const identity = node('details', 'identity'); identity.append(node('summary', undefined, 'Command identity'));
+    const identity = node('details', 'identity'); identity.open = identityOpen; identity.append(node('summary', undefined, 'Command identity'));
     const identityFacts = node('dl', 'facts'); addFact(identityFacts, 'Protocol', step.protocol); addFact(identityFacts, 'Connection / ordinal', `${step.connection} / ${step.ordinal} (zero-based)`);
     if (step.stage) {
       addFact(identityFacts, 'Stage / cycle', `${stageLabel(step)} / ${step.cycle! + 1}`);
@@ -277,11 +284,11 @@ function renderInspector(): void {
     }
     addFact(identityFacts, 'Backend PID', String(step.backendPid)); addFact(identityFacts, 'Available actors', step.available.join(', ')); addFact(identityFacts, 'Fingerprint', step.fingerprint); identity.append(identityFacts); contents.push(identity);
   } else contents.push(node('p', 'detail-note', 'There is no command to inspect. Review the execution outcome and actor observations.'));
-  const observations = node('details', 'observations'); observations.append(node('summary', undefined, 'Selected actor observations'));
+  const observations = node('details', 'observations'); observations.open = observationsOpen; observations.append(node('summary', undefined, 'All actor observations'));
   observations.append(node('p', 'detail-note', 'Values explicitly returned by scenario actors. Database result rows are not automatically captured.'));
   for (const actor of run.actors) {
     const result = node('section', 'actor-result'); result.append(node('h3', undefined, `${actor.actor} · ${actor.status}`));
-    result.append(node('pre', undefined, actor.status === 'rejected' ? actor.error ?? '' : actor.value === undefined ? 'No observation returned' : JSON.stringify(actor.value, null, 2))); observations.append(result);
+    result.append(evidenceText('pre', undefined, actor.status === 'rejected' ? actor.error ?? '' : actor.value === undefined ? 'No observation returned' : JSON.stringify(actor.value, null, 2), `${actor.actor} ${actor.status === 'rejected' ? 'error' : 'observation'}`)); observations.append(result);
   }
   if (!run.actors.length) observations.append(node('p', 'detail-note', 'No actor observations recorded.'));
   contents.push(observations); inspector.replaceChildren(...contents);

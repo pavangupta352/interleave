@@ -5,6 +5,7 @@ import { chromium, firefox, webkit } from 'playwright';
 import { runScenarioFile, renderReport } from '../../dist/index.js';
 import { loadNeveroversell } from '../../dist/cli/demo.js';
 import { checkReport, checkStagedReport } from './report-checks.mjs';
+import { checkLongEvidence, longEvidenceFixture } from './report-long-evidence.mjs';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 assert.ok(databaseUrl, 'Use npm run test:browser to provision a dedicated PostgreSQL server');
@@ -34,7 +35,9 @@ try {
   assert.ok(staged.environment.source);
   assert.ok(staged.trace.some(step => step.completion?.kind === 'metadata'));
   const stagedHtml = await renderReport(staged);
-  server = createServer((request, response) => { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(request.url === '/staged' ? stagedHtml : html); });
+  const longEvidence = longEvidenceFixture();
+  const longHtml = await renderReport(longEvidence);
+  server = createServer((request, response) => { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(request.url === '/staged' ? stagedHtml : request.url === '/long' ? longHtml : html); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const url = `http://127.0.0.1:${server.address().port}/`;
   for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
@@ -46,7 +49,8 @@ try {
       try {
         const result = await checkReport(page, url, artifact);
         const stagedResult = await checkStagedReport(page, `${url}staged`, staged, artifact);
-        console.log(`[browser] ${name} ${viewport.width}×${viewport.height}: ${result.checks.length} legacy + ${stagedResult.checks.length} staged checks passed`);
+        const longResult = await checkLongEvidence(page, `${url}long`, longEvidence);
+        console.log(`[browser] ${name} ${viewport.width}×${viewport.height}: ${result.checks.length} legacy + ${stagedResult.checks.length} staged + ${longResult.checks.length} synthetic long-evidence checks passed`);
       } finally { await page.close(); }
     }
     await browser.close(); browser = undefined;

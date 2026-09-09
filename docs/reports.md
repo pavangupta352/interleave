@@ -36,7 +36,7 @@ An absent wait observation means none was recorded by the scheduler, not that
 PostgreSQL never waited. Release and completion times are measurements, not a
 claim that the proxy controls execution inside PostgreSQL.
 
-**Selected actor observations** shows only values explicitly returned by actors;
+**All actor observations** shows only values explicitly returned by actors;
 it is separate from protocol completion summaries. Database result rows are not
 automatically captured. Failed cleanup and incomplete executions remain visible.
 

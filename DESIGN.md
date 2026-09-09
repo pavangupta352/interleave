@@ -176,6 +176,8 @@ At 780px and below, the viewer becomes a single column. Actor lanes consolidate 
 
 Selection controls stay at the top while scrolling. Paging reveals the opening command below those controls before focusing it. The same selected command remains identifiable in the ledger and inspector. These dimensions and behaviors belong to the current viewer; reuse its alignment and responsive priorities when adding related surfaces.
 
+The initial ledger page contains the selected error or wait even when it occurs after the first 100 commands. Long actor identifiers wrap in selection labels, narrow command labels, blocker references, actor observation headings and status messages.
+
 ## Elevation & Depth
 
 Depth comes from neutral surface changes, borders and position. Containers do not use drop shadows. The selected command uses a thin inset blue outline, implemented as a box shadow, to preserve its bounds without lifting it above the ledger. Keyboard focus uses a separate blue outline (2px with a 3px offset); inside command cells the offset turns inward to remain visible.
@@ -217,6 +219,8 @@ The inspector groups exact SQL, completion facts and observed waits under short 
 ### Disclosures and feedback
 
 Native disclosures hold command identity, actor observations, and record/replay details. Their labels stay visible above thin rules; supporting evidence expands in place. Imported values render as text. The replay command is displayed and copyable, and the viewer does not execute it. A polite live status region reports selection, filtering, import, download and clipboard feedback.
+
+Command identity and All actor observations retain their independent open or closed state when another command is selected. Opening a different artifact starts with fresh disclosures. The observations disclosure contains every recorded actor result. Outcome messages, PostgreSQL error messages and actor observation fields are named, focusable evidence regions so keyboard users can scroll their complete text.
 
 Record details include the captured fixture profile, digest, object and row counts; source, installed dependency and runtime identities; the connection profile; and actor startup digests. Missing identities in older records are labeled explicitly. Long digests wrap within the existing fact layout on narrow screens.
 

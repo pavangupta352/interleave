@@ -74,6 +74,7 @@ pre { overflow: auto; tab-size: 2; }
 .filters input::placeholder { color: var(--muted); opacity: 1; }
 .ledger-hint { padding: 0 32px 12px; font-size: 12px; color: var(--muted); }
 .selection-tools { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 26px 12px 32px; background: var(--paper); font-size: 12px; color: var(--muted); }
+#selection-label { min-width: 0; overflow-wrap: anywhere; }
 .mobile-command-heading { display: none; }
 .ledger { overflow: auto; min-height: 284px; }
 .schedule { width: 100%; border-collapse: collapse; table-layout: fixed; background: var(--surface); font-size: 12px; }
@@ -101,7 +102,7 @@ pre { overflow: auto; tab-size: 2; }
 .command-summary { display: flex; gap: 5px 12px; flex-wrap: wrap; font-size: 10px; color: var(--muted); }
 .command-wait { color: var(--amber); }
 .command-error { color: var(--red); font-family: var(--mono); }
-.mobile-actor { display: none; }
+.mobile-actor { display: none; overflow-wrap: anywhere; }
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 26px 0 32px; }
 .record-count { color: var(--muted); font-size: 11px; }
 .page-controls { display: flex; gap: 7px; }
@@ -122,12 +123,13 @@ pre { overflow: auto; tab-size: 2; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 .error-message { color: var(--red); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; margin-top: 12px; font-size: 12px; }
-.wait-observation { margin-top: 10px; padding: 12px; background: var(--amber-paper); color: var(--amber); border-radius: 4px; font-size: 12px; }
+.wait-observation { margin-top: 10px; padding: 12px; background: var(--amber-paper); color: var(--amber); border-radius: 4px; font-size: 12px; overflow-wrap: anywhere; }
 .wait-title { font-weight: 650; margin-bottom: 4px; }
 .identity, .observations { border-top: 1px solid var(--rule); margin-top: 25px; padding-top: 17px; }
 .identity summary, .observations summary { font-size: 12px; font-weight: 600; }
 .identity .facts dd { font-family: var(--mono); font-size: 11px; }
 .actor-result { margin-top: 17px; }
+.actor-result h3 { overflow-wrap: anywhere; }
 .actor-result pre { margin-top: 8px; max-height: 300px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 .empty { min-height: 250px; padding: 45px 32px; border-block: 1px solid var(--rule); }
 .empty h3 { font-size: 16px; }
@@ -141,7 +143,7 @@ pre { overflow: auto; tab-size: 2; }
 .replay-command { padding: 12px; margin: 15px 0 9px; background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .privacy-note { max-width: 420px; text-align: right; }
 .muted { color: var(--muted); margin-top: 15px; }
-.status { margin: 0; padding: 0 32px 16px; font-size: 12px; color: var(--muted); }
+.status { margin: 0; padding: 0 32px 16px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .status-error { color: var(--red); }
 .boot-message { margin: 32px; max-width: 75ch; }
 .clipboard-buffer { position: fixed; top: -10000px; }

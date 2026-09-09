@@ -91,6 +91,48 @@ export async function checkReport(page, url, artifact) {
     await page.getByRole('button', { name: 'Clear filters' }).click();
     assert.equal(await page.locator('.command').count(), 100);
 
+    const contextResults = {};
+    for (const kind of ['wait', 'error']) {
+      const late = structuredClone(long); late.scenario = `Browser qualification: late ${kind}`; late.outcome = 'inconclusive';
+      if (kind === 'wait') late.trace[150].waits = [{ pid: 101, blockerPids: [102], waitEventType: 'Lock', waitEvent: 'transactionid' }];
+      else late.trace[150].completion.error = { code: '40P01', message: 'Deadlock detected' };
+      await upload(`late-${kind}.json`, late);
+      await page.getByRole('heading', { name: late.scenario, exact: true }).waitFor();
+      contextResults[kind] = {
+        selectedInLedger: await page.locator('.command[data-step="150"][aria-pressed="true"]').count(),
+        firstRenderedStep: await page.locator('.command').first().getAttribute('data-step'),
+        selectedSql: await page.locator('.sql-full').textContent(),
+      };
+    }
+    await upload('comparison.json', long);
+    await page.getByRole('heading', { name: long.scenario, exact: true }).waitFor();
+    await page.locator('.identity summary').click(); await page.locator('.observations summary').click();
+    await page.locator('.command[data-step="0"]').press('ArrowDown');
+    contextResults.openAfterSelection = await page.locator('#inspector').evaluate(element => ({
+      identity: element.querySelector('.identity').open, observations: element.querySelector('.observations').open,
+      sql: element.querySelector('.sql-full').textContent,
+    }));
+    if (await page.locator('.identity').evaluate(element => element.open)) await page.locator('.identity summary').click();
+    await page.locator('.command[data-step="1"]').press('ArrowDown');
+    contextResults.independentDisclosureState = await page.locator('#inspector').evaluate(element => ({
+      identity: element.querySelector('.identity').open, observations: element.querySelector('.observations').open,
+    }));
+    contextResults.observationScope = await page.locator('.observations summary').textContent();
+    contextResults.actorResults = await page.locator('.actor-result h3').allTextContents();
+    await upload('fresh.json', long);
+    await page.getByRole('status').filter({ hasText: /Opened fresh.json/ }).waitFor();
+    contextResults.newRecordDisclosures = await page.locator('#inspector').evaluate(element => ({
+      identity: element.querySelector('.identity').open, observations: element.querySelector('.observations').open,
+    }));
+    assert.deepEqual(contextResults, {
+      wait: { selectedInLedger: 1, firstRenderedStep: '100', selectedSql: 'SELECT 150' },
+      error: { selectedInLedger: 1, firstRenderedStep: '100', selectedSql: 'SELECT 150' },
+      openAfterSelection: { identity: true, observations: true, sql: 'SELECT 1' },
+      independentDisclosureState: { identity: false, observations: true },
+      observationScope: 'All actor observations', actorResults: ['alice · fulfilled', 'bob · fulfilled'],
+      newRecordDisclosures: { identity: false, observations: false },
+    }, 'A selected late failure belongs to the rendered page, and investigation disclosures retain their scope and state within one record');
+
     const statuses = structuredClone(long);
     statuses.scenario = 'Browser qualification: command status names'; statuses.outcome = 'inconclusive';
     statuses.trace = statuses.trace.slice(0, 4);
@@ -126,7 +168,7 @@ export async function checkReport(page, url, artifact) {
     await page.getByRole('heading', { name: originalName, exact: true }).waitFor();
     assert.deepEqual(errors, []);
     assert.deepEqual(unexpectedRequests, []);
-    return { checks: ['recorded fixture, source, runtime and startup identities', 'invalid schema preserved current record', 'invalid UTF-8 rejected', '16 MiB import cap', 'hostile text inert', 'download exact equality', '100-row pagination', 'keyboard page crossing', 'filtered original indices', 'accessible command outcomes and keyboard selection', 'empty evidence', 'no runtime errors', 'no external requests'], passed: true };
+    return { checks: ['recorded fixture, source, runtime and startup identities', 'invalid schema preserved current record', 'invalid UTF-8 rejected', '16 MiB import cap', 'hostile text inert', 'download exact equality', '100-row pagination', 'keyboard page crossing', 'filtered original indices', 'selected page and investigation continuity', 'accessible command outcomes and keyboard selection', 'empty evidence', 'no runtime errors', 'no external requests'], passed: true };
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }
 
