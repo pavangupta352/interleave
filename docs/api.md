@@ -56,6 +56,14 @@ if (search.firstFailure) {
 
 Supervision is a lifecycle boundary for trusted code. On POSIX it terminates the worker's process group; on Windows it terminates the worker. Application-created detached processes remain the scenario's responsibility. `cleanup.complete` reports the owned database and harness resources, and failed creation recovery retains the generated database name. It is not a sandbox or a guarantee about arbitrary external effects.
 
+## Protocol profiles
+
+The default `protocolProfile: 'sync-cycle-v1'` schedules one Simple Query packet or one complete extended cycle ending in Sync. Select `protocolProfile: 'describe-flush-v1'` for the qualified Postgres.js flow that needs server metadata before sending parameter values.
+
+The staged profile gives Parse/statement Describe/Flush its own release gate. Real metadata completes that stage; matching Bind/Execute/Sync requires a second release. A Parse error instead requires a separately released Sync recovery. Cached prepared queries and ordinary whole cycles remain single stages. Each release counts toward `maxSteps`, including metadata and recovery.
+
+Use Postgres.js 3.4.9 with `max: 1`, `ssl: false`, and prompt client closure on the actor's AbortSignal as well as in `finally`. Interrupted `sql.begin` calls need this lifecycle because the driver waits for ReadyForQuery before settling a protocol error. See the [measured profile and complete lifecycle example](qualification/postgresjs-describe-flush-2026-09-09.md). Selecting the profile does not enable arbitrary early-Flush pipelines, cursors, COPY, or cancellation routing.
+
 ## File identity
 
 Before importing a scenario, the supervisor captures its literal local module graph, controlling package metadata and lockfile, actual installed dependency files and declared dependency relationships, and the Interleave runtime. It checks the same inputs after execution. Changed files prevent a completed result from being presented as bound evidence. Source and compiled runtimes have different identities.
@@ -82,10 +90,11 @@ Run options require `databaseUrl`, an explicit administrator URL for a dedicated
 | Option | Default | Meaning |
 | --- | ---: | --- |
 | `plan` | `[]` | Explicit actor choices, then fair rotation among available actors |
-| `maxSteps` | 100 | Maximum released command cycles per run |
+| `maxSteps` | 100 | Maximum released stages per run; whole cycles count once, staged metadata and continuation count separately |
 | `timeoutMs` | 10,000 | Per-run execution deadline in milliseconds |
 | `maxEvidenceBytes` | 8 MiB | Recorded evidence budget per run |
 | `maxConnectionsPerActor` | 1 | Physical connection cap per actor; additional live connections must remain queryless |
+| `protocolProfile` | `sync-cycle-v1` | Whole cycles, or explicit `describe-flush-v1` metadata and continuation stages |
 | `source` | Automatic local module graph | File targets: `{ projectRoot?, include? }` selects the portable root and additional data paths |
 | `signal` | — | Caller cancellation |
 
@@ -106,7 +115,9 @@ Run outcomes are `passed`, `violation`, `actor-error`, `incompatible`, `inconclu
 
 ## Replay and artifacts
 
-Exact replay requires completed evidence and cleanup. It checks the PostgreSQL and Node.js versions, starting fixture identity, actor connection startups (including connections that sent no SQL), command identity, connection generation, query fingerprints, observed lock waits and transaction state. Startup values contribute to hashes; their raw values are not copied into the connection record. File targets additionally check their selected source, actual installed dependencies and Interleave runtime. Exact replay and reduction inherit the recorded connection profile and source selection unless explicitly overridden; changed exact inputs produce an incompatible result.
+Exact replay requires completed evidence and cleanup. It checks the PostgreSQL and Node.js versions, starting fixture identity, actor connection startups (including connections that sent no SQL), command identity, connection generation, query fingerprints, observed lock waits and transaction state. Startup values contribute to hashes; their raw values are not copied into the connection record. File targets additionally check their selected source, actual installed dependencies and Interleave runtime. Exact replay and reduction inherit the recorded connection and protocol profiles and source selection unless explicitly overridden; changed exact inputs produce an incompatible result.
+
+The staged profile produces version 2 artifacts with explicit stage, cycle, and continuation links. Version 1 records retain their original whole-cycle meaning. Exact staged replay checks SQL and Parse inputs before releasing metadata, then checks actual Bind inputs before releasing execution. Metadata records parameter and column counts or the real error; it does not claim row values, affected rows, transaction state, or equality of backend object identifiers. A completed run must close every staged cycle.
 
 Replay returns the actual new command summaries, selected actor observations and
 invariant outcome. It does not require row counts, SQLSTATEs, return values or
