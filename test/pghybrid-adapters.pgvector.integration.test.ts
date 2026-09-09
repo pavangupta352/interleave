@@ -1,5 +1,6 @@
 import { Client } from 'pg';
-import { afterEach, expect, test } from 'vitest';
+import net from 'node:net';
+import { afterEach, expect, test, vi } from 'vitest';
 import { createPghybridAdapterScenario, pghybridAdapterOptions, type PghybridAdapter } from '../examples/pghybrid/adapters.js';
 import { runOnce } from '../src/runner.js';
 import { parseRunArtifact } from '../src/artifact.js';
@@ -9,6 +10,7 @@ import { testDatabaseUrl } from './helpers/postgres.js';
 const databaseUrl = testDatabaseUrl();
 const adapters: PghybridAdapter[] = ['pg-pool', 'pg-client', 'postgresjs', 'drizzle', 'kysely'];
 const owned: string[] = [];
+
 function tracked(input: Scenario): Scenario {
   return { ...input, async setup(context) {
     owned.push(decodeURIComponent(new URL(context.connectionString).pathname.slice(1)));
@@ -22,6 +24,53 @@ afterEach(async () => {
     console.log(JSON.stringify({ pghybridAdapterCleanup: { names: [...owned], remaining } }));
     expect(remaining).toEqual([]);
   } finally { owned.length = 0; await admin.end(); }
+});
+
+test('handled real Pool query waits for proxy retirement before replacing its closed client', async () => {
+  const events: string[] = [];
+  let releaseClose: (() => void) | undefined;
+  let firstServer = true;
+  const createServer = net.createServer.bind(net);
+  const spy = vi.spyOn(net, 'createServer').mockImplementation(((...args: Parameters<typeof net.createServer>) => {
+    const server = createServer(...args);
+    if (!firstServer) return server;
+    firstServer = false;
+    let firstConnection = true;
+    // Register after the production connection listener so the replacement
+    // reaches admission while the real old close notification is still queued.
+    server.on('connection', socket => {
+      if (!firstConnection) {
+        events.push('replacement TCP connection reached proxy');
+        releaseClose?.(); releaseClose = undefined;
+        return;
+      }
+      firstConnection = false;
+      const emit = socket.emit;
+      socket.emit = ((event: string | symbol, ...values: unknown[]) => {
+        if (event === 'close' && !releaseClose) {
+          expect(socket.destroyed).toBe(true);
+          events.push('old proxy frontend physically closed; notification queued');
+          releaseClose = () => { events.push('old proxy close notification delivered'); Reflect.apply(emit, socket, [event, ...values]); };
+          return true;
+        }
+        return Reflect.apply(emit, socket, [event, ...values]);
+      }) as typeof socket.emit;
+    });
+    return server;
+  }) as typeof net.createServer);
+  try {
+    const run = await runOnce(tracked(createPghybridAdapterScenario('pg-pool', 'handled-error')), {
+      databaseUrl, ...pghybridAdapterOptions('pg-pool'), timeoutMs: 10_000,
+    });
+    console.log(JSON.stringify({ poolRetirementReproduction: { events, outcome: run.outcome,
+      reason: run.reason, connections: run.connections?.map(item => [item.actor, item.connection]),
+      completionCodes: run.trace.map(step => step.completion?.error?.code ?? 'ok'), cleanup: run.cleanup } }));
+    expect(events).toEqual(['old proxy frontend physically closed; notification queued',
+      'replacement TCP connection reached proxy', 'old proxy close notification delivered']);
+    expect(run.outcome, run.reason).toBe('passed');
+    expect(run.connections).toHaveLength(4);
+    expect(run.cleanup.complete).toBe(true);
+  } finally { releaseClose?.(); spy.mockRestore(); }
 });
 
 test.each(adapters)('%s public searches reuse, reconnect and exactly replay through the real adapter', async adapter => {

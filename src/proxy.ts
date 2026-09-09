@@ -46,9 +46,11 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   const maxBuffered = positiveLimit(options.maxBufferedBytes, DEFAULT_BUFFER_LIMIT);
   // Validate framing limits before listening.
   new FrameDecoder('typed', options);
-  interface Session { shutdown(): void; closed: Promise<void> }
+  interface Session { shutdown(): void; closed: Promise<void>; isTerminating(): boolean }
+  interface Replacement { client: Socket; retiring: Session; chunks: Buffer[]; bytes: number; detach(): void }
   const sockets = new Set<Socket>(); const sessions = new Set<Session>();
   let commandOwner: Session | undefined;
+  let pendingReplacement: Replacement | undefined;
   let generation = 0; let closing = false; let closePromise: Promise<void> | undefined;
   const notifyError = (error: Error): void => { try { options.onError(error); } catch { /* Consumer errors must never escape a socket event. */ } };
   const notifyEvent = (event: ProxyEvent): void => { try { options.onEvent?.(event); } catch { notifyError(new Error('Proxy event callback failed')); } };
@@ -57,18 +59,61 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     notifyError(error); socket.end(errorResponse(error.message));
     const timer = setTimeout(() => socket.destroy(), 100); timer.unref(); socket.once('close', () => clearTimeout(timer));
   }
+  const connectionLimitError = () => new Error(maxConnections === 1
+    ? 'Unsupported profile: one simultaneous physical connection per actor is supported'
+    : `Unsupported profile: physical connection limit per actor is ${maxConnections}`);
   const server = net.createServer(client => {
     track(client); client.setNoDelay(true);
     if (closing) { client.destroy(); return; }
-    if (sessions.size >= maxConnections) {
-      rejectSocket(client, new Error(maxConnections === 1
-        ? 'Unsupported profile: one simultaneous physical connection per actor is supported'
-        : `Unsupported profile: physical connection limit per actor is ${maxConnections}`));
-      return;
+    if (pendingReplacement) { rejectSocket(client, connectionLimitError()); return; }
+    if (sessions.size < maxConnections) { accept(client); return; }
+    // The peer's public close can finish before our two socket close callbacks.
+    // Keep one prospective startup unadmitted while a conclusively ending session
+    // retires. Its generation and upstream exist only after the original closes.
+    const retiring = [...sessions].find(session => session.isTerminating());
+    if (!retiring) { rejectSocket(client, connectionLimitError()); return; }
+    const replacement: Replacement = { client, retiring, chunks: [], bytes: 0, detach };
+    pendingReplacement = replacement;
+    function detach(): void {
+      client.removeListener('data', retain); client.removeListener('end', abandon);
+      client.removeListener('close', abandon); client.removeListener('error', abandon);
+      if (pendingReplacement === replacement) pendingReplacement = undefined;
     }
+    function abandon(): void { detach(); replacement.chunks = []; client.destroy(); }
+    function retain(chunk: Buffer): void {
+      if (chunk.length > maxBuffered - replacement.bytes) {
+        detach(); replacement.chunks = [];
+        client.pause(); rejectSocket(client, new Error('Protocol pending startup buffered-byte limit exceeded'));
+        return;
+      }
+      replacement.bytes += chunk.length;
+      if (chunk.length) replacement.chunks.push(chunk);
+    }
+    // Reading bounded uninterpreted bytes lets FIN be observed even when it
+    // follows startup data. A fully paused socket would conceal abandonment.
+    client.on('data', retain); client.once('end', abandon);
+    client.once('close', abandon); client.once('error', abandon);
+  });
+  function promoteReplacement(retiring: Session): void {
+    const replacement = pendingReplacement;
+    if (!replacement || replacement.retiring !== retiring) return;
+    const { client } = replacement;
+    client.pause(); replacement.detach();
+    if (closing || client.destroyed || client.readableEnded || client.writableEnded) { client.destroy(); return; }
+    if (sessions.size >= maxConnections) { rejectSocket(client, connectionLimitError()); return; }
+    try {
+      if (replacement.bytes) client.unshift(Buffer.concat(replacement.chunks, replacement.bytes));
+      replacement.chunks = [];
+      accept(client); client.resume();
+    } catch (error) {
+      client.destroy();
+      notifyError(error instanceof Error ? error : new Error('Unable to admit replacement actor connection'));
+    }
+  }
+  function accept(client: Socket): void {
     const connection = generation++; let ordinal = 0; let nextCycle = 0; let backendPid = 0; let startupFingerprint = '';
     let started = false; let ready = false; let negotiated = false; let terminated = false; let failed = false;
-    let closed = false; let clientClosed = false; let upstreamClosed = false; let retainedBytes = 0;
+    let closed = false; let clientClosed = false; let upstreamClosed = false; let frontendEnded = false; let retainedBytes = 0;
     let pendingTerminate: Buffer | undefined;
     const frontend = new FrameDecoder('startup', options); const backend = new FrameDecoder('typed', options); const assembler = new FrontendAssembler(options); const cycles = new FrontendCycleBuffer(options);
     const upstream = net.connect({ host: upstreamUrl.hostname, port: Number(upstreamUrl.port || 5432) }); track(upstream); upstream.setNoDelay(true);
@@ -92,8 +137,12 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       upstream.destroy();
     }
     let resolveClosed!: () => void;
-    const session: Session = { shutdown, closed: new Promise<void>(resolve => { resolveClosed = resolve; }) };
+    const session: Session = { shutdown, closed: new Promise<void>(resolve => { resolveClosed = resolve; }),
+      isTerminating: () => !failed && (terminated || frontendEnded || clientClosed) };
     sessions.add(session);
+    // One waiter per admitted session, independent of how many prospective
+    // replacements abandon their sockets before this session actually retires.
+    void session.closed.then(() => { promoteReplacement(session); });
     function fail(error: Error): void {
       if (failed || closed) return; failed = true; notifyError(error);
       const current = inFlight; inFlight = undefined; current?.reject(error);
@@ -242,7 +291,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       if (negotiated && !started) fail(new Error('Unsupported profile: TLS/GSS encryption required; configure this local actor connection with ssl:false'));
       else if (!terminated && (inFlight || prefix || queue.length || cycles.bufferedBytes || frontend.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
       else if (pendingTerminate) return;
-      else upstream.end();
+      else { frontendEnded = true; upstream.end(); }
     });
     upstream.on('end', () => {
       if (closed) return;
@@ -269,7 +318,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       if (!closed && !client.writableEnded && !failed) client.destroy();
       finishClose();
     });
-  });
+  }
   await new Promise<void>((resolve, reject) => {
     const onError = () => reject(new Error('Unable to listen on loopback for actor proxy'));
     server.once('error', onError);
@@ -283,6 +332,10 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   for (const field of ['host', 'hostaddr', 'port']) endpoint.searchParams.delete(field);
   return { connectionString: endpoint.toString(), close(): Promise<void> {
     if (closePromise) return closePromise; closing = true;
+    if (pendingReplacement) {
+      const replacement = pendingReplacement; replacement.detach();
+      replacement.chunks = []; replacement.client.destroy();
+    }
     closePromise = (async () => {
       const accepted = [...sessions];
       const listenerClosed = new Promise<void>(resolve => { server.close(() => resolve()); });
