@@ -86,9 +86,9 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       const outstanding = Boolean(inFlight || prefix || queue.length || cycles.bufferedBytes);
       const current = inFlight; inFlight = undefined; current?.reject(new Error('Proxy connection closed before command completion'));
       queue.length = 0; retainedBytes = 0; prefix = undefined;
-      // A protocol error rejects the driver's active query before TCP close, allowing
-      // the actor's finally block to close its client without an idle error event.
-      if (outstanding && !client.destroyed) client.end(errorResponse('Interleave actor proxy closed before command completion'));
+      // Notify the driver before TCP close, and leave the existing bounded drain
+      // window for driver cleanup writes. Nothing received after closed is forwarded.
+      if (outstanding && !client.destroyed) client.write(errorResponse('Interleave actor proxy closed before command completion'));
       upstream.destroy();
     }
     let resolveClosed!: () => void;
@@ -98,8 +98,8 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       if (failed || closed) return; failed = true; notifyError(error);
       const current = inFlight; inFlight = undefined; current?.reject(error);
       queue.length = 0; retainedBytes = 0; prefix = undefined; upstream.destroy();
-      client.end(errorResponse(error.message));
-      const timer = setTimeout(shutdown, 100); timer.unref(); client.once('close', () => clearTimeout(timer));
+      client.write(errorResponse(error.message));
+      const timer = setTimeout(() => { shutdown(); client.destroy(); }, 100); timer.unref(); client.once('close', () => clearTimeout(timer));
     }
     function guard(work: () => void): void {
       try { work(); } catch (error) { fail(error instanceof Error ? error : new Error('Proxy protocol processing failed')); }
