@@ -4,6 +4,7 @@ import type {
   ActorResult,
   ConnectionIdentity,
   Failure,
+  MetadataCompletion,
   RunResult,
   TraceStep,
   UnitCompletion,
@@ -86,8 +87,9 @@ export function parseRunArtifact(input: unknown): RunResult {
   assertJsonSafe(value, '$');
 
   const root = shape(value, '$', ROOT_KEYS, REQUIRED_ROOT_KEYS);
-  if (field(root, 'schemaVersion', '$') !== 1) {
-    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1');
+  const version = field(root, 'schemaVersion', '$');
+  if (version !== 1 && version !== 2) {
+    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1 or 2');
   }
   const scenario = field(root, 'scenario', '$');
   assertScenarioName(scenario, '$.scenario');
@@ -107,6 +109,7 @@ export function parseRunArtifact(input: unknown): RunResult {
   }
 
   let connections: ConnectionIdentity[] | undefined;
+  if (version === 2) field(root, 'connections', '$');
   const connectionKeys = new Set<string>();
   if (hasOwn(root, 'connections')) {
     const connectionValues = arrayValue(root.connections, '$.connections', MAX_ARRAY_ITEMS);
@@ -142,7 +145,7 @@ export function parseRunArtifact(input: unknown): RunResult {
   const ordinalByConnection = new Map<string, number>();
   const trace: TraceStep[] = [];
   for (let index = 0; index < traceValues.length; index += 1) {
-    const step = validateTraceStep(traceValues[index], index);
+    const step = validateTraceStep(traceValues[index], index, version);
     if (connections !== undefined && !connectionKeys.has(`${step.actor}\0${step.connection}`)) {
       throw new TypeError(`$.trace[${index}]: command references an unrecorded actor startup`);
     }
@@ -215,6 +218,7 @@ export function parseRunArtifact(input: unknown): RunResult {
     throw new TypeError('Run artifact cannot name more than 8 actors across plan, connections, trace, and results');
   }
   const requiresCompleteActors = outcome === 'passed' || outcome === 'violation' || outcome === 'actor-error';
+  if (version === 2) validateStageSequence(trace, requiresCompleteActors);
   if (requiresCompleteActors && actorNames.size < 2) {
     throw new TypeError('$.actors: completed executions require at least two actor results');
   }
@@ -275,7 +279,8 @@ export function parseRunArtifact(input: unknown): RunResult {
   if (hasOwn(environment, 'fixture')) {
     const profile = validateFixtureIdentity(environment.fixture, '$.environment.fixture');
     const serverMajor = /^(16|17|18)(?:\.|\s|$)/.exec(serverVersion)?.[1];
-    if (!serverMajor || profile !== `postgresql${serverMajor}-native-v1`) {
+    const matches = profile === `postgresql${serverMajor}-native-v1` || (serverMajor === '17' && profile === 'postgresql17-pgvector0.8.6-v1');
+    if (!serverMajor || !matches) {
       throw new TypeError('$.environment.fixture.profile: fixture profile contradicts the recorded PostgreSQL server major');
     }
   }
@@ -286,9 +291,12 @@ export function parseRunArtifact(input: unknown): RunResult {
   const limits = shape(
     field(root, 'limits', '$'),
     '$.limits',
-    ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor'],
-    ['maxSteps', 'timeoutMs'],
+    ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor', ...(version === 2 ? ['protocolProfile'] : [])],
+    ['maxSteps', 'timeoutMs', ...(version === 2 ? ['protocolProfile'] : [])],
   );
+  if (version === 2 && limits.protocolProfile !== 'describe-flush-v1') {
+    throw new TypeError('$.limits.protocolProfile: version 2 requires describe-flush-v1');
+  }
   safeInteger(limits.maxSteps, '$.limits.maxSteps', 1);
   safeInteger(limits.timeoutMs, '$.limits.timeoutMs', 1);
   if (hasOwn(limits, 'maxConnectionsPerActor') && safeInteger(limits.maxConnectionsPerActor, '$.limits.maxConnectionsPerActor', 1) > 8) {
@@ -324,14 +332,16 @@ export function parseRunArtifact(input: unknown): RunResult {
   return root as unknown as RunResult;
 }
 
-function validateTraceStep(value: unknown, index: number): TraceStep {
+function validateTraceStep(value: unknown, index: number, version: 1 | 2): TraceStep {
   const path = `$.trace[${index}]`;
   const step = shape(value, path, [
     'index', 'actor', 'connection', 'ordinal', 'protocol', 'sql', 'fingerprint',
     'backendPid', 'available', 'releasedAt', 'completedAt', 'completion', 'waits',
+    ...(version === 2 ? ['stage', 'cycle', 'prefixOrdinal'] : []),
   ], [
     'index', 'actor', 'connection', 'ordinal', 'protocol', 'sql', 'fingerprint',
     'backendPid', 'available', 'releasedAt', 'waits',
+    ...(version === 2 ? ['stage', 'cycle'] : []),
   ]);
 
   const stepIndex = safeInteger(step.index, `${path}.index`, 0);
@@ -345,6 +355,17 @@ function validateTraceStep(value: unknown, index: number): TraceStep {
   const sql = boundedString(step.sql, `${path}.sql`, 0, MAX_SQL_BYTES, true);
   const fingerprint = fingerprintValue(step.fingerprint, `${path}.fingerprint`);
   const backendPid = safeInteger(step.backendPid, `${path}.backendPid`, 1);
+  const stage = version === 2 ? enumValue(step.stage, `${path}.stage`, ['complete', 'describe', 'execute', 'recover']) : undefined;
+  const cycle = version === 2 ? safeInteger(step.cycle, `${path}.cycle`, 0) : undefined;
+  let prefixOrdinal: number | undefined;
+  if (stage === 'execute' || stage === 'recover') {
+    prefixOrdinal = safeInteger(field(step, 'prefixOrdinal', path), `${path}.prefixOrdinal`, 0);
+  } else if (hasOwn(step, 'prefixOrdinal')) {
+    throw new TypeError(`${path}.prefixOrdinal: only execute and recover stages may reference a prefix`);
+  }
+  if (stage !== undefined && stage !== 'complete' && protocol !== 'extended') {
+    throw new TypeError(`${path}.protocol: staged metadata and continuations require the extended protocol`);
+  }
 
   const availableValues = arrayValue(step.available, `${path}.available`, MAX_AVAILABLE_ACTORS);
   if (availableValues.length === 0) {
@@ -370,7 +391,10 @@ function validateTraceStep(value: unknown, index: number): TraceStep {
   }
   let completion: UnitCompletion | undefined;
   if (hasCompletion) {
-    completion = validateCompletion(step.completion, `${path}.completion`);
+    completion = validateCompletion(step.completion, `${path}.completion`, version, stage === 'describe');
+    if (stage === 'recover' && completion.kind !== 'metadata' && (completion.commandTags.length !== 0 || completion.rowCount !== 0)) {
+      throw new TypeError(`${path}.completion: Sync-only recovery cannot complete executed commands or rows`);
+    }
   }
 
   const waitValues = arrayValue(step.waits, `${path}.waits`, MAX_WAITS_PER_STEP);
@@ -389,6 +413,8 @@ function validateTraceStep(value: unknown, index: number): TraceStep {
     sql,
     fingerprint,
     backendPid,
+    ...(stage === undefined ? {} : { stage, cycle: cycle! }),
+    ...(prefixOrdinal === undefined ? {} : { prefixOrdinal }),
     available,
     releasedAt,
     ...(completedAt === undefined ? {} : { completedAt }),
@@ -397,10 +423,12 @@ function validateTraceStep(value: unknown, index: number): TraceStep {
   };
 }
 
-function validateCompletion(value: unknown, path: string): UnitCompletion {
+function validateCompletion(value: unknown, path: string, version: 1 | 2, metadata: boolean): UnitCompletion {
+  if (metadata) return validateMetadataCompletion(value, path);
   const completion = shape(value, path, [
-    'transactionStatus', 'commandTags', 'rowCount', 'error',
-  ], ['transactionStatus', 'commandTags', 'rowCount']);
+    'transactionStatus', 'commandTags', 'rowCount', 'error', ...(version === 2 ? ['kind'] : []),
+  ], ['transactionStatus', 'commandTags', 'rowCount', ...(version === 2 ? ['kind'] : [])]);
+  if (version === 2 && completion.kind !== 'ready') throw new TypeError(`${path}.kind: expected ready completion`);
   const transactionStatus = enumValue(
     completion.transactionStatus,
     `${path}.transactionStatus`,
@@ -426,7 +454,68 @@ function validateCompletion(value: unknown, path: string): UnitCompletion {
       message: boundedString(errorValue.message, `${path}.error.message`, 0, MAX_GENERAL_STRING_BYTES),
     };
   }
-  return { transactionStatus, commandTags, rowCount, ...(error === undefined ? {} : { error }) };
+  return { ...(version === 2 ? { kind: 'ready' as const } : {}), transactionStatus, commandTags, rowCount, ...(error === undefined ? {} : { error }) };
+}
+
+function validateMetadataCompletion(value: unknown, path: string): MetadataCompletion {
+  const record = plainRecord(value, path);
+  const result = enumValue(field(record, 'result', path), `${path}.result`, ['described', 'error']);
+  const keys = result === 'described'
+    ? ['kind', 'result', 'parameterCount', 'columnCount', 'resultShape']
+    : ['kind', 'result', 'error'];
+  const completion = shape(record, path, keys, keys);
+  if (completion.kind !== 'metadata') throw new TypeError(`${path}.kind: expected metadata completion`);
+  if (result === 'error') {
+    const error = shape(completion.error, `${path}.error`, ['code', 'message'], ['code', 'message']);
+    const code = boundedString(error.code, `${path}.error.code`, 5, 5);
+    if (!SQLSTATE.test(code)) throw new TypeError(`${path}.error.code: expected a five-character SQLSTATE`);
+    return { kind: 'metadata', result, error: { code,
+      message: boundedString(error.message, `${path}.error.message`, 0, MAX_GENERAL_STRING_BYTES) } };
+  }
+  const parameterCount = safeInteger(completion.parameterCount, `${path}.parameterCount`, 0);
+  const columnCount = safeInteger(completion.columnCount, `${path}.columnCount`, 0);
+  if (parameterCount > 65_535 || columnCount > 65_535) throw new TypeError(`${path}: metadata count exceeds the protocol field limit`);
+  const resultShape = enumValue(completion.resultShape, `${path}.resultShape`, ['rows', 'no-data']);
+  if (resultShape === 'no-data' && columnCount !== 0) throw new TypeError(`${path}.columnCount: NoData metadata cannot describe columns`);
+  return { kind: 'metadata', result, parameterCount, columnCount, resultShape };
+}
+
+function validateStageSequence(trace: TraceStep[], complete: boolean): void {
+  const cycles = new Map<string, { next: number; prefix?: TraceStep; previous?: TraceStep }>();
+  for (const step of trace) {
+    const path = `$.trace[${step.index}]`;
+    const key = `${step.actor}\0${step.connection}`;
+    const state = cycles.get(key) ?? { next: 0 };
+    if (state.previous && (state.previous.completedAt === undefined || state.previous.completedAt > step.releasedAt)) {
+      throw new TypeError(`${path}: a connection cannot release another stage before its preceding stage completes`);
+    }
+    if (state.previous && state.previous.backendPid !== step.backendPid) {
+      throw new TypeError(`${path}.backendPid: a connection generation must retain its backend identity`);
+    }
+    if (step.cycle !== state.next) throw new TypeError(`${path}.cycle: expected logical cycle ${state.next}`);
+    if (step.stage === 'execute' || step.stage === 'recover') {
+      const prefix = state.prefix;
+      if (!prefix || prefix.ordinal !== step.prefixOrdinal || prefix.backendPid !== step.backendPid || prefix.sql !== step.sql) {
+        throw new TypeError(`${path}.prefixOrdinal: continuation must reference its own matching describe stage`);
+      }
+      const metadata = prefix.completion;
+      if (metadata?.kind !== 'metadata') throw new TypeError(`${path}: prefix requires a completed metadata stage`);
+      const required = metadata.result === 'error' ? 'recover' : 'execute';
+      if (step.stage !== required) throw new TypeError(`${path}.stage: prefix metadata requires ${required}`);
+      delete state.prefix;
+      state.next++;
+    } else {
+      if (state.prefix) throw new TypeError(`${path}: an open describe cycle requires its continuation`);
+      if (step.stage === 'describe') state.prefix = step;
+      else state.next++;
+    }
+    if (complete && !step.completion) throw new TypeError(`${path}: completed execution requires every released stage to complete`);
+    state.previous = step;
+    cycles.set(key, state);
+  }
+  if (complete && [...cycles.values()].some(state => state.prefix)) {
+    throw new TypeError('$.trace: completed execution cannot leave an open describe cycle');
+  }
 }
 
 function validateWait(value: unknown, path: string, backendPid: number): WaitObservation {
@@ -652,6 +741,7 @@ function validateFixtureIdentity(value: unknown, path: string): string {
   if (fixture.version !== 1) throw new TypeError(`${path}.version: expected fixture identity version 1`);
   const profile = enumValue(fixture.profile, `${path}.profile`, [
     'postgresql16-native-v1', 'postgresql17-native-v1', 'postgresql18-native-v1',
+    'postgresql17-pgvector0.8.6-v1',
   ]);
   enumValue(fixture.algorithm, `${path}.algorithm`, ['sha256']);
   fingerprintValue(fixture.fingerprint, `${path}.fingerprint`);

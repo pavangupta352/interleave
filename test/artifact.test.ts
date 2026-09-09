@@ -170,7 +170,7 @@ describe('parseRunArtifact', () => {
   });
 
   test.each([
-    ['version mismatch', (run: Record<string, unknown>) => { run.schemaVersion = 2; }, /version/i],
+    ['version mismatch', (run: Record<string, unknown>) => { run.schemaVersion = 99; }, /version/i],
     ['unknown root field', (run: Record<string, unknown>) => { run.databaseUrl = 'postgres://secret'; }, /unknown/i],
     ['invalid outcome', (run: Record<string, unknown>) => { run.outcome = 'success'; }, /outcome/i],
     ['invalid mode', (run: Record<string, unknown>) => { run.mode = 'automatic'; }, /mode/i],
@@ -553,7 +553,7 @@ describe('run artifact file IO', () => {
     await writeFile(oversized, Buffer.alloc(16 * 1024 * 1024 + 1, 32));
 
     await expect(readRunArtifact(oversized)).rejects.toThrow(/16|size|large/i);
-    await expect(writeRunArtifact(invalidDestination, { ...validRun(), schemaVersion: 2 as 1 })).rejects.toThrow(/version/i);
+    await expect(writeRunArtifact(invalidDestination, { ...validRun(), schemaVersion: 99 as 1 })).rejects.toThrow(/version/i);
     await expect(access(invalidDestination, constants.F_OK)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

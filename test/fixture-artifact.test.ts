@@ -28,6 +28,16 @@ test('rejects a fixture profile that contradicts the recorded PostgreSQL major',
   (run.environment.fixture as unknown as { profile: string }).profile = 'postgresql18-native-v1';
   expect(() => parseRunArtifact(run)).toThrow(/profile.*server|PostgreSQL.*major/i);
 });
+test('accepts the explicit pgvector fixture profile only with PostgreSQL 17', () => {
+  const run = artifact();
+  run.environment.fixture!.profile = 'postgresql17-pgvector0.8.6-v1';
+  for (const version of ['16.15', '18.6', 'unknown']) {
+    run.environment.serverVersion = version;
+    expect(() => parseRunArtifact(run)).toThrow(/profile.*server|PostgreSQL.*major/i);
+  }
+  run.environment.serverVersion = '17.11';
+  expect(parseRunArtifact(run)).toBe(run);
+});
 test.each([
   ['version', 2], ['profile', 'unknown-profile'], ['algorithm', 'md5'], ['fingerprint', 'not-a-hash'],
   ['components', { schema: 'a'.repeat(64), data: 'a'.repeat(64), sequences: 'a'.repeat(64), settings: 'a'.repeat(64), hidden: true }],

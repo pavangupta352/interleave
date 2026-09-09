@@ -2,6 +2,7 @@ import { replay } from './replay.js';
 import { runTarget } from './run-target.js';
 import { integerLimit, searchBudget } from './search-budget.js';
 import { environmentMatches } from './environment.js';
+import { resolveFixtureProfile } from './fixture-profile.js';
 import type { Scenario, RunResult, MinimizeOptions, MinimizationResult } from './types.js';
 
 type AttemptFailure = NonNullable<MinimizationResult['attemptFailure']>;
@@ -31,7 +32,10 @@ export async function minimize(scenario: Scenario | string, original: RunResult,
   if (original.outcome !== 'violation' || !original.failure) throw new TypeError('Minimization requires an observed invariant failure');
   const maxAttempts = integerLimit(options.maxAttempts, 100, 10_000, 'maxAttempts');
   const { replay: _ignoredReplay, mode: _ignoredMode, plan: _ignoredPlan, expectedEnvironment: _ignoredEnvironment, ...selected } = options;
-  const base = { ...selected, maxConnectionsPerActor: options.maxConnectionsPerActor === undefined ? original.limits.maxConnectionsPerActor ?? 1 : options.maxConnectionsPerActor };
+  const base = { ...selected,
+    fixtureProfile: resolveFixtureProfile(options.fixtureProfile, original.environment.fixture),
+    protocolProfile: options.protocolProfile === undefined ? original.limits.protocolProfile ?? 'sync-cycle-v1' : options.protocolProfile,
+    maxConnectionsPerActor: options.maxConnectionsPerActor === undefined ? original.limits.maxConnectionsPerActor ?? 1 : options.maxConnectionsPerActor };
   const budget = searchBudget(options.totalTimeoutMs, options.signal);
   try {
     const verified = await replay(scenario, original, { ...base, signal: budget.signal, mode: 'replay' });

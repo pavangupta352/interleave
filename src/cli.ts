@@ -13,7 +13,8 @@ import { doctor } from './cli/doctor.js';
 import { initializeProject } from './cli/init.js';
 import { loadNeveroversell } from './cli/demo.js';
 import { exportRegression, type ExportRegressionResult } from './export.js';
-import type { ExplorationResult, MinimizationResult, RunOptions, RunResult } from './types.js';
+import type { ExplorationResult, MinimizationResult, ProtocolProfile, RunOptions, RunResult } from './types.js';
+import type { FixtureIdentityProfile } from './fixture-identity.js';
 
 const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
 const controller = new AbortController();
@@ -88,6 +89,8 @@ async function main(args: string[]): Promise<number> {
     ...(values['timeout-ms'] === undefined ? {} : { timeoutMs: Number(values['timeout-ms']) }),
     ...(values['max-evidence-bytes'] === undefined ? {} : { maxEvidenceBytes: Number(values['max-evidence-bytes']) }),
     ...(values['max-connections-per-actor'] === undefined ? {} : { maxConnectionsPerActor: Number(values['max-connections-per-actor']) }),
+    ...(values['protocol-profile'] === undefined ? {} : { protocolProfile: values['protocol-profile'] as ProtocolProfile }),
+    ...(values['fixture-profile'] === undefined ? {} : { fixtureProfile: values['fixture-profile'] as FixtureIdentityProfile }),
   };
   let result: RunResult | ExplorationResult | MinimizationResult;
   let run: RunResult | undefined;
@@ -151,5 +154,5 @@ function describe(result: RunResult | ExplorationResult | MinimizationResult): s
     const attempt = failed ? `\nReduction trial failed (${failed.outcome}).${failed.reason ? `\n${failed.reason}` : ''}${!failed.cleanup.complete ? `\nCleanup incomplete: ${failed.cleanup.error ?? 'Owned resource cleanup could not be confirmed'}` : ''}` : '';
     return `Reduced ${result.originalChoices} choices to ${result.reducedChoices} in ${result.attempts} attempts; ${result.stopReason}.${result.reason ? `\n${result.reason}` : ''}\n${describe(result.run)}${attempt}`;
   }
-  return `${result.scenario}: ${result.outcome} (${result.mode}); ${result.trace.length} commands; cleanup ${result.cleanup.complete ? 'complete' : 'incomplete'}.${result.reason ? `\n${result.reason}` : ''}${result.failure ? `\n${result.failure.message}` : ''}`;
+  return `${result.scenario}: ${result.outcome} (${result.mode}); ${result.trace.length} ${result.schemaVersion === 2 ? 'releases' : 'commands'}; cleanup ${result.cleanup.complete ? 'complete' : 'incomplete'}.${result.reason ? `\n${result.reason}` : ''}${result.failure ? `\n${result.failure.message}` : ''}`;
 }

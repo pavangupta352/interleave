@@ -33,6 +33,9 @@ function announce(message: string, error = false): void {
 function formatMs(value: number): string { return `${Number(value.toFixed(2)).toLocaleString('en-US')} ms`; }
 function actorNames(value: RunResult): string[] { return [...new Set([...value.actors.map(actor => actor.actor), ...value.trace.flatMap(step => [step.actor, ...step.available]), ...value.plan])]; }
 function shortSql(value: string): string { return value.replace(/\s+/g, ' ').trim() || '(empty command)'; }
+function stageLabel(step: TraceStep): string {
+  return ({ complete: 'Complete query', describe: 'Describe', execute: 'Execute', recover: 'Recover' })[step.stage ?? 'complete'];
+}
 function setRun(value: RunResult, command: string | null): void {
   run = value; replayCommand = command; actors = actorNames(run); query = ''; actorFilter = ''; page = 0;
   selected = run.trace.find(step => step.completion?.error || step.waits.length)?.index ?? 0;
@@ -58,7 +61,7 @@ function renderShell(): void {
   const subtitle = run.failure?.message ?? run.reason ?? (run.outcome === 'passed' ? 'The invariant held in this recorded execution.' : 'Inspect the recorded execution and its limits below.');
   const text = node('p', 'summary-message', subtitle);
   const metadata = node('div', 'metadata');
-  for (const value of [`${run.trace.length.toLocaleString('en-US')} commands`, `${actors.length} actors`, `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
+  for (const value of [`${run.trace.length.toLocaleString('en-US')} ${run.schemaVersion === 2 ? 'releases' : 'commands'}`, `${actors.length} actors`, `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
   const cleanup = node('span', run.cleanup.complete ? 'cleanup-complete' : 'cleanup-incomplete', run.cleanup.complete ? 'Cleanup complete' : 'Cleanup incomplete'); metadata.append(cleanup);
   summary.append(heading, text, metadata);
   if (!run.cleanup.complete) summary.append(node('p', 'cleanup-warning', run.cleanup.error ?? 'Owned resource cleanup did not complete.'));
@@ -88,7 +91,7 @@ function renderShell(): void {
   selectionTools.append(selectionLabel, inspect);
   const ledger = node('div', 'ledger'); ledger.id = 'ledger';
   const pagination = node('div', 'pagination'); pagination.id = 'pagination';
-  const scope = node('p', 'scope-note', 'Each row is a client command released to PostgreSQL. PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.');
+  const scope = node('p', 'scope-note', `${run.schemaVersion === 2 ? 'Each row is a scheduled release. A query may have separate description and execution stages.' : 'Each row is a client command released to PostgreSQL.'} PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.`);
   evidence.append(toolbar, hint, selectionTools, ledger, pagination, scope);
   const inspector = node('aside', 'inspector'); inspector.id = 'inspector'; inspector.setAttribute('aria-label', 'Selected command evidence'); inspector.tabIndex = -1;
   workspace.append(evidence, inspector); main.append(summary, workspace);
@@ -118,6 +121,7 @@ function renderShell(): void {
     addFact(info, 'Harness runtime', `${source.components.runtime.mode} mode · ${source.components.runtime.fingerprint}`);
   }
   addFact(info, 'Connection profile', `${run.limits.maxConnectionsPerActor ?? 1} physical ${(run.limits.maxConnectionsPerActor ?? 1) === 1 ? 'connection' : 'connections'} per actor; one live command producer`);
+  addFact(info, 'Protocol profile', run.limits.protocolProfile ?? 'sync-cycle-v1');
   addFact(info, 'Actor startups', run.connections === undefined ? 'Not recorded in this artifact' : `${run.connections.length.toLocaleString('en-US')} recorded`);
   for (const connection of run.connections ?? []) addFact(info, `${connection.actor} · ${connection.connection}`, connection.fingerprint);
   recordBody.append(info);
@@ -159,10 +163,12 @@ function updateLedger(): void {
           command.setAttribute('aria-controls', 'inspector');
           command.append(node('span', 'mobile-actor', step.actor), node('code', 'sql-preview', shortSql(step.sql)));
           const summary = node('span', 'command-summary');
-          summary.append(node('span', 'protocol', step.protocol === 'extended' ? 'Extended cycle' : 'Simple query'));
+          summary.append(node('span', 'protocol', step.protocol === 'extended' ? step.stage && step.stage !== 'complete' ? 'Extended stage' : 'Extended cycle' : 'Simple query'));
           if (step.completion?.error) summary.append(node('span', 'command-error', step.completion.error.code));
           else if (step.waits.length) summary.append(node('span', 'command-wait', `${step.waits.length} wait ${step.waits.length === 1 ? 'observation' : 'observations'}`));
+          else if (step.completion?.kind === 'metadata') summary.append(node('span', undefined, 'Metadata received'));
           else summary.append(node('span', undefined, step.completion ? `${step.completion.rowCount} ${step.completion.rowCount === 1 ? 'row' : 'rows'}` : 'Incomplete'));
+          if (step.stage && step.stage !== 'complete') summary.prepend(node('span', undefined, stageLabel(step)));
           command.append(summary); command.addEventListener('keydown', navigate); cell.append(command);
         }
         row.append(cell);
@@ -224,12 +230,21 @@ function renderInspector(): void {
     const sql = node('section', 'inspector-section'); const sqlHeading = node('div', 'section-heading'); sqlHeading.append(node('h3', undefined, 'SQL sent to PostgreSQL'));
     const copy = button('Copy SQL', () => void copyText(step.sql, copy), 'text-button'); sqlHeading.append(copy);
     const code = node('pre', 'sql-full'); code.tabIndex = 0; code.append(node('code', undefined, step.sql || '(empty command)')); sql.append(sqlHeading, code);
-    if (step.protocol === 'extended') sql.append(node('p', 'detail-note', 'Parameter values are bound into the command fingerprint; they are not displayed as query text.'));
+    if (step.protocol === 'extended') sql.append(node('p', 'detail-note', step.stage === 'describe'
+      ? 'This release describes the query before parameter values are sent. Values are bound into the later execution fingerprint.'
+      : step.stage === 'recover' ? 'This release sends Sync after the description error. The SQL above identifies the failed query.'
+        : 'Parameter values are bound into the command fingerprint; they are not displayed as query text.'));
     contents.push(sql);
     const completion = node('section', 'inspector-section'); completion.append(node('h3', undefined, 'PostgreSQL completion'));
     const facts = node('dl', 'facts');
     addFact(facts, 'Status', step.completion?.error ? `Error · ${step.completion.error.code}` : step.completion ? 'Completed' : 'Not recorded');
-    if (step.completion) {
+    if (step.completion?.kind === 'metadata') {
+      addFact(facts, 'Boundary', 'Description only');
+      if (step.completion.result === 'described') {
+        addFact(facts, 'Parameters described', String(step.completion.parameterCount));
+        addFact(facts, 'Result columns', step.completion.resultShape === 'no-data' ? 'No result columns (NoData)' : String(step.completion.columnCount));
+      }
+    } else if (step.completion) {
       addFact(facts, 'Command tags', step.completion.commandTags.join(' · ') || 'None'); addFact(facts, 'Rows affected / returned', String(step.completion.rowCount));
       addFact(facts, 'Transaction', ({ I: 'Idle', T: 'In transaction', E: 'Failed transaction' })[step.completion.transactionStatus]);
     }
@@ -244,7 +259,13 @@ function renderInspector(): void {
     }
     contents.push(waits);
     const identity = node('details', 'identity'); identity.append(node('summary', undefined, 'Command identity'));
-    const identityFacts = node('dl', 'facts'); addFact(identityFacts, 'Protocol', step.protocol); addFact(identityFacts, 'Connection / ordinal', `${step.connection} / ${step.ordinal} (zero-based)`); addFact(identityFacts, 'Backend PID', String(step.backendPid)); addFact(identityFacts, 'Available actors', step.available.join(', ')); addFact(identityFacts, 'Fingerprint', step.fingerprint); identity.append(identityFacts); contents.push(identity);
+    const identityFacts = node('dl', 'facts'); addFact(identityFacts, 'Protocol', step.protocol); addFact(identityFacts, 'Connection / ordinal', `${step.connection} / ${step.ordinal} (zero-based)`);
+    if (step.stage) {
+      addFact(identityFacts, 'Stage / cycle', `${stageLabel(step)} / ${step.cycle! + 1}`);
+      const prefix = run.trace.find(candidate => candidate.actor === step.actor && candidate.connection === step.connection && candidate.ordinal === step.prefixOrdinal);
+      if (prefix) addFact(identityFacts, 'Description release', `Step ${prefix.index + 1}`);
+    }
+    addFact(identityFacts, 'Backend PID', String(step.backendPid)); addFact(identityFacts, 'Available actors', step.available.join(', ')); addFact(identityFacts, 'Fingerprint', step.fingerprint); identity.append(identityFacts); contents.push(identity);
   } else contents.push(node('p', 'detail-note', 'There is no command to inspect. Review the execution outcome and actor observations.'));
   const observations = node('details', 'observations'); observations.append(node('summary', undefined, 'Selected actor observations'));
   observations.append(node('p', 'detail-note', 'Values explicitly returned by scenario actors. Database result rows are not automatically captured.'));

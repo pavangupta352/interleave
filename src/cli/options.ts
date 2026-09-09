@@ -8,10 +8,12 @@ const definitions = {
   'project-root': { type: 'string' }, include: { type: 'string', multiple: true },
   'max-steps': { type: 'string' }, 'timeout-ms': { type: 'string' }, 'max-evidence-bytes': { type: 'string' },
   'max-connections-per-actor': { type: 'string' },
+  'protocol-profile': { type: 'string' },
+  'fixture-profile': { type: 'string' },
   'max-runs': { type: 'string' }, 'total-timeout-ms': { type: 'string' },
   'max-candidates': { type: 'string' }, 'max-search-bytes': { type: 'string' }, 'max-attempts': { type: 'string' },
 } as const;
-const runFlags = ['database-url', 'out', 'force', 'max-steps', 'timeout-ms', 'max-evidence-bytes', 'max-connections-per-actor'];
+const runFlags = ['database-url', 'out', 'force', 'max-steps', 'timeout-ms', 'max-evidence-bytes', 'max-connections-per-actor', 'protocol-profile', 'fixture-profile'];
 const searchFlags = ['max-runs', 'total-timeout-ms', 'max-candidates', 'max-search-bytes', 'keep-going', 'plan'];
 const sourceFlags = ['project-root', 'include'];
 const allowed: Record<string, string[]> = {
@@ -43,6 +45,12 @@ export function parseCliArgs(args: string[]) {
     }
   }
   if (parsed.values.force && !parsed.values.out) throw new TypeError('--force requires --out');
+  if (parsed.values['protocol-profile'] !== undefined && !['sync-cycle-v1', 'describe-flush-v1'].includes(parsed.values['protocol-profile'])) {
+    throw new TypeError('--protocol-profile must be sync-cycle-v1 or describe-flush-v1');
+  }
+  if (parsed.values['fixture-profile'] !== undefined && !['native', 'postgresql17-pgvector0.8.6-v1'].includes(parsed.values['fixture-profile'])) {
+    throw new TypeError('--fixture-profile must be native or postgresql17-pgvector0.8.6-v1');
+  }
   for (const [key, [min, max]] of Object.entries(numbers)) {
     const value = parsed.values[key as keyof typeof definitions];
     if (value !== undefined && (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < min || Number(value) > max)) {
@@ -72,6 +80,8 @@ administrator database. Every execution creates and removes its own database.
 Common: --json, --help, --version
 Per run: --max-steps <n>, --timeout-ms <n>, --max-evidence-bytes <n>
 Connections: --max-connections-per-actor <1..8>; extra sessions must remain queryless
+Protocol: --protocol-profile <sync-cycle-v1|describe-flush-v1>; default sync-cycle-v1
+Fixture: --fixture-profile <native|postgresql17-pgvector0.8.6-v1>; default native
 Search: --max-runs <n>, --total-timeout-ms <n>, --max-candidates <n>,
         --max-search-bytes <n>, --plan <alice,bob,...>, --keep-going
 Reduction: --max-attempts <n>, --total-timeout-ms <n>

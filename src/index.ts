@@ -1,6 +1,7 @@
 export { defineScenario } from './scenario.js';
 export { runOnce } from './runner.js';
 export { runScenarioFile } from './supervised.js';
+export type { FixtureIdentityProfile, ResolvedFixtureIdentityProfile } from './fixture-identity.js';
 export type {
   SourceIdentity, SourceIdentityFile, SourceIdentityFiles, SourceIdentityDependency,
   SourceIdentityPackage, SourceIdentityDependencies, SourceIdentityRuntime,
@@ -19,7 +20,7 @@ export type {
 } from './export.js';
 export type {
   ActorContext, ActorResult, ConnectionIdentity, DatabaseContext, ExploreOptions, ExplorationResult,
-  Failure, MinimizeOptions, MinimizationResult, Outcome, ProtocolKind, RunOptions,
+  Failure, MinimizeOptions, MinimizationResult, Outcome, ProtocolKind, ProtocolProfile, RunOptions,
   RunResult, Scenario, StepIdentity, TraceStep, TransactionStatus, UnitCompletion,
-  WaitObservation,
+  WaitObservation, StepStage, ReadyCompletion, MetadataCompletion,
 } from './types.js';

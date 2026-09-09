@@ -8,6 +8,8 @@ import { assertEvidenceEnvelope, finalizeRunEvidence } from './evidence.js';
 import { captureFixtureIdentity, FixtureIdentityError } from './fixture-identity.js';
 import type { SourceIdentity } from './source-identity.js';
 import { environmentMatches } from './environment.js';
+import { resolveProtocolProfile } from './protocol-profile.js';
+import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile.js';
 import type { ActorProxy, ActorResult, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
 
 class Interrupted extends Error {
@@ -49,21 +51,25 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const mode = options.mode ?? (options.replay ? 'replay' : 'explore');
   if (mode === 'replay' && !options.replay) throw new TypeError('replay mode requires a recorded run');
   if (options.replay) parseRunArtifact(options.replay);
+  const recordedProtocol = options.replay?.limits.protocolProfile ?? 'sync-cycle-v1';
+  const protocolProfile = resolveProtocolProfile(options.protocolProfile, mode === 'replay' ? recordedProtocol : undefined);
   if (options.maxConnectionsPerActor !== undefined && !Number.isSafeInteger(options.maxConnectionsPerActor)) {
     throw new TypeError('maxConnectionsPerActor must be an integer from 1 to 8');
   }
   const maxConnectionsPerActor = limit(options.maxConnectionsPerActor,
     mode === 'replay' ? options.replay!.limits.maxConnectionsPerActor ?? 1 : 1, 8, 'maxConnectionsPerActor');
   const replayConnections = new Map((options.replay?.connections ?? []).map(item => [`${item.actor}\0${item.connection}`, item]));
-  const expectedEnvironment = mode === 'replay' ? options.replay!.environment : options.expectedEnvironment;
+  const expectedEnvironment = mode === 'replay' ? options.replay!.environment : mode === 'guided' ? undefined : options.expectedEnvironment;
+  const fixtureProfile = resolveFixtureProfile(options.fixtureProfile, expectedEnvironment?.fixture);
   const started = performance.now();
   const controller = new AbortController();
   const result: RunResult = {
-    schemaVersion: 1, scenario: scenario.name, outcome: 'harness-error', mode,
+    schemaVersion: protocolProfile === 'describe-flush-v1' ? 2 : 1, scenario: scenario.name, outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
     environment: { serverVersion: 'unknown', nodeVersion: process.version, ...(source ? { source } : {}) },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor }, cleanup: { complete: false },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor,
+      ...(protocolProfile === 'describe-flush-v1' ? { protocolProfile } : {}) }, cleanup: { complete: false },
   };
   let database: OwnedDatabase | undefined = providedDatabase;
   let failure: Interrupted | undefined;
@@ -122,6 +128,10 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
 
   try {
     check();
+    if (mode === 'replay' && protocolProfile !== recordedProtocol) throw new Interrupted('incompatible', 'Replay protocol profile differs from the recorded run');
+    if (expectedEnvironment?.fixture && fixtureProfile !== recordedFixtureProfile(expectedEnvironment.fixture)) {
+      throw new Interrupted('incompatible', 'Replay fixture profile differs from the recorded run');
+    }
     // Creation has its own bounded cleanup. Retain the result before applying the run deadline.
     database ??= await createOwnedDatabase(options.databaseUrl);
     result.environment.serverVersion = database.serverVersion;
@@ -139,6 +149,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     await bounded(scenario.setup({ db: database.db, connectionString: database.connectionString }));
     try {
       const fixture = await captureFixtureIdentity(database.connectionString, {
+        profile: fixtureProfile,
         timeoutMs: Math.max(1, Math.min(120_000, Math.floor(timeoutMs - (performance.now() - started)))),
         ...(options.signal ? { signal: options.signal } : {}),
       });
@@ -158,7 +169,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     }
     for (const actor of names) {
       const proxy = await createProxy({
-        actor, upstreamUrl: database.connectionString, maxConnectionsPerActor,
+        actor, upstreamUrl: database.connectionString, maxConnectionsPerActor, protocolProfile,
         onUnit(unit) {
           if (finished) return;
           queues.get(actor)!.push(unit);
@@ -243,10 +254,17 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       if (expected && (expected.actor !== unit.actor || expected.connection !== unit.connection || expected.ordinal !== unit.ordinal || expected.protocol !== unit.protocol || expected.sql !== unit.sql || expected.fingerprint !== unit.fingerprint)) {
         throw new Interrupted('incompatible', `Replay query or actor startup identity changed for ${actor} at step ${result.trace.length}`);
       }
+      const stage = unit.stage ?? 'complete';
+      const cycle = unit.cycle ?? unit.ordinal;
+      if (expected && ((expected.stage ?? 'complete') !== stage || (expected.cycle ?? expected.ordinal) !== cycle || expected.prefixOrdinal !== unit.prefixOrdinal)) {
+        throw new Interrupted('incompatible', `Replay protocol stage changed for ${actor} at step ${result.trace.length}`);
+      }
       const step: TraceStep = {
         index: result.trace.length, actor, connection: unit.connection, ordinal: unit.ordinal,
         protocol: unit.protocol, sql: unit.sql, fingerprint: unit.fingerprint, backendPid: unit.backendPid,
         available, releasedAt: performance.now() - started, waits: [],
+        ...(protocolProfile === 'describe-flush-v1' ? { stage, cycle,
+          ...(unit.prefixOrdinal === undefined ? {} : { prefixOrdinal: unit.prefixOrdinal }) } : {}),
       };
       if (!retain(step)) { check(); }
       result.trace.push(step);
@@ -257,7 +275,8 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       unit.release().then(completion => {
         if (retain(completion)) {
           step.completedAt = performance.now() - started;
-          step.completion = completion;
+          step.completion = protocolProfile === 'describe-flush-v1' && completion.kind !== 'metadata'
+            ? { ...completion, kind: 'ready' } : completion;
         }
         running.delete(actor);
         runtimeEpoch++;

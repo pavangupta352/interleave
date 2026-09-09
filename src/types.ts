@@ -1,8 +1,10 @@
 import type { Client } from 'pg';
-import type { FixtureIdentity } from './fixture-identity.js';
+import type { FixtureIdentity, FixtureIdentityProfile } from './fixture-identity.js';
 import type { SourceIdentity } from './source-identity.js';
 
 export type ProtocolKind = 'simple' | 'extended';
+export type ProtocolProfile = 'sync-cycle-v1' | 'describe-flush-v1';
+export type StepStage = 'complete' | 'describe' | 'execute' | 'recover';
 export type TransactionStatus = 'I' | 'T' | 'E';
 export type Outcome = 'passed' | 'violation' | 'actor-error' | 'incompatible' | 'inconclusive' | 'harness-error';
 
@@ -31,12 +33,35 @@ export interface Scenario {
   invariant(context: DatabaseContext & { results: ActorResult[] }): Promise<void>;
 }
 
-export interface UnitCompletion {
+export interface ReadyCompletion {
+  /** Required in version 2 artifacts; absent in original version 1 records. */
+  kind?: 'ready';
   transactionStatus: TransactionStatus;
   commandTags: string[];
   rowCount: number;
   error?: { code: string; message: string };
 }
+
+export type MetadataCompletion = {
+  kind: 'metadata';
+  transactionStatus?: never;
+  commandTags?: never;
+  rowCount?: never;
+} & ({
+  result: 'described';
+  parameterCount: number;
+  columnCount: number;
+  resultShape: 'rows' | 'no-data';
+  error?: never;
+} | {
+  result: 'error';
+  error: { code: string; message: string };
+  parameterCount?: never;
+  columnCount?: never;
+  resultShape?: never;
+});
+
+export type UnitCompletion = ReadyCompletion | MetadataCompletion;
 
 export interface PendingUnit {
   actor: string;
@@ -46,6 +71,9 @@ export interface PendingUnit {
   sql: string;
   fingerprint: string;
   backendPid: number;
+  stage?: StepStage;
+  cycle?: number;
+  prefixOrdinal?: number;
   release(): Promise<UnitCompletion>;
 }
 
@@ -70,6 +98,7 @@ export interface ProxyOptions {
   maxBufferedBytes?: number;
   /** Total live sessions, including queryless auxiliaries; integer 1..8, default 1. */
   maxConnectionsPerActor?: number;
+  protocolProfile?: ProtocolProfile;
 }
 
 export interface ActorProxy {
@@ -100,6 +129,10 @@ export interface StepIdentity {
   protocol: ProtocolKind;
   sql: string;
   fingerprint: string;
+  /** Explicit for every version 2 step; omitted by version 1. */
+  stage?: StepStage;
+  cycle?: number;
+  prefixOrdinal?: number;
 }
 
 export interface TraceStep extends StepIdentity {
@@ -119,7 +152,7 @@ export interface Failure {
 }
 
 export interface RunResult {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   scenario: string;
   outcome: Outcome;
   mode: 'explore' | 'replay' | 'guided';
@@ -133,12 +166,14 @@ export interface RunResult {
   environment: { serverVersion: string; nodeVersion: string; fixture?: FixtureIdentity; source?: SourceIdentity };
   startedAt: string;
   durationMs: number;
-  limits: { maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number; maxConnectionsPerActor?: number };
+  limits: { maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number; maxConnectionsPerActor?: number; protocolProfile?: ProtocolProfile };
   cleanup: { complete: boolean; error?: string };
 }
 
 export interface RunOptions {
   databaseUrl: string;
+  /** Select the catalog capture contract; native is the default. */
+  fixtureProfile?: FixtureIdentityProfile;
   /** Selected local files for supervised file runs; imported modules are also captured. */
   source?: { projectRoot?: string; include?: string[] };
   plan?: string[];
@@ -151,6 +186,8 @@ export interface RunOptions {
   maxEvidenceBytes?: number;
   /** Permit queryless auxiliary sessions; at most one live session may issue commands. */
   maxConnectionsPerActor?: number;
+  /** Opt in to separately scheduled Parse/Describe/Flush and Bind/Execute/Sync phases. */
+  protocolProfile?: ProtocolProfile;
   signal?: AbortSignal;
 }
 

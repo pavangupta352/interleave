@@ -8,6 +8,8 @@ import { parseRunArtifact } from './artifact.js';
 import { assertEvidenceEnvelope, finalizeRunEvidence } from './evidence.js';
 import { captureSourceIdentity, SourceIdentityError, type SourceIdentity } from './source-identity.js';
 import { sourceSelection } from './source-selection.js';
+import { resolveProtocolProfile } from './protocol-profile.js';
+import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile.js';
 import type { OwnedDatabase, RunOptions, RunResult } from './types.js';
 
 const GRACE_MS = 250;
@@ -30,6 +32,12 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   if (!['explore', 'replay', 'guided'].includes(mode)) throw new TypeError('Unknown execution mode');
   if (mode === 'replay' && !options.replay) throw new TypeError('replay mode requires a recorded run');
   if (options.replay) parseRunArtifact(options.replay);
+  const recordedProtocol = options.replay?.limits.protocolProfile ?? 'sync-cycle-v1';
+  const protocolProfile = resolveProtocolProfile(options.protocolProfile, mode === 'replay' ? recordedProtocol : undefined);
+  const protocolProfileMismatch = mode === 'replay' && protocolProfile !== recordedProtocol;
+  const expectedEnvironment = mode === 'replay' ? options.replay!.environment : mode === 'guided' ? undefined : options.expectedEnvironment;
+  const fixtureProfile = resolveFixtureProfile(options.fixtureProfile, expectedEnvironment?.fixture);
+  const fixtureProfileMismatch = expectedEnvironment?.fixture !== undefined && fixtureProfile !== recordedFixtureProfile(expectedEnvironment.fixture);
   const replayConnections = mode === 'replay' ? (options.replay!.limits.maxConnectionsPerActor ?? 1) : undefined;
   const maxConnectionsPerActor = limit(
     options.maxConnectionsPerActor === undefined ? replayConnections : options.maxConnectionsPerActor,
@@ -41,11 +49,12 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000 || options.plan.some(actor => typeof actor !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,47}$/.test(actor) || ['constructor', 'prototype', '__proto__'].includes(actor)))) throw new TypeError('plan contains an invalid actor');
   const started = performance.now();
   const result: RunResult = {
-    schemaVersion: 1, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
-    plan: [...(options.plan ?? [])], trace: [], actors: [],
+    schemaVersion: protocolProfile === 'describe-flush-v1' ? 2 : 1, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
+    plan: [...(options.plan ?? [])], trace: [], actors: [], ...(protocolProfile === 'describe-flush-v1' ? { connections: [] } : {}),
     environment: { serverVersion: 'unknown', nodeVersion: process.version },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor }, cleanup: { complete: false },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor,
+      ...(protocolProfile === 'describe-flush-v1' ? { protocolProfile } : {}) }, cleanup: { complete: false },
   };
   assertEvidenceEnvelope(result, maxEvidenceBytes);
   let database: OwnedDatabase | undefined;
@@ -61,7 +70,6 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   const deadline = setTimeout(() => interrupt(`Execution exceeded its ${timeoutMs} ms deadline`), timeoutMs);
   options.signal?.addEventListener('abort', onAbort, { once: true });
   if (options.signal?.aborted) onAbort();
-  const expectedEnvironment = mode === 'replay' ? options.replay!.environment : mode === 'guided' ? undefined : options.expectedEnvironment;
   let sourceIdentity: SourceIdentity | undefined;
   const captureSource = () => captureSourceIdentity(resolve(scenarioFile), {
     ...sourceSelection(scenarioFile, options.source, expectedEnvironment?.source), signal: captureController.signal,
@@ -74,7 +82,13 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     delete result.failure;
   };
   try {
-    if (!interruption && connectionProfileMismatch) {
+    if (!interruption && fixtureProfileMismatch) {
+      result.outcome = 'incompatible';
+      result.reason = 'Replay fixture profile differs from the recorded run';
+    } else if (!interruption && protocolProfileMismatch) {
+      result.outcome = 'incompatible';
+      result.reason = 'Replay protocol profile differs from the recorded run';
+    } else if (!interruption && connectionProfileMismatch) {
       result.outcome = 'incompatible';
       result.reason = 'Replay actor connection profile differs from the recorded run';
     } else if (!interruption && expectedEnvironment?.nodeVersion !== undefined && expectedEnvironment.nodeVersion !== process.version) {
@@ -147,6 +161,8 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
                 candidate.environment.serverVersion !== database!.serverVersion
                 || candidate.environment.nodeVersion !== process.version
                 || !isDeepStrictEqual(candidate.environment.source, sourceIdentity)
+                || (candidate.limits.protocolProfile ?? 'sync-cycle-v1') !== protocolProfile
+                || (candidate.environment.fixture !== undefined && recordedFixtureProfile(candidate.environment.fixture) !== fixtureProfile)
               ) throw new TypeError('Worker result changed parent-owned environment identity');
               received = {
                 ...candidate,
@@ -185,7 +201,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
         workerChild.send({
           type: 'start', token: protocolToken, scenarioFile: resolve(scenarioFile), connectionString: database!.connectionString,
           sourceIdentity,
-          options: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, mode, ...(options.plan ? { plan: options.plan } : {}), ...(options.replay ? { replay: options.replay } : {}), ...(options.expectedEnvironment ? { expectedEnvironment: options.expectedEnvironment } : {}) },
+          options: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, fixtureProfile, mode, ...(options.plan ? { plan: options.plan } : {}), ...(options.replay ? { replay: options.replay } : {}), ...(options.expectedEnvironment ? { expectedEnvironment: options.expectedEnvironment } : {}) },
         }, error => { if (error) { result.reason = 'Could not initialize scenario worker'; terminateGroup(workerChild); } });
         if (interruption) stopChild();
       });

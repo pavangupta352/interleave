@@ -2,10 +2,13 @@ import { createHash } from 'node:crypto';
 import { Client, escapeIdentifier, type QueryResultRow } from 'pg';
 
 export type FixtureIdentityErrorCode = 'unsupported' | 'budget-exceeded' | 'not-quiescent' | 'aborted' | 'database-error';
+export type FixtureIdentityProfile = 'native' | 'postgresql17-pgvector0.8.6-v1';
+export type ResolvedFixtureIdentityProfile = 'postgresql16-native-v1' | 'postgresql17-native-v1' | 'postgresql18-native-v1' | 'postgresql17-pgvector0.8.6-v1';
 export class FixtureIdentityError extends Error {
   constructor(readonly code: FixtureIdentityErrorCode, message: string) { super(message); this.name = 'FixtureIdentityError'; }
 }
 export interface FixtureIdentityOptions {
+  profile?: FixtureIdentityProfile;
   maxObjects?: number;
   maxRows?: number;
   /** Total canonical bytes hashed, including catalog definitions and row values. */
@@ -15,7 +18,7 @@ export interface FixtureIdentityOptions {
 }
 export interface FixtureIdentity {
   version: 1;
-  profile: 'postgresql16-native-v1' | 'postgresql17-native-v1' | 'postgresql18-native-v1';
+  profile: ResolvedFixtureIdentityProfile;
   algorithm: 'sha256';
   fingerprint: string;
   components: { schema: string; data: string; sequences: string; settings: string };
