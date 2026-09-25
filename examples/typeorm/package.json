@@ -1,0 +1,8 @@
+{
+  "name": "interleave-typeorm-example",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": { "node": "22.18.0" },
+  "dependencies": { "pg": "8.23.0", "typeorm": "1.1.1" }
+}
