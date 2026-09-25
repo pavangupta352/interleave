@@ -1,6 +1,6 @@
 # Project working agreement
 
-Read `PRODUCT.md`, `docs/architecture/specification.md` and `docs/plans/implementation.md` before changing behavior. If `.local/CURRENT.md` exists, read it first and use its ledger to resume completed work without repeating it. Update the continuation record after milestones and before context transitions.
+Read `PRODUCT.md`, `docs/architecture/specification.md` and `docs/plans/implementation.md` before changing behavior. If `.local/CURRENT.md` exists, read it first and use its ledger to resume completed work without repeating it. Read `PROJECT_STATUS.md` for the current user direction, complete roadmap, unfinished worktrees and pause/resume instructions. Update the continuation record after milestones and before context transitions.
 
 Run actual application queries against real PostgreSQL. Keep protocol bytes intact. Distinguish query release from completion and record actual lock observations. Never label timeouts or unsupported behavior as passing evidence.
 

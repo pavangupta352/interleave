@@ -10,6 +10,8 @@ This actual run of [neveroversell's unchanged unsafe operation](examples/neverov
 
 The library, CLI, offline viewer and supported regression exports are implemented. There is no stable release yet. Start from a source checkout or build a local package using the [installation guide](docs/getting-started.md).
 
+See the [project status and full roadmap](https://github.com/pavangupta352/interleave/blob/main/PROJECT_STATUS.md) for completed work, current qualification, unfinished branches and the development pause checkpoint.
+
 ## Run an example and open the evidence
 
 You need Git, Node.js 22.18+ and a running Docker engine. Run these commands in a POSIX shell:
