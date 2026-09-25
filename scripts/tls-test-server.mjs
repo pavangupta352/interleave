@@ -21,7 +21,7 @@ export async function withTlsTestServer({ image = 'postgres:16', leaf = 'valid',
   check();
   return withTlsTestCertificates(async certificates => {
     const owner = randomUUID(), name = `interleave-tls-test-${owner}`, password = randomBytes(24).toString('hex');
-    let id, imageId, proposed = false, failed = false, failure, result;
+    let id, imageId, proposed = false, creationUncertain = false, failed = false, failure, result;
     const event = (type, fields = {}) => onEvent({ type, at: new Date().toISOString(), name, ...fields });
     const docker = async (args, timeout = 15_000, extraEnv = {}) => {
       // Detached children also survive a signal delivered to the fixture owner's group.
@@ -49,6 +49,7 @@ export async function withTlsTestServer({ image = 'postgres:16', leaf = 'valid',
     async function cleanup() {
       if (!proposed) return;
       const owned = await inspect(id ?? name);
+      if (!owned && creationUncertain) throw new Error(`TLS test creation reply was lost; absence remains unconfirmed for ${name}`);
       if (owned) {
         id = owned.id; imageId = owned.image;
         try { await docker(['rm', '--force', '--volumes', id], 30_000); }
@@ -75,8 +76,11 @@ export async function withTlsTestServer({ image = 'postgres:16', leaf = 'valid',
           '--publish', '127.0.0.1::5432', '--env', 'POSTGRES_PASSWORD', '--env', 'POSTGRES_USER=postgres',
           '--env', 'POSTGRES_DB=postgres', '--entrypoint', '/bin/sh', image, '-ec', entrypoint],
         180_000, { POSTGRES_PASSWORD: password });
-      } catch { throw new Error(`Could not create TLS test server ${name}`); }
-      if (!/^[a-f0-9]{64}$/.test(reply)) throw new Error(`Invalid create reply for TLS test server ${name}`);
+      } catch (error) {
+        creationUncertain = error.code !== 'ENOENT';
+        throw new Error(`Could not create TLS test server ${name}`);
+      }
+      if (!/^[a-f0-9]{64}$/.test(reply)) { creationUncertain = true; throw new Error(`Invalid create reply for TLS test server ${name}`); }
       const created = await inspect(reply);
       if (!created || created.id !== reply) throw new Error(`Created TLS test server is missing or inconsistent: ${name}`);
       id = created.id; imageId = created.image;

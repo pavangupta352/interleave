@@ -34,3 +34,24 @@ test('combined output overflow rejects rather than returning truncated success',
   await assert.rejects(tlsTestCommand(process.execPath, ['-e',
     "process.stdout.write('x'.repeat(2048));setInterval(()=>{},1000)"], { maxBuffer: 1024 }), { code: 'ERR_OUTPUT_LIMIT' });
 });
+
+test('deadline settles and terminates a descendant holding inherited output pipes', { timeout: 5000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'interleave-tls-descendant-'));
+  const pidFile = join(directory, 'pid');
+  let pid;
+  try {
+    const operation = tlsTestCommand(process.execPath, ['-e',
+      "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});require('fs').writeFileSync(process.argv[1],String(c.pid));setInterval(()=>{},1000)", pidFile], { timeout: 500 });
+    let timer;
+    try {
+      await assert.rejects(Promise.race([operation, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error('Descendant kept the timed-out command open'), { code: 'TEST_BOUND_EXCEEDED' })), 2000);
+      })]), { code: 'ETIMEDOUT' });
+    } finally { clearTimeout(timer); }
+    pid = Number(await readFile(pidFile, 'utf8'));
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  } finally {
+    try { pid ??= Number(await readFile(pidFile, 'utf8')); process.kill(pid, 'SIGKILL'); } catch (error) { if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error; }
+    await rm(directory, { recursive: true, force: true });
+  }
+});

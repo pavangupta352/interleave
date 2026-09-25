@@ -7,7 +7,14 @@ export function tlsTestCommand(executable, args, { cwd, env = process.env, timeo
     const child = spawn(executable, args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     const chunks = { stdout: [], stderr: [] };
     let size = 0, failure;
-    const stop = code => { failure ??= code; child.kill('SIGKILL'); };
+    const stop = code => {
+      failure ??= code;
+      if (!child.pid) return;
+      try {
+        if (process.platform === 'win32') child.kill('SIGKILL');
+        else process.kill(-child.pid, 'SIGKILL');
+      } catch (error) { if (error.code !== 'ESRCH') failure = 'ERR_TERMINATION'; }
+    };
     const timer = setTimeout(() => stop('ETIMEDOUT'), timeout);
     for (const channel of ['stdout', 'stderr']) child[channel].on('data', chunk => {
       size += chunk.length;
