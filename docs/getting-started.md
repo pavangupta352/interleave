@@ -30,14 +30,18 @@ download both, check the hash, then scaffold and install from the file:
 
 ```sh
 shasum -a 256 -c SHA256SUMS --ignore-missing
-npx --yes --package ./pavangupta352-interleave-0.1.0.tgz interleave init interleave-race
+interleave_archive="$PWD/pavangupta352-interleave-0.1.0.tgz"
+npx --yes --package "$interleave_archive" interleave init interleave-race
 cd interleave-race
-npm install --save-dev --save-exact ../pavangupta352-interleave-0.1.0.tgz pg@8.23.0
+npm install --save-dev --save-exact "$interleave_archive" pg@8.23.0
 ```
 
-`npx` needs `--package` for a file path; `npx ./archive.tgz` tries to execute the
-archive. Continue with the [application guide](application-guide.md) to test your
-own operation. The rest of this page builds from source.
+Use an absolute path: npm resolves a relative file path against the nearest
+enclosing project, not the current directory. `npx` also needs `--package` for a
+file; `npx ./archive.tgz` tries to execute the archive. Keep `interleave_archive`
+set: the [CI guide](ci.md) passes the same file to `export`. Continue with the
+[application guide](application-guide.md) to test your own operation. The rest of
+this page builds from source.
 
 ## Build the checkout
 
