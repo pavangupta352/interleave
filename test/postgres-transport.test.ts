@@ -19,7 +19,7 @@ const url = 'postgresql://fixture-user:credential-sentinel@DB.Fixture.Test/fixtu
 const ca = rootCertificates[0]!;
 const otherCa = rootCertificates[1]!;
 // Generated for this repository; only its public certificate is retained.
-const leaf = new X509Certificate(readFileSync(new URL('./fixtures/tls/reference-name.pem', import.meta.url)));
+const leaf = new X509Certificate(readFileSync(new URL('./fixtures/tls/reference-name.crt', import.meta.url)));
 const tlsInput = { mode: 'verify-full', ca } as const;
 
 function expectCode(action: () => unknown, code: string): void {
