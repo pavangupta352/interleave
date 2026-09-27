@@ -61,6 +61,31 @@ drivers, ORMs and pool implementations, larger pools and cancellation routing
 have not been checked with this profile, and the complete release matrix (every
 suite on each PostgreSQL major and Node.js version) has not yet run with it.
 
+## Statement overlap
+
+`overlap: 'pairs'` (`--overlap pairs`) releases the next commands of two actors or
+lanes together; see [statement overlap](api.md#statement-overlap). It was checked
+on 27 September 2026 against PostgreSQL 16.15 with Node.js 24.7.0, using a claim
+that inserts a row only when none exists, in one statement that pauses after its
+snapshot:
+
+- Exploring without overlap tried every order and never failed; with overlap it
+  found the duplicate claim on its third run, at the pair `alice+bob`.
+- Exact replay of that pair repeated the failure, guided replay reran it, and
+  reduction kept the pair as its one choice.
+- An atomic `UPDATE ... SET value = value + 1` passed every sequential and
+  paired choice.
+- Postgres.js prepared statements under `describe-flush-v1` found the pair of
+  execution stages, and replayed it exactly.
+- A multi-producer pool paired two connections of one actor (`alice#0+alice#1`)
+  and replayed through connection binding.
+- The CLI recorded, replayed, reduced and reported the failure through supervised
+  file runs, and the report marked the pair in Chromium, Firefox and WebKit.
+
+The pause makes those checks deterministic. Real statements overlap for much less
+time, so a real overlap failure can reproduce only some of the time. PostgreSQL
+chooses how a pair interleaves; replay cannot force it.
+
 ## PostgreSQL 17 with pgvector 0.8.6
 
 The separate `postgresql17-pgvector0.8.6-v1` fixture profile is qualified on

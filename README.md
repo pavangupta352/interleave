@@ -132,6 +132,8 @@ The same workflow is available from JavaScript: `explore`, `runOnce`,
 | Drizzle 0.45.2, Kysely 0.29.5 | Ordinary query-builder CRUD and transactions over node-postgres, each actor with its own pool |
 | TypeORM 1.1.1 and 0.3.31 | A per-actor DataSource helper with transactions and serialization-failure retry, on Node.js 22.18; [example](examples/typeorm/README.md) |
 | Any language | `processActor` runs a separate program as an actor; qualified with Python and psycopg 3.3.6 ([example](examples/python/README.md)) |
+| Connection pools | `--connection-profile multi-producer-v1` schedules each connection of an actor: `pg.Pool` with `max: 2`, a Kysely side query beside a transaction, Postgres.js with `max: 2` ([details](docs/compatibility.md#multi-connection-actors)) |
+| Races inside one statement | `--overlap pairs` releases two commands together and lets PostgreSQL interleave them ([details](docs/compatibility.md#statement-overlap)) |
 | TLS-only servers | `--upstream-tls [--upstream-ca ca.pem]` verifies the certificate chain and host name on every connection |
 | pgvector 0.8.6 | An explicit fixture profile on PostgreSQL 17, with the pinned [pghybrid](examples/pghybrid/README.md) search adapters |
 
@@ -150,8 +152,9 @@ isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize
   statements executing at the same instant are missed; the case studies include
   one such miss. With it, PostgreSQL chooses how a released pair interleaves, so
   replaying such a failure can succeed only some of the time.
-- By default each actor holds one command-producing connection at a time. COPY,
-  pipelining and cancel requests are not supported and fail explicitly.
+- By default each actor holds one command-producing connection at a time; the
+  `multi-producer-v1` profile schedules several. COPY, pipelining and cancel
+  requests are not supported and fail explicitly.
 - Clocks, randomness and external services are not controlled.
 
 ## Install
