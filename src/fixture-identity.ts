@@ -317,12 +317,17 @@ export async function captureFixtureIdentity(connectionString: string, options: 
   }
   async function quiescent(): Promise<void> {
     // An uncommitted setup session must fail before we wait on one of its table locks.
-    const activity = await query<{ busy: boolean }>(`SELECT EXISTS (
-      SELECT 1 FROM pg_catalog.pg_stat_activity WHERE datname OPERATOR(pg_catalog.=) pg_catalog.current_database()
+    // Report how many other sessions were busy and their states, never their queries.
+    const activity = await query<{ busy: number; states: string }>(`SELECT pg_catalog.count(*)::integer AS busy,
+      COALESCE(pg_catalog.string_agg(DISTINCT COALESCE(state, 'starting'), ', '), '') AS states
+      FROM pg_catalog.pg_stat_activity WHERE datname OPERATOR(pg_catalog.=) pg_catalog.current_database()
       AND pid OPERATOR(pg_catalog.<>) pg_catalog.pg_backend_pid()
       AND backend_type OPERATOR(pg_catalog.=) 'client backend'
-      AND (state IS NULL OR state OPERATOR(pg_catalog.<>) 'idle' OR xact_start IS NOT NULL)) AS busy`);
-    if (activity[0]!.busy) throw new FixtureIdentityError('not-quiescent', 'Fixture identity requires committed setup and no active actor or external transactions');
+      AND (state IS NULL OR state OPERATOR(pg_catalog.<>) 'idle' OR xact_start IS NOT NULL)`);
+    const { busy, states } = activity[0]!;
+    if (busy > 0) {
+      throw new FixtureIdentityError('not-quiescent', `Fixture identity requires committed setup and no active actor or external transactions (${busy} other ${busy === 1 ? 'session' : 'sessions'}: ${states})`);
+    }
   }
   async function records(label: string, sql: string, values: unknown[] = []): Promise<string> {
     const rows = await query<{ digest: string; bytes: string }>(`SELECT pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(payload,'UTF8')),'hex') AS digest,

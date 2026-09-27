@@ -148,8 +148,11 @@ integration('fixture identity integration with real PostgreSQL', () => {
   });
   test('rejects uncommitted setup and uncovered custom range types explicitly', async () => {
     const owned = await database(fixture); await owned.db.query('BEGIN');
-    try { await expect(captureFixtureIdentity(owned.connectionString)).rejects.toMatchObject({ code: 'not-quiescent' }); }
-    finally { await owned.db.query('ROLLBACK'); }
+    try {
+      await expect(captureFixtureIdentity(owned.connectionString)).rejects.toMatchObject({
+        code: 'not-quiescent', message: expect.stringContaining('(1 other session: idle in transaction)'),
+      });
+    } finally { await owned.db.query('ROLLBACK'); }
     await owned.db.query('CREATE TYPE app.span AS RANGE (subtype=integer)');
     await expect(captureFixtureIdentity(owned.connectionString)).rejects.toMatchObject({ code: 'unsupported' });
   });
