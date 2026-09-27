@@ -18,6 +18,8 @@ import { connectionFailureMessage } from './protocol/upstream-transport.js';
 import type { OwnedDatabase, RunOptions, RunResult } from './types.js';
 
 const GRACE_MS = 250;
+/** Each source identity capture, before and after execution, is bounded separately. */
+const SOURCE_IDENTITY_TIMEOUT_MS = 60_000;
 
 function limit(value: number | undefined, fallback: number, maximum: number, label: string): number {
   const result = value === undefined ? fallback : value;
@@ -77,13 +79,17 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   const captureController = new AbortController();
   const interrupt = (reason: string): void => { interruption ??= reason; captureController.abort(); stopChild?.(); };
   const onAbort = (): void => interrupt('Execution was cancelled');
-  const deadline = setTimeout(() => interrupt(`Execution exceeded its ${timeoutMs} ms deadline`), timeoutMs);
+  // The execution deadline covers the database and worker. Source identity capture
+  // before and after execution is evidence binding with its own bound, so a slow
+  // capture on a loaded machine cannot consume the scenario's execution time.
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const armDeadline = (): void => { deadline ??= setTimeout(() => interrupt(`Execution exceeded its ${timeoutMs} ms deadline`), timeoutMs); };
   options.signal?.addEventListener('abort', onAbort, { once: true });
   if (options.signal?.aborted) onAbort();
   let sourceIdentity: SourceIdentity | undefined;
   const captureSource = () => captureSourceIdentity(resolve(scenarioFile), {
     ...sourceSelection(scenarioFile, options.source, expectedEnvironment?.source), signal: captureController.signal,
-    timeoutMs: Math.max(1, Math.min(120_000, Math.floor(timeoutMs - (performance.now() - started)))),
+    timeoutMs: SOURCE_IDENTITY_TIMEOUT_MS,
   });
   const unbound = (reason: string): void => {
     const hard = result.outcome === 'actor-error' || (result.outcome === 'harness-error' && result.reason !== undefined);
@@ -130,6 +136,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     if (!interruption && sourceIdentity && result.outcome === 'harness-error') {
       // Never race creation against cancellation: the eventual handle owns the
       // exact generated database and must be retained for authoritative cleanup.
+      armDeadline();
       database = await createOwnedDatabase(options.databaseUrl, transport);
       result.environment.serverVersion = database.serverVersion;
       if (expectedEnvironment && expectedEnvironment.serverVersion !== database.serverVersion) {
@@ -224,6 +231,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
         }, error => { if (error) { result.reason = 'Could not initialize scenario worker'; terminateGroup(workerChild); } });
         if (interruption) stopChild();
       });
+      clearTimeout(deadline);
       if (!interruption && sourceIdentity) {
         try {
           const after = await captureSource();

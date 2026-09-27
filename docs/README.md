@@ -1,8 +1,9 @@
 # Interleave documentation
 
-Start with the task you want to complete. Interleave is under development and
-has no stable release yet; the setup guide covers the current source and local
-package routes.
+Start with the task you want to complete. The setup guide covers installing a
+release and building from source. Interleave is at 0.1: before 1.0, a minor
+release may change the API, CLI or artifact format, and the changelog records
+each change.
 
 | I want to… | Read |
 | --- | --- |

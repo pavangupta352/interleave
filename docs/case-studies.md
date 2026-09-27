@@ -44,9 +44,9 @@ What these results show:
   choices. In the Sequelize case its record includes the lock wait that
   PostgreSQL reported for the losing insert. Its offline export bundle worked
   for Knex. For the other two cases it rejected the applications' dependency
-  archives, which is a defect in the current development build; the separate
-  installation profile, which installs dependencies with ordinary `npm ci`,
-  exported and replayed both.
+  archives, a defect in the build that was studied (fixed since, not
+  re-measured; see below); the separate installation profile, which installs
+  dependencies with ordinary `npm ci`, exported and replayed both.
 - node-pg-migrate 6.0.0 and Sequelize 6.8.0 passed under every method.
 - **Knex 0.95.12 is the important miss.** Its fix passed Interleave's guided
   replay, 100 explored schedules and the isolation tester, yet ordinary

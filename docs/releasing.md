@@ -1,8 +1,9 @@
 # Preparing a release
 
-Interleave has no stable release yet. The [acceptance checklist](plans/implementation.md)
-tracks the remaining application qualification and publication gates. Preparing
-archives is one step in that work.
+A release is published only after its exact CI-built archive has passed consumer
+acceptance on both qualified Node.js versions. The
+[implementation plan](plans/implementation.md) tracks remaining qualification work.
+Preparing archives is one step in a release.
 
 Use a clean source checkout on POSIX with Git, tar, Node.js 22.18+ and npm. The
 canonical CI packaging environment uses Node.js 24.7.0 and npm 11.5.1. Select a

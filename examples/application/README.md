@@ -6,7 +6,7 @@ and asserts that two increments leave a counter at two.
 
 Follow the [application guide](../../docs/application-guide.md) for complete
 commands. It copies both files from the built package into an ordinary application
-installed through the [local-archive route](../../docs/getting-started.md#install-this-development-build-into-an-application).
+installed through the [local-archive route](../../docs/getting-started.md#install-a-source-build-into-an-application).
 The scenario's public Interleave import resolves that app-installed package.
 Running it directly under Interleave's own package root would use a self-reference
 alias, which the source capture profile rejects.

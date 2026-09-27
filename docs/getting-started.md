@@ -25,10 +25,19 @@ npx --no-install interleave report failure.interleave.json --out report.html
 ```
 
 Every [GitHub release](https://github.com/pavangupta352/interleave/releases) also
-carries the npm archive and `SHA256SUMS`. To install from it, check the archive's
-hash and pass its path or URL to `npm install --save-dev`. Continue with the
-[application guide](application-guide.md) to test your own operation. The rest of
-this page builds from source.
+carries the npm archive and `SHA256SUMS`. To install from the archive instead,
+download both, check the hash, then scaffold and install from the file:
+
+```sh
+shasum -a 256 -c SHA256SUMS --ignore-missing
+npx --yes --package ./pavangupta352-interleave-0.1.0.tgz interleave init interleave-race
+cd interleave-race
+npm install --save-dev --save-exact ../pavangupta352-interleave-0.1.0.tgz pg@8.23.0
+```
+
+`npx` needs `--package` for a file path; `npx ./archive.tgz` tries to execute the
+archive. Continue with the [application guide](application-guide.md) to test your
+own operation. The rest of this page builds from source.
 
 ## Build the checkout
 
@@ -128,7 +137,7 @@ Output destinations must be new. Use a new name on later runs, or add `--force`
 when you intend to replace an artifact or report. `init` and `export` always
 require unoccupied destinations; they do not support replacement.
 
-## Install this development build into an application
+## Install a source build into an application
 
 This route builds an ordinary local npm archive. It is useful for development;
 it is not a signed release or the full [release qualification](releasing.md).
@@ -146,7 +155,7 @@ npx --no-install interleave --version
 
 Choose a new sibling directory if `interleave-race` already contains any scaffold
 files. `init` creates `package.json`, `scenario.mjs` and a README; it never installs
-dependencies. The installation above replaces the scaffold's development-version
+dependencies. The installation above replaces the scaffold's version-range
 dependency with the actual archive path and records it in your lockfile. Keep
 that original archive if you want a portable export later. Repacking after source
 or package changes does not produce a substitute for its locked bytes.

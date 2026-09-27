@@ -165,7 +165,7 @@ async function acceptInstalled(context, archive, packageHash) {
   assert(/Interleave/i.test((await command(cli, ['--help'], options)).toString('utf8')), 'Installed CLI help is missing');
   const scaffold = join(cwd, 'new scenario'); await command(cli, ['init', scaffold], options);
   const scaffoldPackage = JSON.parse(await readOrdinaryFile(join(scaffold, 'package.json')));
-  assert(scaffoldPackage.dependencies?.[context.metadata.name] === context.metadata.version, 'Installed init selected a different package version');
+  assert(scaffoldPackage.devDependencies?.[context.metadata.name] === context.metadata.version, 'Installed init selected a different package version');
   for (const path of ['scenario.mjs', 'README.md']) assert((await readOrdinaryFile(join(scaffold, path))).length > 0, `Installed init omitted ${path}`);
   const lockBytes = await readOrdinaryFile(join(cwd, 'package-lock.json'));
   const lock = JSON.parse(lockBytes);

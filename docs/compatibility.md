@@ -99,7 +99,9 @@ loopback endpoint. Python with psycopg 3.3.6 (binary wheel, libpq 18) on Python
 3.14 is qualified against PostgreSQL 16 through an installed-package workflow:
 the unsafe [example](../examples/python/README.md) oversold, exact replay
 reproduced the failure, an edited program was rejected as changed source, and the
-repaired program passed a fully explored frontier. The `python` CI job repeats it.
+repaired program passed a fully explored frontier of 47 schedules. That search
+starts two Python processes per schedule and needs more than the default 60-second
+search budget; the example and the `python` CI job give it ten minutes.
 Separate Node.js programs using node-postgres are covered by the integration suite
 in-process, including exact replay.
 

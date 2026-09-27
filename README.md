@@ -59,7 +59,8 @@ export default defineScenario({
 ```
 
 Then let Interleave find the order that breaks it, replay it and shrink it. This
-is real output:
+output comes from a real run, shortened where the CLI repeats the search's scope
+note and each run's summary:
 
 ```console
 $ npx interleave run scenario.mjs --docker --out failure.json

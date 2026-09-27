@@ -30,7 +30,7 @@ test.each(['8.23.0', '8.11.5'])('init workload exports and clean-replays with or
   // ordinary default-import syntax; establish that fixture before recording.
   if (appPg === '8.11.5') await writeFile(join(app, 'scenario.mjs'), (await readFile(join(app, 'scenario.mjs'), 'utf8')).replace("import { Client } from 'pg';", "import pg from 'pg';\nconst { Client } = pg;"));
   const originalScenario = await readFile(join(app, 'scenario.mjs'));
-  // Installing the unpublished local tarball is the documented init workflow.
+  // Installing a local tarball is one documented init workflow.
   // These dependency pins are established before any recording.
   execute('npm', ['install', archive, `pg@${appPg}`, '--ignore-scripts'], app);
   const cli = join(app, 'node_modules/@pavangupta352/interleave/dist/cli.js');

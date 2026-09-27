@@ -1,6 +1,6 @@
 # Library API
 
-The API is under development. These entries describe the implemented core; release and compatibility qualification remain in progress.
+This page describes the 0.1 API. Before 1.0, a minor release may change it; the [changelog](../CHANGELOG.md) records every change and the [compatibility guide](compatibility.md) lists what each release was qualified against.
 
 For a complete application example, start with the [application guide](application-guide.md).
 The [CI guide](ci.md) shows result checks and evidence retention. The API requires
@@ -181,7 +181,7 @@ Run options require `databaseUrl`, an explicit administrator URL for a dedicated
 | --- | ---: | --- |
 | `plan` | `[]` | Explicit actor choices, then fair rotation among available actors |
 | `maxSteps` | 100 | Maximum released stages per run; whole cycles count once, staged metadata and continuation count separately |
-| `timeoutMs` | 10,000 | Per-run execution deadline in milliseconds |
+| `timeoutMs` | 10,000 | Per-run execution deadline in milliseconds. File runs capture source identity before and after execution under a separate 60-second bound each |
 | `maxEvidenceBytes` | 8 MiB | Recorded evidence budget per run |
 | `maxConnectionsPerActor` | 1 | Admitted PostgreSQL connection cap per actor; additional live connections must remain queryless |
 | `protocolProfile` | `sync-cycle-v1` | Whole cycles, or explicit `describe-flush-v1` metadata and continuation stages |

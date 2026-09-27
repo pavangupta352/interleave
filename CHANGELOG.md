@@ -79,6 +79,11 @@ exploration does not prove an application has no races.
 - User names and passwords with unencoded special characters are rejected with a
   percent-encoding hint. `NODE_PG_FORCE_NATIVE` is rejected for Interleave's own
   connections because pg's native binding ignores their TLS settings.
+- The per-run `timeoutMs` covers execution only. File runs capture source
+  identity before and after execution under a separate 60-second bound each.
+  Before, a slow capture on a loaded machine could use up the remaining run time
+  and leave a finished run inconclusive.
+- `interleave init` lists Interleave and pg under `devDependencies`.
 
 ### Known limits
 

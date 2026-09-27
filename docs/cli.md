@@ -1,15 +1,17 @@
 # Command-line interface
 
-The CLI is under development. These commands execute the implemented core;
-broader driver, environment and release qualification remains in progress.
+This page describes the 0.1 command-line interface. Before 1.0, a minor release
+may change commands or options; the [changelog](../CHANGELOG.md) records every
+change and the [compatibility guide](compatibility.md) lists what each release was
+qualified against.
 
 Use Node.js 22.18 or newer. Scenario files are trusted executable code. Production
 fixtures should be runnable `.mjs`/ESM files with their own installed dependencies.
 The installed CLI does not provide tsx or custom TypeScript loaders. Source-mode
 development tests use tsx separately.
 
-Use [getting started](getting-started.md) to acquire the current unpublished
-development build and configure PostgreSQL. Commands below use an installed
+Use [getting started](getting-started.md) to install a release or build from
+source, and to configure PostgreSQL. Commands below use an installed
 application's `npx --no-install interleave`. In a built source checkout, replace
 that prefix with `node dist/cli.js`. See [troubleshooting](troubleshooting.md)
 for setup failures and outcome-specific next steps.
@@ -21,9 +23,9 @@ npx --no-install interleave init ../race-check
 ```
 
 `init` creates `scenario.mjs`, `package.json`, and `README.md`. It never installs
-packages or overwrites existing files. Install the original local Interleave
-archive into that new project using the [complete development-package route](getting-started.md#install-this-development-build-into-an-application).
-There is no published development version promised by this guide.
+packages or overwrites existing files. Then install Interleave and `pg` in that
+project as [getting started](getting-started.md#install-a-release) shows, or use
+the [source-build route](getting-started.md#install-a-source-build-into-an-application).
 
 ## Select PostgreSQL
 
@@ -214,6 +216,8 @@ milliseconds as named. Defaults and supported contracts are in [API](api.md).
 Choose execution limits for each invocation. Replay does not inherit the recorded
 timeout: if recording needed `--timeout-ms 30000`, pass that option again when
 replaying or minimizing. Omitting it selects the default 10-second per-run limit.
+That limit covers execution. File runs capture the scenario's source identity
+before and after execution, and each capture has its own 60-second bound.
 
 `--json` writes one JSON value to stdout: the corresponding public API result
 (ExplorationResult for run, RunResult for replay/doctor/demo, MinimizationResult

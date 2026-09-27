@@ -78,7 +78,7 @@ included by a later `npm pack` of the checkout.
 The measurements used a different route: each `before-fix/` and `after-fix/`
 directory was copied out as an ordinary application, and the packed Interleave
 archive was installed into it with `npm install --save-exact <archive>`, as in
-[getting started](../../docs/getting-started.md#install-this-development-build-into-an-application).
+[getting started](../../docs/getting-started.md#install-a-source-build-into-an-application).
 
 ## Keep a portable regression
 

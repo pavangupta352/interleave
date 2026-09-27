@@ -13,18 +13,22 @@ that guide and must stay in the same shell.
 ## Retain the original failing case
 
 Before changing `application/counter.mjs`, keep the source, package/lock files,
-original Interleave archive and artifacts. A supported export bundles them:
+the Interleave archive you installed from, if any, and the artifacts. A supported
+export bundles them:
 
 ```sh
 npx --no-install interleave export application/scenario.mjs application-reduced.json \
   --project-root . --runtime-archive "$interleave_archive" --out counter-regression
 ```
 
-`interleave_archive` is the absolute original archive path set during
-[installation](getting-started.md#install-this-development-build-into-an-application).
-If you opened a new shell, set it to that same retained file. Export verifies its
-bytes against the recorded lock and runtime; a newly packed archive is not an
-interchangeable replacement. Export requires a completed invariant violation
+`interleave_archive` is the absolute path of the archive you installed: the
+[release file](getting-started.md#install-a-release) or the
+[source build](getting-started.md#install-a-source-build-into-an-application).
+If you opened a new shell, set it to that same retained file. When Interleave was
+installed from the npm registry, omit `--runtime-archive`; export downloads the
+exact locked archive from `registry.npmjs.org` and checks its integrity. Export
+verifies the archive's bytes against the recorded lock and runtime; a newly packed
+archive is not an interchangeable replacement. Export requires a completed invariant violation
 and does not need PostgreSQL or execute the application.
 
 Follow the emitted installation and replay commands from the export directory
@@ -138,9 +142,10 @@ exists; the test runner still fails and retains its error output.
 
 ## Run it in GitHub Actions
 
-For the current unpublished development package, first make its original archive
-available at a path the CI checkout can resolve. From the installed application,
-with `interleave_archive` still pointing to the original file:
+If you installed Interleave from an archive file rather than the npm registry,
+first make that original archive available at a path the CI checkout can
+resolve. From the installed application, with `interleave_archive` still pointing
+to the original file:
 
 ```sh
 mkdir -p vendor
@@ -151,9 +156,9 @@ npm install --save-exact ./vendor/interleave.tgz pg@8.23.0
 Retain `vendor/interleave.tgz`, the updated `package.json` and `package-lock.json`,
 `application/`, and `check-race.mjs` in your CI input. A local archive path outside
 the checkout will not exist on the runner. Changing dependency metadata creates
-a new source identity; record new application evidence after this setup. Once a
-published version is actually available, a pinned registry dependency can replace
-this development-archive route through an intentional lockfile update.
+a new source identity; record new application evidence after this setup. An
+application that installed the registry package needs no vendored archive;
+switching between the two routes is an intentional lockfile update.
 
 Save this complete workflow as `.github/workflows/race.yml` in that application:
 

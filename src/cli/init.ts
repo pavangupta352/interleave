@@ -9,7 +9,7 @@ export async function initializeProject(directory: string, version: string) {
     'package.json': JSON.stringify({
       name: 'interleave-scenario', private: true, type: 'module',
       scripts: { race: 'interleave run scenario.mjs --out failure.interleave.json' },
-      dependencies: { '@pavangupta352/interleave': version, pg: '^8.23.0' },
+      devDependencies: { '@pavangupta352/interleave': version, pg: '^8.23.0' },
     }, null, 2) + '\n',
     'scenario.mjs': `import assert from 'node:assert/strict';
 import { Client } from 'pg';
