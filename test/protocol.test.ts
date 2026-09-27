@@ -73,6 +73,20 @@ describe('frontend scheduling units', () => {
     expect(additional.fingerprint).not.toBe(ordinary.fingerprint);
     expect(closed.fingerprint).not.toBe(ordinary.fingerprint);
   });
+  test('names a statement once when a cycle only prepares, describes or closes it', () => {
+    const target = (type: 'D' | 'C', name: string) => packet(type, Buffer.concat([Buffer.from('S'), cstring(name)]));
+    const assembler = new FrontendAssembler();
+    // pgx prepares with Parse/Describe/Sync; PDO closes with Close/Sync.
+    const prepared = [parse('stmtcache_1', 'SELECT $1::text'), target('D', 'stmtcache_1'), sync].map(f => assembler.accept(f)).at(-1)!;
+    expect(prepared.sql).toBe('SELECT $1::text');
+    expect(prepared.fingerprint).not.toBe(assemble([parse('stmtcache_1', 'SELECT $1::text'), sync])[0]!.fingerprint);
+    expect(assembler.accept(target('C', 'stmtcache_1'))).toBeUndefined();
+    expect(assembler.accept(sync)!.sql).toBe('SELECT $1::text');
+    expect(assemble([parse('a', 'SELECT 1'), parse('b', 'SELECT 2'), target('D', 'a'), target('D', 'b'), sync])[0]!.sql).toBe('SELECT 1; SELECT 2');
+    const executed = [parse('a', 'SELECT $1::text'), bind('p', 'a', 'hello'), execute('p')];
+    expect(assemble([...executed, execute('p'), sync])[0]!.sql).toBe('SELECT $1::text; SELECT $1::text');
+    expect(assemble([...executed, target('C', 'a'), sync])[0]!.sql).toBe('SELECT $1::text');
+  });
   test('rejects early Flush, COPY data, unknown statements, malformed fields, and bounded cycles', () => {
     expect(() => assemble([packet('H')])).toThrow(/unsupported.*Flush/i);
     expect(() => assemble([packet('d')])).toThrow(/unsupported.*COPY/i);
