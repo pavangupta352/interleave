@@ -104,6 +104,20 @@ Both runs recorded the same source identity fingerprint and generated client as
 the matrix. The earlier 900-second search budget would not have covered either
 search.
 
+### On the 0.1.0 source
+
+The same four commits, applied to `main` at `ebbadbc` (Interleave 0.1.0, run
+artifact schema 3, separately bounded source capture), produced the archive
+`pavangupta352-interleave-0.1.0.tgz` (1,967,020 bytes, SHA-256
+`83994f2188352c82195ea035cb4f8c23a6bac63416a4d5ba642eb1eda394b224`). The gate
+passed 13 of 13 on Node.js 24.7.0 with PostgreSQL 16.15 (1,238 s) and on Node.js
+22.18.0 with PostgreSQL 18.6 (1,240 s). The recorded identity grew to 82,525,513
+bytes in 605 files with the larger runtime, and both runs recorded the same
+fingerprint. The 363-run search took 1,145 s each, with the slowest run at
+21.8 s. The 0.1.0 archive built from `ebbadbc` itself, with the 64 MiB default,
+ran the unsafe checkout as `inconclusive` (exit 4) with `Source identity byte
+limit exceeded` and no SQL.
+
 ## Additional observations
 
 - **Unchanged runtime.** With an archive built from `2ee7677`, whose source

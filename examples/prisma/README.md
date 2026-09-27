@@ -114,12 +114,13 @@ npx interleave minimize scenario.ts oversell.json --timeout-ms 30000 --out minim
 ```
 
 `--include prisma` records the schema and the migration that setup reads.
-Each run's deadline also covers capturing the roughly 82 MB source identity
-before and after execution and starting two Prisma clients in a new worker.
-Most observed runs took one to three seconds, but with the default 10-second
-deadline one run stopped as `inconclusive` (`Source identity deadline
-exceeded`) while the host's load average was above 30, ending that search with
-exit 4. These commands allow 30 seconds per run, as the qualification gate does.
+Each run starts a new worker, database and two Prisma clients, and Interleave
+captures the roughly 82 MB source identity before and after it. Most observed
+runs took one to three seconds, but on a heavily loaded host single runs took up
+to 21.8 seconds, so these commands allow 30 seconds per run, as the
+qualification gate does. (Source capture now has its own 60-second bound; in
+builds where it still counted against the 10-second default, one run stopped as
+`inconclusive` with `Source identity deadline exceeded`.)
 `prisma generate` and `prisma migrate diff` do not connect to a database;
 `generator/prisma.config.ts` reads `DATABASE_URL` only for commands that do.
 The CLI downloads its schema engine from Prisma's binary host on first use.
@@ -142,8 +143,8 @@ changed. The guided rerun follows the recorded actor order against the repaired
 code and passes (exit 0). The fresh search explores 363 schedules, all passing,
 until its frontier is exhausted (exit 0). Each schedule starts a new worker,
 database and two Prisma clients, so the search is slow. In the qualification
-runs, two at a time on a shared host, it took 9 to 18 minutes, with median runs
-of 1.4 to 2.5 seconds and the slowest at 18.4 seconds. When other work had
+runs, two at a time on a shared host, it took 9 to 19 minutes, with median runs
+of 1.4 to 2.5 seconds and the slowest at 21.8 seconds. When other work had
 pushed the host's load average near 30, a 900-second budget covered only 182
 schedules. A search that reaches its budget stops with exit 4 and `deadline`,
 which does not establish the repair; the default 60-second budget is far too

@@ -200,8 +200,9 @@ Boundaries of this profile:
 - `@prisma/client` 7.10.0 alone installs 74,458,946 bytes; the example's recorded
   source identity is 82,478,406 bytes in 602 files, within the 128 MiB default
   budget. Builds with the earlier 64 MiB default, including the `3785d49`
-  candidate archive, stop every Prisma 7.10.0 recording as `inconclusive` with
-  `Source identity byte limit exceeded` before any SQL runs.
+  candidate and the 0.1.0 package prepared at `ebbadbc`, stop every Prisma
+  7.10.0 recording as `inconclusive` with `Source identity byte limit exceeded`
+  before any SQL runs.
 - The recorded application must not install the Prisma CLI where its modules
   resolve packages. `@prisma/client` declares the CLI as an optional peer, and
   installed peers are recorded; with the CLI beside the client the closure is
