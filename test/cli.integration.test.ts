@@ -106,6 +106,31 @@ describe('CLI real PostgreSQL integration', () => {
     const guided = await execute(['replay', fixture('counter'), artifact, '--guided']);
     expect(guided.code).toBe(1); expect(JSON.parse(guided.stdout).mode).toBe('guided');
   });
+  test('schedules pooled connections as lanes and replays, reduces and guides without repeating the profile', { timeout: 60_000 }, async () => {
+    const out = join(await directory(), 'pool run.json');
+    const scenario = fixture('pool');
+    const run = await execute(['run', scenario, '--connection-profile', 'multi-producer-v1', '--plan', 'alice#0,alice#1,bob,alice#0,alice#1,bob', '--out', out]);
+    expect(run.code, run.stdout + run.stderr).toBe(1);
+    const original = await readRunArtifact(out);
+    expect(original.schemaVersion).toBe(4);
+    expect(original.limits.connectionProfile).toBe('multi-producer-v1');
+    expect(original.trace.map(step => `${step.actor}#${step.connection}`)).toEqual(['alice#0', 'alice#1', 'bob#0', 'alice#0', 'alice#1', 'bob#0']);
+    expect(original.environment.source).toBeDefined();
+    const exact = await start(['replay', scenario, out], {}, false).result;
+    expect(exact.code, exact.stdout + exact.stderr).toBe(1);
+    expect(exact.stdout).toContain('cli-pool: violation (replay); 6 commands; cleanup complete.');
+    const mismatched = await execute(['replay', scenario, out, '--connection-profile', 'single-producer-v1']);
+    expect(mismatched.code).toBe(3); expect(JSON.parse(mismatched.stdout).reason).toMatch(/connection profile differs/);
+    const minimized = await execute(['minimize', scenario, out, '--max-attempts', '12']);
+    expect(minimized.code, minimized.stdout + minimized.stderr).toBe(1);
+    const reduced = JSON.parse(minimized.stdout);
+    expect(reduced.run.failure.fingerprint).toBe(original.failure!.fingerprint);
+    expect(reduced.run.limits.connectionProfile).toBe('multi-producer-v1');
+    const guided = await execute(['replay', scenario, out, '--guided']);
+    expect(guided.code, guided.stdout + guided.stderr).toBe(1);
+    expect(JSON.parse(guided.stdout)).toMatchObject({ mode: 'guided', plan: ['alice#0', 'alice#1', 'bob', 'alice#0', 'alice#1', 'bob'],
+      limits: { connectionProfile: 'multi-producer-v1' } });
+  });
   test('doctor checks real disposable database and proxy operations', async () => {
     const result = await execute(['doctor']); expect(result.code).toBe(0);
     const run = JSON.parse(result.stdout); expect(run.trace).toHaveLength(2); expect(run.cleanup.complete).toBe(true);

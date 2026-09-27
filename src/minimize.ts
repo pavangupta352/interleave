@@ -3,6 +3,7 @@ import { runTarget } from './run-target.js';
 import { integerLimit, searchBudget } from './search-budget.js';
 import { environmentMatches } from './environment.js';
 import { resolveFixtureProfile } from './fixture-profile.js';
+import { planFromTrace, recordedConnectionProfile, resolveConnectionProfile } from './lanes.js';
 import type { Scenario, RunResult, MinimizeOptions, MinimizationResult } from './types.js';
 
 type AttemptFailure = NonNullable<MinimizationResult['attemptFailure']>;
@@ -35,6 +36,7 @@ export async function minimize(scenario: Scenario | string, original: RunResult,
   const base = { ...selected,
     fixtureProfile: resolveFixtureProfile(options.fixtureProfile, original.environment.fixture),
     protocolProfile: options.protocolProfile === undefined ? original.limits.protocolProfile ?? 'sync-cycle-v1' : options.protocolProfile,
+    connectionProfile: resolveConnectionProfile(options.connectionProfile, recordedConnectionProfile(original)),
     maxConnectionsPerActor: options.maxConnectionsPerActor === undefined ? original.limits.maxConnectionsPerActor ?? 1 : options.maxConnectionsPerActor };
   const budget = searchBudget(options.totalTimeoutMs, options.signal);
   try {
@@ -43,7 +45,8 @@ export async function minimize(scenario: Scenario | string, original: RunResult,
     if (verificationFailure || verified.outcome !== 'violation' || verified.failure?.fingerprint !== original.failure.fingerprint) {
       throw new MinimizationVerificationError(verificationFailure?.outcome ?? verified.outcome, budget.reason(), verificationFailure);
     }
-    let plan = original.trace.map(step => step.actor);
+    // Lane-qualified only for actors that released commands on several connections.
+    let plan = planFromTrace(original);
     const originalChoices = plan.length;
     let run = verified;
     const expectedEnvironment = structuredClone(verified.environment);

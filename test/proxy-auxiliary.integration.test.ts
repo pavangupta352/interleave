@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { Client } from 'pg';
 import { createOwnedDatabase } from '../src/database.js';
 import { createProxy } from '../src/proxy.js';
-import type { ActorProxy, OwnedDatabase, PendingUnit, ProxyEvent } from '../src/types.js';
+import type { ActorProxy, ConnectionProfile, OwnedDatabase, PendingUnit, ProxyEvent } from '../src/types.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
 
 let database: OwnedDatabase;
@@ -19,13 +19,14 @@ async function until<T>(predicate: () => T | undefined | false): Promise<T> {
   throw new Error('Timed out waiting for auxiliary connection evidence');
 }
 
-async function harness(maxConnectionsPerActor?: number) {
+async function harness(maxConnectionsPerActor?: number, connectionProfile?: ConnectionProfile) {
   const units: PendingUnit[] = [];
   const events: ProxyEvent[] = [];
   const errors: Error[] = [];
   const proxy = await createProxy({
     upstreamUrl: database.connectionString, actor: 'worker',
     ...(maxConnectionsPerActor === undefined ? {} : { maxConnectionsPerActor }),
+    ...(connectionProfile === undefined ? {} : { connectionProfile }),
     onUnit(unit) { units.push(unit); },
     onEvent(event) { events.push(event); },
     onError(error) { errors.push(error); },
@@ -192,5 +193,31 @@ describe('bounded auxiliary PostgreSQL connections', () => {
 
   test.each([0, -1, 1.5, 9, Number.NaN, Number.POSITIVE_INFINITY, null, '2', true])('rejects invalid connection limit %s before listening', async limit => {
     await expect(harness(limit as number)).rejects.toThrow(/maxConnectionsPerActor.*integer.*1.*8/i);
+  });
+
+  test('the multi-producer profile lets every live session produce commands as its own lane', async () => {
+    const h = await harness(2, 'multi-producer-v1');
+    const first = await h.connect('lane-zero');
+    const second = await h.connect('lane-one');
+    const held = first.query('INSERT INTO auxiliary_effects VALUES (21)');
+    const other = second.query('INSERT INTO auxiliary_effects VALUES ($1)', [22]);
+    for (const result of [held, other]) void result.catch(() => {});
+    await until(() => h.units.length === 2);
+    expect(h.units.map(unit => [unit.connection, unit.ordinal, unit.protocol]).sort()).toEqual([[0, 0, 'simple'], [1, 0, 'extended']]);
+    expect((await database.db.query('SELECT * FROM auxiliary_effects')).rows).toEqual([]);
+    const lane = (connection: number) => h.units.find(unit => unit.connection === connection)!;
+    // One lane completes while the other lane's command is still held.
+    await lane(1).release();
+    expect((await other).rowCount).toBe(1);
+    expect((await database.db.query('SELECT id FROM auxiliary_effects')).rows).toEqual([{ id: 22 }]);
+    await lane(0).release();
+    expect((await held).rowCount).toBe(1);
+    expect((await h.query(second, 'SELECT 2 AS n')).rows).toEqual([{ n: 2 }]);
+    expect(h.units.map(unit => [unit.connection, unit.ordinal]).sort()).toEqual([[0, 0], [1, 0], [1, 1]]);
+    expect(h.errors).toEqual([]);
+  });
+
+  test.each([null, 'pool', 'multi-producer-v2'])('rejects invalid connection profile %s before listening', async profile => {
+    await expect(harness(2, profile as ConnectionProfile)).rejects.toThrow(/connectionProfile must be single-producer-v1 or multi-producer-v1/);
   });
 });

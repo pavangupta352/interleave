@@ -14,6 +14,10 @@ import { connectionFailureMessage, HARD_UPSTREAM_FAILURES, UpstreamConnectionErr
 import { resolveProtocolProfile } from './protocol-profile.js';
 import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile.js';
 import { missingReplayIdentity } from './replay-readiness.js';
+import {
+  defaultConnectionLimit, fairLane, LaneBinder, laneLabel, parsePlanEntry, recordedConnectionProfile, resolveConnectionProfile,
+  resolvePlanEntry, validatePlanEntries, type Lane, type LiveLane, type PlanResolution,
+} from './lanes.js';
 import type { ActorProxy, ActorResult, DatabaseContext, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
 
 class Interrupted extends Error {
@@ -50,7 +54,8 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   if (maxEvidenceBytes < 1024) throw new TypeError('maxEvidenceBytes must be at least 1024');
   if (!options.databaseUrl) throw new TypeError('databaseUrl must explicitly name a dedicated test PostgreSQL administrator connection');
   const names = Object.keys(scenario.actors).sort();
-  if (options.plan?.some(actor => !names.includes(actor))) throw new TypeError('plan contains an unknown actor');
+  // Lane grammar is checked here; its profile requirement once the profile is known.
+  validatePlanEntries(options.plan, 'multi-producer-v1', names);
   if (Buffer.byteLength(JSON.stringify(options.plan ?? [])) > maxEvidenceBytes / 2) throw new TypeError('Initial schedule exceeds the evidence byte limit');
   const mode = options.mode ?? (options.replay ? 'replay' : 'explore');
   if (mode === 'replay' && !options.replay) throw new TypeError('replay mode requires a recorded run');
@@ -60,11 +65,15 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   }
   const recordedProtocol = options.replay?.limits.protocolProfile ?? 'sync-cycle-v1';
   const protocolProfile = resolveProtocolProfile(options.protocolProfile, mode === 'replay' ? recordedProtocol : undefined);
+  const recordedConnections = options.replay ? recordedConnectionProfile(options.replay) : 'single-producer-v1';
+  const connectionProfile = resolveConnectionProfile(options.connectionProfile, mode === 'replay' ? recordedConnections : undefined);
+  const multi = connectionProfile === 'multi-producer-v1';
+  validatePlanEntries(options.plan, connectionProfile, names);
   if (options.maxConnectionsPerActor !== undefined && !Number.isSafeInteger(options.maxConnectionsPerActor)) {
     throw new TypeError('maxConnectionsPerActor must be an integer from 1 to 8');
   }
   const maxConnectionsPerActor = limit(options.maxConnectionsPerActor,
-    mode === 'replay' ? options.replay!.limits.maxConnectionsPerActor ?? 1 : 1, 8, 'maxConnectionsPerActor');
+    mode === 'replay' ? options.replay!.limits.maxConnectionsPerActor ?? 1 : defaultConnectionLimit(connectionProfile), 8, 'maxConnectionsPerActor');
   const replayConnections = new Map((options.replay?.connections ?? []).map(item => [`${item.actor}\0${item.connection}`, item]));
   const expectedEnvironment = mode === 'replay' ? options.replay!.environment : mode === 'guided' ? undefined : options.expectedEnvironment;
   const fixtureProfile = resolveFixtureProfile(options.fixtureProfile, expectedEnvironment?.fixture);
@@ -73,11 +82,12 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const started = performance.now();
   const controller = new AbortController();
   const result: RunResult = {
-    schemaVersion: 3, scenario: scenario.name, outcome: 'harness-error', mode,
+    schemaVersion: multi ? 4 : 3, scenario: scenario.name, outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
     environment: { serverVersion: 'unknown', nodeVersion: process.version, ...(source ? { source } : {}), transport: runTransportIdentity(transport) },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile }, cleanup: { complete: false },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, ...(multi ? { connectionProfile } : {}) },
+    cleanup: { complete: false },
   };
   let database: OwnedDatabase | undefined = providedDatabase;
   let failure: Interrupted | undefined;
@@ -87,13 +97,26 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const proxies: ActorProxy[] = [];
   const actors: Promise<void>[] = [];
   const settled = new Map<string, ActorResult>();
-  const queues = new Map(names.map(name => [name, [] as PendingUnit[]]));
-  const running = new Map<string, { step: TraceStep; blocked: boolean }>();
+  // One lane per admitted connection generation. The single-producer proxy lets
+  // only one lane of an actor hold commands at a time; multi-producer does not.
+  interface LaneState extends Lane { queue: PendingUnit[]; running?: { step: TraceStep; blocked: boolean }; fingerprint?: string; closed: boolean }
+  const lanes = new Map<string, LaneState>();
+  const laneState = (actor: string, connection: number): LaneState => {
+    const key = laneLabel(actor, connection);
+    let lane = lanes.get(key);
+    if (!lane) { lane = { actor, connection, queue: [], closed: false }; lanes.set(key, lane); }
+    return lane;
+  };
+  const describeLane = (lane: Lane): string => multi ? laneLabel(lane.actor, lane.connection) : lane.actor;
+  const binder = mode === 'replay' && multi ? new LaneBinder(options.replay!) : undefined;
   const pids = new Map<number, string>();
+  const pidLanes = new Map<number, Lane>();
   const connectionPids = new Map<string, number>();
   const livePids = new Set<number>();
   const waiters = new Set<() => void>();
   let lastActor: string | undefined;
+  const lastConnection = new Map<string, number>();
+  let laneWait: string | undefined;
   let runtimeEpoch = 0;
   let evidenceBytes = Buffer.byteLength(JSON.stringify(result)) + 256;
   assertEvidenceEnvelope(result, maxEvidenceBytes);
@@ -115,7 +138,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const onAbort = (): void => stop('inconclusive', 'Execution was cancelled');
   options.signal?.addEventListener('abort', onAbort, { once: true });
   if (options.signal?.aborted) onAbort();
-  const deadline = setTimeout(() => stop('inconclusive', `Execution exceeded its ${timeoutMs} ms deadline`), timeoutMs);
+  const deadline = setTimeout(() => stop('inconclusive', `Execution exceeded its ${timeoutMs} ms deadline${laneWait ? `; ${laneWait}` : ''}`), timeoutMs);
 
   const pause = async (milliseconds = 10): Promise<void> => new Promise(resolve => {
     const complete = (): void => { clearTimeout(timer); waiters.delete(complete); resolve(); };
@@ -142,6 +165,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       if (missing) throw new Interrupted('incompatible', missing);
     }
     if (mode === 'replay' && protocolProfile !== recordedProtocol) throw new Interrupted('incompatible', 'Replay protocol profile differs from the recorded run');
+    if (mode === 'replay' && connectionProfile !== recordedConnections) throw new Interrupted('incompatible', 'Replay connection profile differs from the recorded run');
     if (expectedEnvironment?.fixture && fixtureProfile !== recordedFixtureProfile(expectedEnvironment.fixture)) {
       throw new Interrupted('incompatible', 'Replay fixture profile differs from the recorded run');
     }
@@ -191,9 +215,10 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     for (const actor of names) {
       const proxy = await createProxy({
         actor, upstreamUrl: database.transport.connectionString, upstreamTransport: database.transport, maxConnectionsPerActor, protocolProfile,
+        connectionProfile,
         onUnit(unit) {
           if (finished) return;
-          queues.get(actor)!.push(unit);
+          laneState(actor, unit.connection).queue.push(unit);
           wake();
         },
         onEvent(event) {
@@ -201,7 +226,12 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           if (event.type === 'startup') {
             const identity = { actor: event.actor, connection: event.connection, fingerprint: event.fingerprint };
             if (retain(identity)) result.connections!.push(identity);
-            if (mode === 'replay') {
+            laneState(actor, event.connection).fingerprint = event.fingerprint;
+            if (binder) {
+              const admitted = [...lanes.values()].flatMap(lane => lane.actor === actor && lane.fingerprint !== undefined ? [lane.fingerprint] : []);
+              const changed = binder.startup(actor, event.connection, admitted, event.fingerprint);
+              if (changed) stop('incompatible', changed);
+            } else if (mode === 'replay') {
               const original = replayConnections.get(`${event.actor}\0${event.connection}`);
               if (!original || original.fingerprint !== event.fingerprint) stop('incompatible', `Replay actor startup identity changed for ${event.actor} connection ${event.connection}`);
             }
@@ -210,11 +240,13 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           }
           const key = `${actor}\0${event.connection}`;
           if (event.type === 'connected') {
-            pids.set(event.backendPid, actor); livePids.add(event.backendPid); connectionPids.set(key, event.backendPid);
+            pids.set(event.backendPid, actor); pidLanes.set(event.backendPid, { actor, connection: event.connection });
+            livePids.add(event.backendPid); connectionPids.set(key, event.backendPid);
           } else {
             const pid = connectionPids.get(key);
             if (pid !== undefined) livePids.delete(pid);
             connectionPids.delete(key);
+            laneState(actor, event.connection).closed = true;
           }
           runtimeEpoch++;
           wake();
@@ -244,42 +276,74 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       actors.push(task);
     }
 
-    executionLoop: while (settled.size < names.length || running.size || [...queues.values()].some(queue => queue.length)) {
+    const order = (a: Lane, b: Lane): number => names.indexOf(a.actor) - names.indexOf(b.actor) || a.connection - b.connection;
+    const liveLanes = (): LiveLane[] => [...lanes.values()].sort(order).map(lane => ({
+      actor: lane.actor, connection: lane.connection, running: lane.running !== undefined, closed: lane.closed,
+      ...(lane.fingerprint === undefined ? {} : { fingerprint: lane.fingerprint }),
+      ...(lane.queue[0] === undefined ? {} : { head: lane.queue[0] }),
+    }));
+    const active = (actor: string): boolean => [...lanes.values()].some(lane => lane.actor === actor && (lane.running !== undefined || lane.queue.length > 0));
+    executionLoop: while (settled.size < names.length || [...lanes.values()].some(lane => lane.running !== undefined || lane.queue.length > 0)) {
       check();
       // Monitor actual backend wait state. Polling cadence never itself declares a lock.
       const sampledEpoch = runtimeEpoch;
-      for (const [actor, state] of [...running]) {
+      for (const lane of [...lanes.values()]) {
+        const state = lane.running;
+        if (!state) continue;
         const observation = await bounded(database.observeWait(state.step.backendPid));
         // A completed or disconnected blocker invalidates every earlier sample in this batch.
         if (sampledEpoch !== runtimeEpoch) continue executionLoop;
-        if (running.get(actor) !== state) continue;
+        if (lane.running !== state) continue;
         state.blocked = false;
         if (observation) {
           const ownBlockers = observation.blockerPids.every(pid => livePids.has(pid));
-          if (!ownBlockers) throw new Interrupted('inconclusive', `${actor} is waiting for a lock outside the scheduled actors`);
+          if (!ownBlockers) throw new Interrupted('inconclusive', `${describeLane(lane)} is waiting for a lock outside the scheduled actors`);
           state.blocked = true;
           const previous = state.step.waits.at(-1);
           if ((!previous || JSON.stringify(previous) !== JSON.stringify(observation)) && retain(observation)) state.step.waits.push(observation);
         }
       }
-      if ([...running.values()].some(state => !state.blocked)) { await pause(); continue; }
-      const allReady = names.every(actor => settled.has(actor) || running.has(actor) || queues.get(actor)!.length > 0);
-      if (!allReady) { await pause(); continue; }
-      const available = names.filter(actor => !running.has(actor) && queues.get(actor)!.length > 0);
-      if (!available.length) { await pause(); continue; }
+      if ([...lanes.values()].some(lane => lane.running && !lane.running.blocked)) { laneWait = undefined; await pause(); continue; }
+      const allReady = names.every(actor => settled.has(actor) || active(actor));
+      if (!allReady) { laneWait = undefined; await pause(); continue; }
+      const current = liveLanes();
+      // A queued command that no recorded connection can match is incompatible now,
+      // rather than after waiting for a connection that will never proceed.
+      const mismatch = binder?.mismatch(current);
+      if (mismatch) throw new Interrupted('incompatible', mismatch);
+      const availableLanes = current.filter(lane => lane.head !== undefined && !lane.running);
+      if (!availableLanes.length) { await pause(); continue; }
       if (result.trace.length >= maxSteps) throw new Interrupted('inconclusive', `Execution reached its ${maxSteps}-step limit`);
       const expected = mode === 'replay' ? options.replay!.trace[result.trace.length] : undefined;
       if (mode === 'replay' && !expected) throw new Interrupted('incompatible', 'Application emitted more queries than the replay contains');
-      const requested = expected?.actor ?? options.plan?.[result.trace.length];
-      if (requested && !available.includes(requested)) {
-        throw new Interrupted('incompatible', `Schedule asks for ${requested}, which cannot issue its next query at step ${result.trace.length}`);
+      let chosen: Lane;
+      let available: string[];
+      if (!multi) {
+        available = names.filter(actor => availableLanes.some(lane => lane.actor === actor));
+        const requested = expected?.actor ?? options.plan?.[result.trace.length];
+        if (requested && !available.includes(requested)) {
+          throw new Interrupted('incompatible', `Schedule asks for ${requested}, which cannot issue its next query at step ${result.trace.length}`);
+        }
+        chosen = requested === undefined ? fairLane(names, availableLanes, lastActor, lastConnection) : availableLanes.find(lane => lane.actor === requested)!;
+      } else {
+        available = availableLanes.map(lane => laneLabel(lane.actor, lane.connection));
+        const entry = options.plan?.[result.trace.length];
+        const choice = entry === undefined ? undefined : parsePlanEntry(entry)!;
+        const resolution: PlanResolution = expected
+          ? binder!.resolve(expected, current, settled.has(expected.actor), result.trace.length)
+          : choice ? resolvePlanEntry(choice, current, settled.has(choice.actor), lastConnection, result.trace.length)
+            : { kind: 'release', lane: fairLane(names, availableLanes, lastActor, lastConnection) };
+        if (resolution.kind === 'incompatible') throw new Interrupted('incompatible', resolution.reason);
+        // Waiting is bounded by the run deadline and never becomes a pass.
+        if (resolution.kind === 'wait') { laneWait = resolution.reason; await pause(); continue; }
+        chosen = resolution.lane;
       }
-      const nextIndex = lastActor === undefined ? 0 : (names.indexOf(lastActor) + 1) % names.length;
-      const fair = [...names.slice(nextIndex), ...names.slice(0, nextIndex)].find(actor => available.includes(actor))!;
-      const actor = requested ?? fair;
-      const unit = queues.get(actor)!.shift()!;
+      laneWait = undefined;
+      const lane = lanes.get(laneLabel(chosen.actor, chosen.connection))!;
+      const actor = lane.actor;
+      const unit = lane.queue.shift()!;
       if (Buffer.byteLength(unit.sql) > ARTIFACT_LIMITS.maxSqlBytes) throw new Interrupted('inconclusive', 'SQL exceeds the supported evidence byte limit');
-      if (expected && (expected.actor !== unit.actor || expected.connection !== unit.connection || expected.ordinal !== unit.ordinal || expected.protocol !== unit.protocol || expected.sql !== unit.sql || expected.fingerprint !== unit.fingerprint)) {
+      if (expected && !multi && (expected.actor !== unit.actor || expected.connection !== unit.connection || expected.ordinal !== unit.ordinal || expected.protocol !== unit.protocol || expected.sql !== unit.sql || expected.fingerprint !== unit.fingerprint)) {
         throw new Interrupted('incompatible', `Replay query or actor startup identity changed for ${actor} at step ${result.trace.length}`);
       }
       const stage = unit.stage ?? 'complete';
@@ -287,6 +351,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       if (expected && ((expected.stage ?? 'complete') !== stage || (expected.cycle ?? expected.ordinal) !== cycle || expected.prefixOrdinal !== unit.prefixOrdinal)) {
         throw new Interrupted('incompatible', `Replay protocol stage changed for ${actor} at step ${result.trace.length}`);
       }
+      // The binder released only a head identical to the recorded step; the
+      // binding is final for the rest of this execution.
+      if (expected && binder) binder.bind(actor, expected.connection, unit.connection);
       const step: TraceStep = {
         index: result.trace.length, actor, connection: unit.connection, ordinal: unit.ordinal,
         protocol: unit.protocol, sql: unit.sql, fingerprint: unit.fingerprint, backendPid: unit.backendPid,
@@ -297,8 +364,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       if (!retain(step)) { check(); }
       result.trace.push(step);
       lastActor = actor;
+      lastConnection.set(actor, unit.connection);
       const state = { step, blocked: false };
-      running.set(actor, state);
+      lane.running = state;
       runtimeEpoch++;
       unit.release().then(completion => {
         if (retain(completion)) {
@@ -306,32 +374,46 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           step.completion = protocolProfile === 'describe-flush-v1' && completion.kind !== 'metadata'
             ? { ...completion, kind: 'ready' } : completion;
         }
-        running.delete(actor);
+        delete lane.running;
         runtimeEpoch++;
         wake();
       }, error => {
-        running.delete(actor);
+        delete lane.running;
         runtimeEpoch++;
-        if (!finished) stop('inconclusive', `${actor} query did not complete: ${message(error)}`);
+        if (!finished) stop('inconclusive', `${describeLane(lane)} query did not complete: ${message(error)}`);
         wake();
       });
     }
     check();
-    if (mode === 'replay' && result.connections!.length !== options.replay!.connections!.length) throw new Interrupted('incompatible', 'Application finished before consuming every recorded actor connection');
+    if (binder) {
+      const admitted = [...lanes.values()].flatMap(lane => lane.fingerprint === undefined ? [] : [{ actor: lane.actor, fingerprint: lane.fingerprint }]);
+      if (!binder.complete(admitted)) throw new Interrupted('incompatible', 'Application finished before consuming every recorded actor connection');
+    } else if (mode === 'replay' && result.connections!.length !== options.replay!.connections!.length) {
+      throw new Interrupted('incompatible', 'Application finished before consuming every recorded actor connection');
+    }
     if (mode === 'replay' && result.trace.length !== options.replay!.trace.length) throw new Interrupted('incompatible', 'Application finished before consuming every replay step');
     if (mode !== 'replay' && (options.plan?.length ?? 0) > result.trace.length) throw new Interrupted('incompatible', 'Application finished before consuming every requested schedule choice');
     if (mode === 'replay') {
-      const originalPids = new Map(options.replay!.trace.map(step => [step.backendPid, step.actor]));
+      // Single-producer blockers are actors. Multi-producer blockers are recorded
+      // lanes; live lanes are translated through the replay's bijection.
+      const original = new Map(options.replay!.trace.map(step => [step.backendPid, multi ? laneLabel(step.actor, step.connection) : step.actor]));
+      const recordedIdentity = (pid: number): string => original.get(pid) ?? 'unknown';
+      const liveIdentity = (pid: number): string => {
+        if (!binder) return pids.get(pid) ?? 'unknown';
+        const lane = pidLanes.get(pid);
+        const connection = lane === undefined ? undefined : binder.recordedFor(lane.actor, lane.connection);
+        return lane === undefined || connection === undefined ? 'unknown' : laneLabel(lane.actor, connection);
+      };
+      const describeWaits = (item: TraceStep, identity: (pid: number) => string): string => {
+        const observations = item.waits.map(wait => JSON.stringify({
+          type: wait.waitEventType, event: wait.waitEvent,
+          blockers: [...new Set(wait.blockerPids.map(identity))].sort(),
+        }));
+        return JSON.stringify([...new Set(observations)].sort());
+      };
       for (const step of result.trace) {
         const recorded = options.replay!.trace[step.index]!;
-        const describeWaits = (item: TraceStep, identities: Map<number, string>): string => {
-          const observations = item.waits.map(wait => JSON.stringify({
-            type: wait.waitEventType, event: wait.waitEvent,
-            blockers: [...new Set(wait.blockerPids.map(pid => identities.get(pid) ?? 'unknown'))].sort(),
-          }));
-          return JSON.stringify([...new Set(observations)].sort());
-        };
-        if (describeWaits(recorded, originalPids) !== describeWaits(step, pids)) {
+        if (describeWaits(recorded, recordedIdentity) !== describeWaits(step, liveIdentity)) {
           throw new Interrupted('incompatible', `Replay lock-wait evidence changed for ${step.actor} at step ${step.index}`);
         }
         if (recorded.completion?.transactionStatus !== step.completion?.transactionStatus) {

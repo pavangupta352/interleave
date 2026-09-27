@@ -5,6 +5,8 @@ import type { ResolvedPostgresTransport, TransportIdentity, UpstreamTlsInput } f
 
 export type ProtocolKind = 'simple' | 'extended';
 export type ProtocolProfile = 'sync-cycle-v1' | 'describe-flush-v1';
+/** Single-producer allows one live command connection per actor; multi-producer schedules every connection as a lane. */
+export type ConnectionProfile = 'single-producer-v1' | 'multi-producer-v1';
 export type StepStage = 'complete' | 'describe' | 'execute' | 'recover';
 export type TransactionStatus = 'I' | 'T' | 'E';
 export type Outcome = 'passed' | 'violation' | 'actor-error' | 'incompatible' | 'inconclusive' | 'harness-error';
@@ -106,6 +108,8 @@ export interface ProxyOptions {
   /** Total live sessions, including queryless auxiliaries; integer 1..8, default 1. */
   maxConnectionsPerActor?: number;
   protocolProfile?: ProtocolProfile;
+  /** multi-producer-v1 lets every admitted session send commands; default single-producer-v1. */
+  connectionProfile?: ConnectionProfile;
 }
 
 export interface ActorProxy {
@@ -149,6 +153,7 @@ export interface StepIdentity {
 export interface TraceStep extends StepIdentity {
   index: number;
   backendPid: number;
+  /** Actor ids that could proceed; version 4 records connection lanes such as `alice#1`. */
   available: string[];
   releasedAt: number;
   completedAt?: number;
@@ -171,10 +176,12 @@ export interface RunTransportIdentity {
 }
 
 export interface RunResult {
-  schemaVersion: 1 | 2 | 3;
+  /** Version 4 records the multi-producer connection profile; 1-3 remain readable. */
+  schemaVersion: 1 | 2 | 3 | 4;
   scenario: string;
   outcome: Outcome;
   mode: 'explore' | 'replay' | 'guided';
+  /** Actor choices; version 4 may name a connection lane, such as `alice#1`. */
   plan: string[];
   /** Accepted actor startup attempts. Optional only for reading legacy artifacts. */
   connections?: ConnectionIdentity[];
@@ -185,7 +192,11 @@ export interface RunResult {
   environment: { serverVersion: string; nodeVersion: string; fixture?: FixtureIdentity; source?: SourceIdentity; transport?: RunTransportIdentity };
   startedAt: string;
   durationMs: number;
-  limits: { maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number; maxConnectionsPerActor?: number; protocolProfile?: ProtocolProfile };
+  limits: {
+    maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number; maxConnectionsPerActor?: number; protocolProfile?: ProtocolProfile;
+    /** Present, and required, only in version 4. */
+    connectionProfile?: ConnectionProfile;
+  };
   cleanup: { complete: boolean; error?: string };
 }
 
@@ -205,10 +216,12 @@ export interface RunOptions {
   maxSteps?: number;
   timeoutMs?: number;
   maxEvidenceBytes?: number;
-  /** Permit queryless auxiliary sessions; at most one live session may issue commands. */
+  /** Admitted connection cap per actor: 1..8; default 1, or 8 for multi-producer-v1. */
   maxConnectionsPerActor?: number;
   /** Opt in to separately scheduled Parse/Describe/Flush and Bind/Execute/Sync phases. */
   protocolProfile?: ProtocolProfile;
+  /** Opt in to scheduling every admitted actor connection as its own sequential lane. */
+  connectionProfile?: ConnectionProfile;
   signal?: AbortSignal;
 }
 

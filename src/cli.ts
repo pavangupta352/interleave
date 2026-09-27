@@ -15,7 +15,7 @@ import { doctor } from './cli/doctor.js';
 import { initializeProject } from './cli/init.js';
 import { loadNeveroversell } from './cli/demo.js';
 import { exportRegression, type ExportRegressionResult } from './export.js';
-import type { ExplorationResult, ExplorationStrategy, MinimizationResult, ProtocolProfile, RunOptions, RunResult } from './types.js';
+import type { ConnectionProfile, ExplorationResult, ExplorationStrategy, MinimizationResult, ProtocolProfile, RunOptions, RunResult } from './types.js';
 import type { FixtureIdentityProfile } from './fixture-identity.js';
 
 const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
@@ -121,6 +121,7 @@ async function main(args: string[]): Promise<number> {
       ...(values['timeout-ms'] === undefined ? {} : { timeoutMs: Number(values['timeout-ms']) }),
       ...(values['max-evidence-bytes'] === undefined ? {} : { maxEvidenceBytes: Number(values['max-evidence-bytes']) }),
       ...(values['max-connections-per-actor'] === undefined ? {} : { maxConnectionsPerActor: Number(values['max-connections-per-actor']) }),
+      ...(values['connection-profile'] === undefined ? {} : { connectionProfile: values['connection-profile'] as ConnectionProfile }),
       ...(values['protocol-profile'] === undefined ? {} : { protocolProfile: values['protocol-profile'] as ProtocolProfile }),
       ...(values['fixture-profile'] === undefined ? {} : { fixtureProfile: values['fixture-profile'] as FixtureIdentityProfile }),
     };

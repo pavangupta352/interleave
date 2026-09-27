@@ -27,6 +27,8 @@ const MAX_SQL_BYTES = ARTIFACT_LIMITS.maxSqlBytes;
 const MAX_ARRAY_ITEMS = 100_000;
 const MAX_ACTORS = 8;
 const MAX_AVAILABLE_ACTORS = 8;
+/** Version 4 lists available lanes: at most eight actors with eight connections each. */
+const MAX_AVAILABLE_LANES = 64;
 const MAX_WAITS_PER_STEP = 10_000;
 const MAX_COMMAND_TAGS = 10_000;
 const MAX_BLOCKER_PIDS = 10_000;
@@ -35,6 +37,7 @@ const MAX_JSON_NODES = ARTIFACT_LIMITS.maxJsonNodes;
 const ACTOR_VALUE_WRAPPER_DEPTH = 3;
 
 const ACTOR_ID = /^[a-zA-Z][a-zA-Z0-9_-]{0,47}$/;
+const LANE_LABEL = /^([a-zA-Z][a-zA-Z0-9_-]{0,47})#(0|[1-9][0-9]{0,8})$/;
 const FINGERPRINT = /^[a-f0-9]{64}$/;
 const SQLSTATE = /^[0-9A-Z]{5}$/;
 const PROTOTYPE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -88,16 +91,19 @@ export function parseRunArtifact(input: unknown): RunResult {
 
   const root = shape(value, '$', ROOT_KEYS, REQUIRED_ROOT_KEYS);
   const version = field(root, 'schemaVersion', '$');
-  if (version !== 1 && version !== 2 && version !== 3) {
-    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1, 2 or 3');
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
+    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1, 2, 3 or 4');
   }
   // Schema 3 separates scheduling from transport. Legacy trace validators retain
   // their exact grammar; the explicit profile selects one for new evidence.
-  const protocolProfile = version === 3
+  const protocolProfile = version >= 3
     ? enumValue(field(plainRecord(field(root, 'limits', '$'), '$.limits'), 'protocolProfile', '$.limits'),
       '$.limits.protocolProfile', ['sync-cycle-v1', 'describe-flush-v1'])
     : version === 2 ? 'describe-flush-v1' : 'sync-cycle-v1';
   const traceVersion = protocolProfile === 'describe-flush-v1' ? 2 : 1;
+  // Schema 4 is the multi-producer connection profile: plans and available
+  // choices may name lanes, and lanes of one actor may block each other.
+  const lanes = version === 4;
   const scenario = field(root, 'scenario', '$');
   assertScenarioName(scenario, '$.scenario');
   const outcome = enumValue(field(root, 'outcome', '$'), '$.outcome', [
@@ -108,9 +114,13 @@ export function parseRunArtifact(input: unknown): RunResult {
 
   const plan = arrayValue(field(root, 'plan', '$'), '$.plan', MAX_ARRAY_ITEMS);
   const planActors: string[] = [];
+  const planLanes: { index: number; key: string }[] = [];
   const allActorNames = new Set<string>();
   for (let index = 0; index < plan.length; index += 1) {
-    const actor = actorId(plan[index], `$.plan[${index}]`);
+    const path = `$.plan[${index}]`;
+    const lane = lanes ? laneValue(plan[index], path, true) : undefined;
+    const actor = lane?.actor ?? actorId(plan[index], path);
+    if (lane?.connection !== undefined) planLanes.push({ index, key: `${actor}\0${lane.connection}` });
     planActors.push(actor);
     allActorNames.add(actor);
   }
@@ -152,9 +162,17 @@ export function parseRunArtifact(input: unknown): RunResult {
   const ordinalByConnection = new Map<string, number>();
   const trace: TraceStep[] = [];
   for (let index = 0; index < traceValues.length; index += 1) {
-    const step = validateTraceStep(traceValues[index], index, traceVersion);
+    const step = validateTraceStep(traceValues[index], index, traceVersion, lanes);
     if (connections !== undefined && !connectionKeys.has(`${step.actor}\0${step.connection}`)) {
       throw new TypeError(`$.trace[${index}]: command references an unrecorded actor startup`);
+    }
+    if (lanes) {
+      for (let availableIndex = 0; availableIndex < step.available.length; availableIndex += 1) {
+        const lane = laneValue(step.available[availableIndex], `$.trace[${index}].available[${availableIndex}]`, false);
+        if (!connectionKeys.has(`${lane.actor}\0${lane.connection}`)) {
+          throw new TypeError(`$.trace[${index}].available[${availableIndex}]: lane references an unrecorded actor startup`);
+        }
+      }
     }
     const ordinalKey = `${step.actor}\0${step.connection}`;
     const expectedOrdinal = ordinalByConnection.get(ordinalKey) ?? 0;
@@ -166,7 +184,7 @@ export function parseRunArtifact(input: unknown): RunResult {
     ordinalByConnection.set(ordinalKey, expectedOrdinal + 1);
     trace.push(step);
     allActorNames.add(step.actor);
-    for (const availableActor of step.available) allActorNames.add(availableActor);
+    for (const availableActor of step.available) allActorNames.add(lanes ? laneValue(availableActor, '$', false).actor : availableActor);
   }
 
   for (let index = 0; index < trace.length; index += 1) {
@@ -182,10 +200,13 @@ export function parseRunArtifact(input: unknown): RunResult {
     }
   }
 
+  // Blockers are identified by actor before version 4 and by lane in version 4,
+  // where two connections of one actor can hold and wait for the same lock.
+  const blockerIdentity = (step: TraceStep): string => lanes ? `${step.actor}\0${step.connection}` : step.actor;
   const actorsByBackendPid = new Map<number, Set<string>>();
   for (const step of trace) {
     const actors = actorsByBackendPid.get(step.backendPid) ?? new Set<string>();
-    actors.add(step.actor);
+    actors.add(blockerIdentity(step));
     actorsByBackendPid.set(step.backendPid, actors);
   }
   for (let stepIndex = 0; stepIndex < trace.length; stepIndex += 1) {
@@ -202,8 +223,8 @@ export function parseRunArtifact(input: unknown): RunResult {
         if (blockerActors === undefined) {
           throw new TypeError(`${blockerPath}: blocker pid is absent from the released trace`);
         }
-        if (![...blockerActors].some(actor => actor !== step.actor)) {
-          throw new TypeError(`${blockerPath}: blocker pid must belong to a different actor`);
+        if (![...blockerActors].some(actor => actor !== blockerIdentity(step))) {
+          throw new TypeError(`${blockerPath}: blocker pid must belong to a different ${lanes ? 'connection' : 'actor'}`);
         }
       }
     }
@@ -225,7 +246,13 @@ export function parseRunArtifact(input: unknown): RunResult {
     throw new TypeError('Run artifact cannot name more than 8 actors across plan, connections, trace, and results');
   }
   const requiresCompleteActors = outcome === 'passed' || outcome === 'violation' || outcome === 'actor-error';
-  if (traceVersion === 2) validateStageSequence(trace, requiresCompleteActors);
+  if (traceVersion === 2) validateStageSequence(trace, requiresCompleteActors, lanes);
+  // A completed run consumed every explicit choice, so each named lane was admitted.
+  if (requiresCompleteActors) {
+    for (const lane of planLanes) {
+      if (!connectionKeys.has(lane.key)) throw new TypeError(`$.plan[${lane.index}]: lane references an unrecorded actor startup`);
+    }
+  }
   if (requiresCompleteActors && actorNames.size < 2) {
     throw new TypeError('$.actors: completed executions require at least two actor results');
   }
@@ -241,7 +268,8 @@ export function parseRunArtifact(input: unknown): RunResult {
         throw new TypeError(`$.trace[${index}].actor: actor is absent from recorded actor results`);
       }
       for (let availableIndex = 0; availableIndex < step.available.length; availableIndex += 1) {
-        if (!actorNames.has(step.available[availableIndex]!)) {
+        const available = step.available[availableIndex]!;
+        if (!actorNames.has(lanes ? laneValue(available, '$', false).actor : available)) {
           throw new TypeError(
             `$.trace[${index}].available[${availableIndex}]: actor is absent from recorded actor results`,
           );
@@ -278,8 +306,8 @@ export function parseRunArtifact(input: unknown): RunResult {
   const environment = shape(
     field(root, 'environment', '$'),
     '$.environment',
-    ['serverVersion', 'nodeVersion', 'fixture', 'source', ...(version === 3 ? ['transport'] : [])],
-    ['serverVersion', 'nodeVersion', ...(version === 3 ? ['transport'] : [])],
+    ['serverVersion', 'nodeVersion', 'fixture', 'source', ...(version >= 3 ? ['transport'] : [])],
+    ['serverVersion', 'nodeVersion', ...(version >= 3 ? ['transport'] : [])],
   );
   const serverVersion = boundedString(environment.serverVersion, '$.environment.serverVersion', 1, 256);
   boundedString(environment.nodeVersion, '$.environment.nodeVersion', 1, 256);
@@ -292,19 +320,22 @@ export function parseRunArtifact(input: unknown): RunResult {
     }
   }
   if (hasOwn(environment, 'source')) validateSourceIdentity(environment.source, '$.environment.source');
-  if (version === 3) validateTransportIdentity(environment.transport, '$.environment.transport');
+  if (version >= 3) validateTransportIdentity(environment.transport, '$.environment.transport');
 
   validateTimestamp(field(root, 'startedAt', '$'), '$.startedAt');
 
   const limits = shape(
     field(root, 'limits', '$'),
     '$.limits',
-    ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor', ...(version !== 1 ? ['protocolProfile'] : [])],
-    ['maxSteps', 'timeoutMs', ...(version !== 1 ? ['protocolProfile'] : [])],
+    ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor', ...(version !== 1 ? ['protocolProfile'] : []),
+      ...(lanes ? ['connectionProfile'] : [])],
+    ['maxSteps', 'timeoutMs', ...(version !== 1 ? ['protocolProfile'] : []),
+      ...(lanes ? ['maxConnectionsPerActor', 'connectionProfile'] : [])],
   );
   if (version === 2 && limits.protocolProfile !== 'describe-flush-v1') {
     throw new TypeError('$.limits.protocolProfile: version 2 requires describe-flush-v1');
   }
+  if (lanes) enumValue(limits.connectionProfile, '$.limits.connectionProfile', ['multi-producer-v1']);
   safeInteger(limits.maxSteps, '$.limits.maxSteps', 1);
   safeInteger(limits.timeoutMs, '$.limits.timeoutMs', 1);
   if (hasOwn(limits, 'maxConnectionsPerActor') && safeInteger(limits.maxConnectionsPerActor, '$.limits.maxConnectionsPerActor', 1) > 8) {
@@ -361,7 +392,7 @@ function validateTransportIdentity(value: unknown, path: string): void {
   fingerprintValue(upstream.referenceFingerprint, `${upstreamPath}.referenceFingerprint`);
 }
 
-function validateTraceStep(value: unknown, index: number, version: 1 | 2): TraceStep {
+function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes: boolean): TraceStep {
   const path = `$.trace[${index}]`;
   const step = shape(value, path, [
     'index', 'actor', 'connection', 'ordinal', 'protocol', 'sql', 'fingerprint',
@@ -396,16 +427,22 @@ function validateTraceStep(value: unknown, index: number, version: 1 | 2): Trace
     throw new TypeError(`${path}.protocol: staged metadata and continuations require the extended protocol`);
   }
 
-  const availableValues = arrayValue(step.available, `${path}.available`, MAX_AVAILABLE_ACTORS);
+  const availableValues = arrayValue(step.available, `${path}.available`, lanes ? MAX_AVAILABLE_LANES : MAX_AVAILABLE_ACTORS);
   if (availableValues.length === 0) {
-    throw new TypeError(`${path}.available: expected at least the selected actor`);
+    throw new TypeError(`${path}.available: expected at least the selected ${lanes ? 'lane' : 'actor'}`);
   }
-  const available = availableValues.map((item, itemIndex) => actorId(item, `${path}.available[${itemIndex}]`));
+  const available = availableValues.map((item, itemIndex) => {
+    const itemPath = `${path}.available[${itemIndex}]`;
+    if (!lanes) return actorId(item, itemPath);
+    laneValue(item, itemPath, false);
+    return item as string;
+  });
   if (new Set(available).size !== available.length) {
-    throw new TypeError(`${path}.available: duplicate actor ids are not allowed`);
+    throw new TypeError(`${path}.available: duplicate ${lanes ? 'lanes' : 'actor ids'} are not allowed`);
   }
-  if (!available.includes(actor)) {
-    throw new TypeError(`${path}.available: must include selected actor ${actor}`);
+  const selected = lanes ? `${actor}#${connection}` : actor;
+  if (!available.includes(selected)) {
+    throw new TypeError(`${path}.available: must include selected ${lanes ? 'lane' : 'actor'} ${selected}`);
   }
 
   const releasedAt = finiteNumber(step.releasedAt, `${path}.releasedAt`, 0);
@@ -509,14 +546,15 @@ function validateMetadataCompletion(value: unknown, path: string): MetadataCompl
   return { kind: 'metadata', result, parameterCount, columnCount, resultShape };
 }
 
-function validateStageSequence(trace: TraceStep[], complete: boolean): void {
+function validateStageSequence(trace: TraceStep[], complete: boolean, lanes: boolean): void {
   const cycles = new Map<string, { next: number; prefix?: TraceStep; previous?: TraceStep }>();
   const actorCycles = new Map<string, { connection: number; completedAt?: number }>();
   for (const step of trace) {
     const path = `$.trace[${step.index}]`;
     const active = actorCycles.get(step.actor);
+    // One command connection per actor before version 4; every lane is sequential after it.
     if (active?.completedAt !== undefined && active.completedAt <= step.releasedAt) actorCycles.delete(step.actor);
-    else if (active && active.connection !== step.connection) {
+    else if (!lanes && active && active.connection !== step.connection) {
       throw new TypeError(`${path}.connection: another command connection cannot enter an actor's open staged cycle`);
     }
     const key = `${step.actor}\0${step.connection}`;
@@ -780,6 +818,20 @@ function actorId(value: unknown, path: string): string {
     throw new TypeError(`${path}: invalid actor id`);
   }
   return actor;
+}
+
+/** A version 4 lane label `actor#n`, or also a bare actor id where allowed. */
+function laneValue(value: unknown, path: string, allowActor: true): { actor: string; connection?: number };
+function laneValue(value: unknown, path: string, allowActor: false): { actor: string; connection: number };
+function laneValue(value: unknown, path: string, allowActor: boolean): { actor: string; connection?: number } {
+  const text = boundedString(value, path, 1, 58);
+  const match = LANE_LABEL.exec(text);
+  if (!match) {
+    if (allowActor) return { actor: actorId(text, path) };
+    throw new TypeError(`${path}: expected an actor connection lane such as alice#0`);
+  }
+  if (PROTOTYPE_KEYS.has(match[1]!)) throw new TypeError(`${path}: invalid actor id`);
+  return { actor: match[1]!, connection: Number(match[2]) };
 }
 
 function validateFixtureIdentity(value: unknown, path: string): string {

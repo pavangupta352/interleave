@@ -15,6 +15,7 @@ import { missingReplayIdentity } from './replay-readiness.js';
 import { transportMatches } from './environment.js';
 import { resolvePostgresTransport, runTransportIdentity } from './postgres-transport.js';
 import { connectionFailureMessage } from './protocol/upstream-transport.js';
+import { defaultConnectionLimit, recordedConnectionProfile, resolveConnectionProfile, validatePlanEntries } from './lanes.js';
 import type { OwnedDatabase, RunOptions, RunResult } from './types.js';
 
 const GRACE_MS = 250;
@@ -49,24 +50,29 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   const expectedEnvironment = mode === 'replay' ? options.replay!.environment : mode === 'guided' ? undefined : options.expectedEnvironment;
   const fixtureProfile = resolveFixtureProfile(options.fixtureProfile, expectedEnvironment?.fixture);
   const fixtureProfileMismatch = expectedEnvironment?.fixture !== undefined && fixtureProfile !== recordedFixtureProfile(expectedEnvironment.fixture);
+  const recordedConnections = mode === 'replay' ? recordedConnectionProfile(options.replay!) : undefined;
+  const connectionProfile = resolveConnectionProfile(options.connectionProfile, recordedConnections);
   const replayConnections = mode === 'replay' ? (options.replay!.limits.maxConnectionsPerActor ?? 1) : undefined;
   const maxConnectionsPerActor = limit(
     options.maxConnectionsPerActor === undefined ? replayConnections : options.maxConnectionsPerActor,
-    1, 8, 'maxConnectionsPerActor',
+    defaultConnectionLimit(connectionProfile), 8, 'maxConnectionsPerActor',
   );
   const connectionProfileMismatch = mode === 'replay'
-    && options.maxConnectionsPerActor !== undefined
-    && options.maxConnectionsPerActor !== replayConnections;
-  if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000 || options.plan.some(actor => typeof actor !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,47}$/.test(actor) || ['constructor', 'prototype', '__proto__'].includes(actor)))) throw new TypeError('plan contains an invalid actor');
+    && ((options.maxConnectionsPerActor !== undefined && options.maxConnectionsPerActor !== replayConnections)
+      || connectionProfile !== recordedConnections);
+  if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000)) throw new TypeError('plan contains an invalid actor');
+  validatePlanEntries(options.plan, connectionProfile);
   // Resolve trust once; the parent and worker use this snapshot for every connection.
   const transport = resolvePostgresTransport(options.databaseUrl, options.upstreamTls);
   const started = performance.now();
+  const multi = connectionProfile === 'multi-producer-v1';
   const result: RunResult = {
-    schemaVersion: 3, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
+    schemaVersion: multi ? 4 : 3, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
     environment: { serverVersion: 'unknown', nodeVersion: process.version, transport: runTransportIdentity(transport) },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile }, cleanup: { complete: false },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, ...(multi ? { connectionProfile } : {}) },
+    cleanup: { complete: false },
   };
   assertEvidenceEnvelope(result, maxEvidenceBytes);
   let database: OwnedDatabase | undefined;
@@ -187,6 +193,8 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
                 || !isDeepStrictEqual(candidate.environment.source, sourceIdentity)
                 || !isDeepStrictEqual(candidate.environment.transport, result.environment.transport)
                 || (candidate.limits.protocolProfile ?? 'sync-cycle-v1') !== protocolProfile
+                || recordedConnectionProfile(candidate) !== connectionProfile
+                || candidate.limits.maxConnectionsPerActor !== maxConnectionsPerActor
                 || (candidate.environment.fixture !== undefined && recordedFixtureProfile(candidate.environment.fixture) !== fixtureProfile)
               ) throw new TypeError('Worker result changed parent-owned environment identity');
               received = {
@@ -227,7 +235,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
         workerChild.send({
           type: 'start', token: protocolToken, scenarioFile: resolve(scenarioFile), connectionString: database!.connectionString,
           transport: database!.transport, sourceIdentity,
-          options: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, fixtureProfile, mode, ...(options.plan ? { plan: options.plan } : {}), ...(options.replay ? { replay: options.replay } : {}), ...(options.expectedEnvironment ? { expectedEnvironment: options.expectedEnvironment } : {}) },
+          options: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, connectionProfile, fixtureProfile, mode, ...(options.plan ? { plan: options.plan } : {}), ...(options.replay ? { replay: options.replay } : {}), ...(options.expectedEnvironment ? { expectedEnvironment: options.expectedEnvironment } : {}) },
         }, error => { if (error) { result.reason = 'Could not initialize scenario worker'; terminateGroup(workerChild); } });
         if (interruption) stopChild();
       });

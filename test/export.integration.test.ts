@@ -40,10 +40,30 @@ async function execute(
   });
 }
 
-async function makeApplication(root: string): Promise<string> {
+async function makeApplication(root: string, pooled: boolean): Promise<string> {
   const application = join(root, 'application project');
   await mkdir(application);
-  await writeFile(join(application, 'scenario.mjs'), `
+  await writeFile(join(application, 'scenario.mjs'), pooled ? `
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { Pool } from 'pg';
+const increment = async pool => {
+  const { rows } = await pool.query('SELECT value FROM counter');
+  await pool.query('UPDATE counter SET value = $1', [rows[0].value + 1]);
+};
+// alice runs two increments concurrently on two pooled connections.
+const pooled = (count, max) => async ({ connectionString }) => {
+  const pool = new Pool({ connectionString, max });
+  pool.on('error', () => undefined);
+  try { await Promise.all(Array.from({ length: count }, () => increment(pool))); } finally { await pool.end(); }
+};
+export default {
+  name: 'portable-export-pool',
+  async setup({ db }) { await db.query(await readFile(new URL('./seed.sql', import.meta.url), 'utf8')); },
+  actors: { alice: pooled(2, 2), bob: pooled(1, 1) },
+  async invariant({ db }) { assert.equal((await db.query('SELECT value FROM counter')).rows[0].value, 3, 'every increment survives'); },
+};
+`.trimStart() : `
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Client } from 'pg';
@@ -88,21 +108,26 @@ afterEach(async () => {
 });
 
 describe('portable regression export integration', () => {
-  test('exports, clean-installs and exactly replays a real failure from a path with spaces', async () => {
+  test.each([
+    ['one connection per actor', false],
+    ['pooled connection lanes', true],
+  ])('exports, clean-installs and exactly replays a real failure from a path with spaces (%s)', async (_name, pooled) => {
     const root = await mkdtemp(join(tmpdir(), 'interleave portable export '));
     temporary.push(root);
-    const application = await makeApplication(root);
+    const application = await makeApplication(root, pooled);
     const scenario = join(application, 'scenario.mjs');
     const installApplication = await execute(npmExecutable(), ['ci', '--ignore-scripts'], application);
     expect(installApplication.code).toBe(0);
 
     const artifact = join(root, 'recorded failure.json');
     const recording = await execute(process.execPath, [cli, 'run', scenario,
-      '--project-root', application, '--include', 'seed.sql', '--plan', 'alice,bob,alice,bob',
+      '--project-root', application, '--include', 'seed.sql',
+      ...(pooled ? ['--connection-profile', 'multi-producer-v1', '--plan', 'alice#0,alice#1,bob,alice#0,alice#1,bob'] : ['--plan', 'alice,bob,alice,bob']),
       '--max-runs', '1', '--timeout-ms', '20000', '--out', artifact, '--json'], repository);
     expect(recording.code, recording.stderr).toBe(1);
     const recorded = await readRunArtifact(artifact);
     expect(recorded.outcome).toBe('violation');
+    expect(recorded.schemaVersion).toBe(pooled ? 4 : 3);
     expect(recorded.environment.source?.components.runtime.mode).toBe('build');
     expect(recorded.environment.source?.sharedPackages).toEqual([]);
 
@@ -142,5 +167,6 @@ describe('portable regression export integration', () => {
     expect(replay.trace.map((step: { fingerprint: string }) => step.fingerprint)).toEqual(
       recorded.trace.map((step) => step.fingerprint),
     );
+    expect(replay.limits.connectionProfile).toBe(recorded.limits.connectionProfile);
   }, 60_000);
 });

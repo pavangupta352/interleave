@@ -22,7 +22,7 @@ export type {
   RegressionFileRole, RegressionManifest,
 } from './export.js';
 export type {
-  ActorContext, ActorResult, ConnectionIdentity, DatabaseContext, ExploreOptions, ExplorationResult,
+  ActorContext, ActorResult, ConnectionIdentity, ConnectionProfile, DatabaseContext, ExploreOptions, ExplorationResult,
   ExplorationStrategy, ExplorationSearch, ExplorationMetrics,
   Failure, MinimizeOptions, MinimizationResult, Outcome, ProtocolKind, ProtocolProfile, RunOptions,
   RunResult, Scenario, StepIdentity, TraceStep, TransactionStatus, UnitCompletion,

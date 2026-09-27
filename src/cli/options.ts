@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { normalizeExplorationSearch } from '../exploration-search.js';
+import { parsePlanEntry } from '../lanes.js';
 
 const definitions = {
   help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
@@ -12,13 +13,14 @@ const definitions = {
   'runtime-archive': { type: 'string' }, 'dependency-archive': { type: 'string', multiple: true },
   'max-steps': { type: 'string' }, 'timeout-ms': { type: 'string' }, 'max-evidence-bytes': { type: 'string' },
   'max-connections-per-actor': { type: 'string' },
+  'connection-profile': { type: 'string' },
   'protocol-profile': { type: 'string' },
   'fixture-profile': { type: 'string' },
   'max-runs': { type: 'string' }, 'total-timeout-ms': { type: 'string' },
   strategy: { type: 'string' }, seed: { type: 'string' },
   'max-candidates': { type: 'string' }, 'max-search-bytes': { type: 'string' }, 'max-attempts': { type: 'string' },
 } as const;
-const runFlags = ['database-url', 'upstream-tls', 'upstream-ca', 'docker', 'postgres-image', 'out', 'force', 'max-steps', 'timeout-ms', 'max-evidence-bytes', 'max-connections-per-actor', 'protocol-profile', 'fixture-profile'];
+const runFlags = ['database-url', 'upstream-tls', 'upstream-ca', 'docker', 'postgres-image', 'out', 'force', 'max-steps', 'timeout-ms', 'max-evidence-bytes', 'max-connections-per-actor', 'connection-profile', 'protocol-profile', 'fixture-profile'];
 export const POSTGRES_IMAGES = ['postgres:16', 'postgres:17', 'postgres:18', 'pgvector/pgvector:0.8.6-pg17-bookworm'] as const;
 const searchFlags = ['max-runs', 'total-timeout-ms', 'max-candidates', 'max-search-bytes', 'keep-going', 'plan', 'strategy', 'seed'];
 const sourceFlags = ['project-root', 'include'];
@@ -61,6 +63,9 @@ export function parseCliArgs(args: string[]) {
   if (parsed.values['protocol-profile'] !== undefined && !['sync-cycle-v1', 'describe-flush-v1'].includes(parsed.values['protocol-profile'])) {
     throw new TypeError('--protocol-profile must be sync-cycle-v1 or describe-flush-v1');
   }
+  if (parsed.values['connection-profile'] !== undefined && !['single-producer-v1', 'multi-producer-v1'].includes(parsed.values['connection-profile'])) {
+    throw new TypeError('--connection-profile must be single-producer-v1 or multi-producer-v1');
+  }
   if (parsed.values['fixture-profile'] !== undefined && !['native', 'postgresql17-pgvector0.8.6-v1'].includes(parsed.values['fixture-profile'])) {
     throw new TypeError('--fixture-profile must be native or postgresql17-pgvector0.8.6-v1');
   }
@@ -75,7 +80,10 @@ export function parseCliArgs(args: string[]) {
     ...(parsed.values.seed === undefined ? {} : { seed: Number(parsed.values.seed) }),
   });
   const plan = parsed.values.plan?.split(',');
-  if (plan && (plan.length > 100_000 || plan.some(actor => !/^[a-zA-Z][a-zA-Z0-9_-]{0,47}$/.test(actor) || ['constructor', 'prototype', '__proto__'].includes(actor)))) throw new TypeError('--plan must be comma-separated actor names');
+  if (plan && (plan.length > 100_000 || plan.some(entry => parsePlanEntry(entry) === undefined))) throw new TypeError('--plan must be comma-separated actor names');
+  if (plan?.some(entry => parsePlanEntry(entry)!.connection !== undefined) && parsed.values['connection-profile'] !== 'multi-producer-v1') {
+    throw new TypeError('--plan lanes such as alice#1 require --connection-profile multi-producer-v1');
+  }
   return { command, values: parsed.values, positionals: parsed.positionals.slice(1), plan };
 }
 
@@ -106,6 +114,8 @@ URL sslmode=verify-full selects the same policy. Actor endpoints stay loopback p
 Common: --json, --help, --version
 Per run: --max-steps <n>, --timeout-ms <n>, --max-evidence-bytes <n>
 Connections: --max-connections-per-actor <1..8>; extra sessions must remain queryless
+             --connection-profile multi-producer-v1 schedules every actor connection as
+             its own lane (default cap 8); --plan may then name lanes such as alice#1
 Protocol: --protocol-profile <sync-cycle-v1|describe-flush-v1>; default sync-cycle-v1
 Fixture: --fixture-profile <native|postgresql17-pgvector0.8.6-v1>; default native
 Search: --max-runs <n>, --total-timeout-ms <n>, --max-candidates <n>,

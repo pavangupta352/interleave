@@ -3,6 +3,7 @@ import { frontierIndex, normalizeExplorationSearch } from './exploration-search.
 import { runTarget } from './run-target.js';
 import { defineScenario } from './scenario.js';
 import { integerLimit, searchBudget } from './search-budget.js';
+import { multiLaneActors, planChoice, planFromTrace, resolveConnectionProfile, validatePlanEntries } from './lanes.js';
 import type { Scenario, ExploreOptions, ExplorationResult } from './types.js';
 
 /** Explore observed actor-choice prefixes; a bounded search is not a safety proof. */
@@ -13,7 +14,8 @@ export async function explore(input: Scenario | string, options: ExploreOptions)
   const maxCandidates = integerLimit(options.maxCandidates, 10_000, 100_000, 'maxCandidates');
   const maxSearchBytes = integerLimit(options.maxSearchBytes, 64 * 1024 * 1024, 256 * 1024 * 1024, 'maxSearchBytes', 1024);
   if (options.replay || (options.mode && options.mode !== 'explore')) throw new TypeError('Exploration cannot use replay or guided mode');
-  if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000 || options.plan.some(actor => typeof actor !== 'string' || actor.length > 48))) throw new TypeError('Invalid initial schedule');
+  if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000 || options.plan.some(actor => typeof actor !== 'string' || actor.length > 58))) throw new TypeError('Invalid initial schedule');
+  validatePlanEntries(options.plan, resolveConnectionProfile(options.connectionProfile));
   // Search configuration belongs to this process, never to a runner or worker.
   const { strategy: _strategy, seed: _seed, maxRuns: _maxRuns, maxCandidates: _maxCandidates,
     maxSearchBytes: _maxSearchBytes, totalTimeoutMs: _totalTimeoutMs, stopOnFailure: _stopOnFailure,
@@ -77,14 +79,17 @@ export async function explore(input: Scenario | string, options: ExploreOptions)
       if (interrupted) { result.stopReason = interrupted; break; }
       if (run.outcome === 'violation' && options.stopOnFailure !== false) { result.stopReason = 'failure'; break; }
       if (['inconclusive', 'harness-error', 'actor-error'].includes(run.outcome)) { result.stopReason = 'inconclusive'; break; }
-      const choices = run.trace.map(step => step.actor);
+      // Multi-producer choices name lanes only for actors that used several connections.
+      const choices = planFromTrace(run);
+      const multi = multiLaneActors(run.trace);
       const prefixBytes = [1];
       for (const actor of choices) prefixBytes.push(prefixBytes.at(-1)! + Buffer.byteLength(JSON.stringify(actor)) + 1);
       // Latest deviations first; the loop checks elapsed time even without an await.
       for (let index = run.trace.length - 1; index >= 0; index--) {
         const stopped = budget.reason();
         if (stopped) { result.stopReason = stopped; break search; }
-        for (const alternative of run.trace[index]!.available) {
+        for (const available of run.trace[index]!.available) {
+          const alternative = planChoice(available, multi);
           if (alternative === choices[index]) continue;
           const keyBytes = prefixBytes[index]! + Buffer.byteLength(JSON.stringify(alternative)) + 1;
           const key = JSON.stringify([...choices.slice(0, index), alternative]);

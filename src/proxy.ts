@@ -49,6 +49,10 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   const profile = options.protocolProfile === undefined ? 'sync-cycle-v1' : options.protocolProfile;
   if (profile !== 'sync-cycle-v1' && profile !== 'describe-flush-v1') throw new Error('protocolProfile must be sync-cycle-v1 or describe-flush-v1');
   const staged = profile === 'describe-flush-v1';
+  const connectionProfile = options.connectionProfile === undefined ? 'single-producer-v1' : options.connectionProfile;
+  if (connectionProfile !== 'single-producer-v1' && connectionProfile !== 'multi-producer-v1') throw new Error('connectionProfile must be single-producer-v1 or multi-producer-v1');
+  // Each admitted session is already sequential; multi-producer lets every one send commands.
+  const multiProducer = connectionProfile === 'multi-producer-v1';
   const maxBuffered = positiveLimit(options.maxBufferedBytes, DEFAULT_BUFFER_LIMIT);
   // Validate framing limits before listening.
   new FrameDecoder('typed', options);
@@ -262,8 +266,10 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
         // Reserve on the first command frame, including an incomplete extended
         // cycle. Buffered commands before ReadyForQuery reserve ownership too,
         // but authentication and Terminate never turn an auxiliary into an owner.
-        if (commandOwner && commandOwner !== session) throw new Error('Unsupported profile: only one live command-producing connection per actor is supported; close the previous command connection before another sends commands');
-        commandOwner = session;
+        if (!multiProducer) {
+          if (commandOwner && commandOwner !== session) throw new Error('Unsupported profile: only one live command-producing connection per actor is supported; close the previous command connection before another sends commands, or select the multi-producer-v1 connection profile');
+          commandOwner = session;
+        }
         const unit = cycles.accept(frame);
         if (unit) enqueue(unit);
         checkRetained();
