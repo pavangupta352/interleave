@@ -30,6 +30,16 @@
   single-producer runs keep schema version 3, and versions 1-3 read unchanged.
 - The unsupported second command connection error now names the multi-producer
   profile as the alternative.
+- A plan entry naming a connection that has not queued its next command becomes
+  `incompatible` once nothing else can proceed for half the run deadline (at most
+  5 seconds), instead of waiting for the deadline. Exploration and reduction move
+  on from such a choice, and reduction keeps an inconclusive candidate's reason.
+- In the multi-producer profile, a connection that has just started or completed a
+  command gets up to 25 ms to queue its next one before the next decision.
+- A supervised worker reports its own deadline reason, including what it was
+  waiting for; the parent's backstop now follows the worker's deadline.
+- A fixture capture that is not quiescent names how many other sessions were busy
+  and their states.
 
 ### Qualified profiles
 
@@ -37,6 +47,9 @@
   Kysely 0.29.5 and Postgres.js 3.4.9 (`max: 2`) on PostgreSQL 16.15, 17.11 and
   18.6. See [compatibility](docs/compatibility.md#multi-connection-actors) for the
   checked cases and what remains unrun.
+- Statement overlap on PostgreSQL 16.15 with node-postgres 8.23.0 and Postgres.js
+  3.4.9 prepared statements, including pairs of two connections of one actor. See
+  [compatibility](docs/compatibility.md#statement-overlap).
 
 ## 0.1.0 — 27 September 2026
 
