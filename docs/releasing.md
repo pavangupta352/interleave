@@ -39,8 +39,8 @@ To check a supplied archive against a fresh pair of builds, use its path with
 tag, replace `--ref` with `--tag vX.Y.Z`; the tag must match both package and lockfile
 versions. The tool does not create tags or publish packages.
 
-Version-tag CI runs the PostgreSQL, pgvector, managed CLI, verified TLS, Python actor,
-TypeORM, Prisma and browser matrix from the tagged checkout. Only after every required job family succeeds can
+Version-tag CI runs the PostgreSQL, pgvector, managed CLI, verified TLS, Python, Ruby,
+PHP, Go and Java actor, TypeORM, Prisma and browser matrix from the tagged checkout. Only after every required job family succeeds can
 the separate assets job prepare and upload its candidate. Those matrix jobs use their own builds;
 the candidate archive has the installed acceptance recorded in its manifest.
 

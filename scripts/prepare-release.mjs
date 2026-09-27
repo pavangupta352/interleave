@@ -173,16 +173,20 @@ async function acceptInstalled(context, archive, packageHash) {
   return { lockBytes, result: { installedArchiveSha256: packageHash, import: true, cliVersion: true, cliHelp: true, init: true, database: 'not-run' } };
 }
 
+// Version-tag CI job families that must all succeed before assets are prepared.
+// The workflow's release-candidate job needs exactly these jobs.
+export const requiredJobFamilies = ['postgres', 'pgvector', 'managed', 'tls', 'python', 'ruby', 'php', 'go', 'java', 'typeorm', 'prisma', 'browser'];
+
 function qualificationContext(source, env) {
   if (env.GITHUB_ACTIONS !== 'true') return null;
   assert(env.GITHUB_REPOSITORY === 'pavangupta352/interleave' && /^\d+$/.test(env.GITHUB_RUN_ID ?? '') && /^\d+$/.test(env.GITHUB_RUN_ATTEMPT ?? ''), 'Invalid GitHub qualification context');
   assert(source.tag && env.GITHUB_REF === `refs/tags/${source.tag}` && env.GITHUB_SHA === source.commit, 'GitHub run does not match the selected version tag commit');
   let needs; try { needs = JSON.parse(env.INTERLEAVE_RELEASE_NEEDS); } catch { throw new Error('Required CI job conclusions are missing'); }
-  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', tls: 'success', python: 'success', typeorm: 'success', prisma: 'success', browser: 'success' };
+  const jobFamilies = Object.fromEntries(requiredJobFamilies.map(job => [job, 'success']));
   for (const [job, result] of Object.entries(jobFamilies)) assert(needs?.[job]?.result === result, `Required CI job family did not succeed: ${job}`);
   return { kind: 'github-actions-needs', runUrl: `https://github.com/pavangupta352/interleave/actions/runs/${env.GITHUB_RUN_ID}/attempts/${env.GITHUB_RUN_ATTEMPT}`,
     commit: source.commit, jobFamilies,
-    scope: 'Required PostgreSQL, pgvector, managed CLI, verified TLS, Python actor, TypeORM, Prisma and browser CI jobs using their own source checkouts and builds. Candidate archive acceptance here is the installed smoke only.' };
+    scope: 'Required PostgreSQL, pgvector, managed CLI, verified TLS, Python, Ruby, PHP, Go and Java actor, TypeORM, Prisma and browser CI jobs using their own source checkouts and builds. Candidate archive acceptance here is the installed smoke only.' };
 }
 
 export async function prepareRelease({ repository = repositoryDefault, ref, tag, out, archive, signal, qualificationEnvironment = {} }) {

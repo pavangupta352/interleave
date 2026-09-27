@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Ruby, PHP, Go and Java examples for `processActor`, each using its driver's
+  default statement handling: the pg gem 1.6.3, PDO `pdo_pgsql`, pgx 5.11.0 and
+  pgjdbc 42.7.13. Gated `ruby`, `php`, `go` and `java` CI jobs run their
+  installed-package workflow, and version-tag release preparation requires them.
+
+### Qualified profiles
+
+- Ruby 4.0.5, PHP 8.5.0, Go 1.27.1 and Java 21 programs through `processActor`
+  on PostgreSQL 16 and Node.js 24.7.0. In each, the unsafe checkout oversells,
+  exact replay repeats the failure, an edited program makes exact replay
+  incompatible, and the repaired checkout passes a fully explored frontier (47,
+  619, 295 and 183 schedules). See
+  [compatibility](docs/compatibility.md#external-programs-as-actors) for how each
+  driver's protocol cycles become scheduling steps and which startup parameters
+  tie exact replay to a directory or time zone.
+
+### Fixes
+
+- A protocol cycle that prepares, describes or closes a statement without
+  executing it records that statement's SQL once. pgx's Parse/Describe/Sync
+  prepare cycle previously showed the statement twice, as if it had run two
+  commands.
+
 ## 0.2.0 — 25 October 2026
 
 Interleave can now schedule actors that use several connections at once,
