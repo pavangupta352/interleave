@@ -16,6 +16,7 @@ package routes.
 | Package the original failing source for another checkout | [Regression exports](regressions.md) |
 | Check driver, PostgreSQL, and extension support | [Compatibility](compatibility.md) |
 | Diagnose a stopped run or ask for help | [Troubleshooting](troubleshooting.md) |
+| See how real library defects and their fixes behaved, compared with other methods | [Historical case studies](case-studies.md) |
 
 ## Examples
 
@@ -25,11 +26,13 @@ package routes.
 | [neveroversell](../examples/neveroversell/README.md) | Exercise the original unsafe purchase and safe reservation APIs | Native PostgreSQL, node-postgres Pool |
 | [Postgres.js](../examples/postgresjs/README.md) | Parameterized tagged templates and interrupted-client shutdown | `describe-flush-v1`, Postgres.js 3.4.9 |
 | [pghybrid](../examples/pghybrid/README.md) | The pinned library's four public search adapters | PostgreSQL 17, pgvector 0.8.6, stated caller versions |
+| [Historical cases](../examples/historical/README.md) | Knex, node-pg-migrate and Sequelize defects before and after their upstream fixes, with baselines | Native PostgreSQL, node-postgres 8.23.0 through each library |
 
 The counter and neveroversell are constructed race examples. pghybrid is a
-compatibility workload, with no claimed library defect. Each example's guide
-states its tested boundaries; using one adapter does not qualify every feature
-of its underlying driver or ORM.
+compatibility workload, with no claimed library defect. The historical cases
+are defects that were reported and fixed in the libraries' own repositories.
+Each example's guide states its tested boundaries; using one adapter does not
+qualify every feature of its underlying driver or ORM.
 
 ## Maintainer references
 

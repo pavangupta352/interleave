@@ -55,6 +55,20 @@ records the subsequent 417-test suite, actual clean-installed replay, source and
 runtime review repairs, auxiliary connection profile, and all six browser
 configurations. It states the remaining export and compatibility limits.
 
+## Historical cases and baselines
+
+The [historical case studies](case-studies.md) record three defects that were
+reported and fixed in Knex, node-pg-migrate and Sequelize, measured on
+27 September 2026 with the unchanged npm releases before and after each fix on
+PostgreSQL 16.15. Interleave reproduced each defect on its first run, replayed
+each failure exactly 20 of 20 times and reduced each to zero explicit choices.
+Ordinary concurrency, a hand-written result barrier and PostgreSQL's isolation
+tester were measured on the same scenarios. The record includes a residual Knex
+race that ordinary concurrency caught and Interleave's application scenario did
+not, and an export defect that blocked the offline regression bundle for two of
+the three cases; those two were exported and replayed through the separate
+installation profile instead.
+
 ## Repeating the checks
 
 With Docker available:
@@ -81,7 +95,9 @@ with its [four public adapters](qualification/pghybrid-adapters-2026-09-09.md),
 and supported [shared regression installation](regressions.md) now have executed
 qualification. Their documented boundaries still apply.
 
-Three independent historical bug/fix pairs, comparative measurements and final
-release/download verification remain unfinished. Other drivers, extensions and
-platforms need their own evidence before support claims expand. The
+The historical cases and baselines above have executed measurements with the
+limits recorded there, including the offline export defect for two cases. No
+participant usability study has been run. Final release/download verification
+remains unfinished. Other drivers, extensions and platforms need their own
+evidence before support claims expand. The
 [implementation checklist](plans/implementation.md) tracks the remaining work.

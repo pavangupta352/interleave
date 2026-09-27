@@ -68,6 +68,7 @@ Minimization removes ordering instructions, while application SQL still executes
 | TypeORM 1.1.1 and 0.3.31 | Per-actor DataSource helper: CRUD, transactions, 40001 whole-transaction retry, exact replay, minimization and portable export on PostgreSQL 16/17/18 with Node.js 22.18; [example](examples/typeorm/README.md) |
 | pghybrid 0.1.4 | Four pinned public search adapters on PostgreSQL 17 with pgvector 0.8.6; [caller and shutdown boundaries](examples/pghybrid/README.md) |
 | Programs in other languages | `processActor` runs any program as an actor; qualified with Python and psycopg 3.3.6 ([example](examples/python/README.md)) |
+| Knex, node-pg-migrate and Sequelize over node-postgres 8.23.0 | Three historical library defects and their upstream fixes, with ordinary-concurrency, barrier and isolation-tester baselines; [case studies](docs/case-studies.md) |
 
 The [compatibility matrix](docs/compatibility.md) records exact server/runtime versions, Node.js 22.18.0/24.7.0 qualification, and the limits of each profile. A qualified adapter workload does not establish support for every feature of its driver or ORM.
 
