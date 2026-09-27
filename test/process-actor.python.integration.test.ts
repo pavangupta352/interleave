@@ -13,10 +13,10 @@ const python = process.env.INTERLEAVE_TEST_PYTHON!;
 
 // Installed-package workflow: Python programs using psycopg are the actors; Interleave
 // schedules their real PostgreSQL commands through each actor's loopback endpoint.
-test('Python psycopg actors oversell, replay exactly, reject changed source and pass when repaired', { timeout: 300_000 }, async () => {
+test('Python psycopg actors oversell, replay exactly, reject changed source and pass when repaired', { timeout: 900_000 }, async () => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'interleave python actors '));
   function execute(args: string[], cwd: string, expected: number) {
-    const result = spawnSync(args[0]!, args.slice(1), { cwd, encoding: 'utf8', timeout: 180_000, maxBuffer: 16 * 1024 * 1024,
+    const result = spawnSync(args[0]!, args.slice(1), { cwd, encoding: 'utf8', timeout: 660_000, maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, NODE_OPTIONS: '', TEST_DATABASE_URL: databaseUrl, INTERLEAVE_PYTHON: python,
         npm_config_ignore_scripts: 'true', npm_config_audit: 'false', npm_config_fund: 'false' } });
     expect(result.error).toBeUndefined();
@@ -51,7 +51,8 @@ test('Python psycopg actors oversell, replay exactly, reject changed source and 
     expect(drift.outcome).toBe('incompatible');
     expect(drift.reason).toMatch(/source/i);
 
-    const safe = JSON.parse(execute([process.execPath, cli, 'run', 'safe-scenario.mjs', '--include', 'checkout_safe.py', '--max-runs', '50', ...budget, '--json'], app, 0));
+    // Every run starts two Python processes; give the complete search an explicit budget.
+    const safe = JSON.parse(execute([process.execPath, cli, 'run', 'safe-scenario.mjs', '--include', 'checkout_safe.py', '--max-runs', '100', '--total-timeout-ms', '600000', ...budget, '--json'], app, 0));
     expect(safe.violationCount).toBe(0);
     expect(safe.stopReason).toBe('frontier-exhausted');
   } finally { await rm(root, { recursive: true, force: true }); }

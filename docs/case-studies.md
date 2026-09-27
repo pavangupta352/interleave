@@ -55,7 +55,8 @@ What these results show:
   same time, and neither Interleave's scenario nor the isolation spec ran them at
   the same time. A deliberately added blocker session made the overlap
   repeatable under both.
-- Knex changed this code again two months later. With the unchanged scenario,
+- Knex changed this code again two months later. With the unchanged scenario, which starts with both tables present and the lock
+  row missing,
   Knex 3.3.0, the latest release at the time of measurement, produced two lock
   rows on Interleave's first run, in 20 of 20 exact replays, in 93 of 100
   ordinary trials and in 20 of 20 barrier trials.
