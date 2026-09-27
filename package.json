@@ -43,6 +43,8 @@
     "test:tls": "npm run build && node --test --test-concurrency=1 \"test/tls/*.test.mjs\"",
     "check": "npm run typecheck && npm test",
     "test:browser": "npm run build && node scripts/test.mjs browser",
+    "test:typeorm": "node scripts/test-typeorm.mjs",
+    "test:typeorm-functional": "node scripts/test-typeorm-functional.mjs",
     "pretest": "npm run build",
     "pretest:unit": "npm run build",
     "pretest:integration": "npm run build"
