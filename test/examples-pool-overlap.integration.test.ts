@@ -32,9 +32,11 @@ test('the pool and overlap examples behave as their READMEs state', { timeout: 9
     const multi = ['--connection-profile', 'multi-producer-v1'];
 
     // Pool: the default profile refuses the handler's second connection.
-    const refused = JSON.parse(execute([process.execPath, cli, 'run', 'pool/scenario.mjs', '--json'], app, 2));
+    const refused = JSON.parse(execute([process.execPath, cli, 'run', 'pool/scenario.mjs', '--json'], app, 4));
+    console.log(JSON.stringify({ poolDefaultProfile: { stopReason: refused.stopReason, outcome: refused.runs[0]?.outcome, reason: refused.runs[0]?.reason } }));
     expect(refused.firstFailure).toBeUndefined();
-    expect(JSON.stringify(refused.runs[0].reason)).toMatch(/multi-producer-v1/);
+    expect(refused.runs[0].outcome).toBe('inconclusive');
+    expect(refused.runs[0].reason).toMatch(/multi-producer-v1/);
     const poolArtifact = join(root, 'pool-failure.json');
     const found = JSON.parse(execute([process.execPath, cli, 'run', 'pool/scenario.mjs', ...multi, '--out', poolArtifact, '--json'], app, 1));
     expect(found.violationCount).toBe(1);

@@ -18,7 +18,8 @@ Copy this folder into an application where Interleave and `pg` are
 its `package.json`, and run from the application root:
 
 ```sh
-# The default profile refuses the second connection (exit 2, a harness error).
+# The default profile refuses the pool's second connection: exit 4, inconclusive,
+# with a reason that names the profile to select.
 npx --no-install interleave run pool/scenario.mjs --docker
 
 # Schedule each connection as a lane: the handlers lose increments (exit 1).
@@ -32,7 +33,7 @@ npx --no-install interleave minimize pool/scenario.mjs pool-failure.json --docke
 npx --no-install interleave report pool-failure.json --out pool-failure.html
 
 # The atomic update passes every explored order (exit 0).
-npx --no-install interleave run pool/safe-scenario.mjs --connection-profile multi-producer-v1 --docker __SAFE_BUDGET__
+npx --no-install interleave run pool/safe-scenario.mjs --connection-profile multi-producer-v1 --docker --total-timeout-ms 600000
 ```
 
 Replay and minimize take the connection profile from the recording. The report
@@ -41,4 +42,10 @@ lock wait was blocked by.
 
 ## What was verified
 
-__VERIFIED__
+On 27 September 2026, with the package installed in an application and
+PostgreSQL 16.15, Node.js 24.7.0: the default profile stopped as described; with
+the lane profile the first run lost increments across four connections
+(`alice#0`, `alice#1`, `bob#0`, `bob#1`), three exact replays repeated the failure,
+reduction removed all 8 explicit choices in 5 attempts, and the atomic version
+passed all 41 explored schedules. `test/examples-pool-overlap.integration.test.ts`
+repeats this workflow.

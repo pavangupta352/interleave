@@ -70,8 +70,9 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     notifyError(error); socket.end(errorResponse(error.message));
     const timer = setTimeout(() => socket.destroy(), 100); timer.unref(); socket.once('close', () => clearTimeout(timer));
   }
+  // Name the way forward: a pool that opens several connections needs the lane profile.
   const connectionLimitError = () => new Error(maxConnections === 1
-    ? 'Unsupported profile: one simultaneous physical connection per actor is supported'
+    ? `Unsupported profile: one simultaneous physical connection per actor is supported${multiProducer ? '' : '; for pools or side queries that use several at once, select connectionProfile multi-producer-v1'}`
     : `Unsupported profile: physical connection limit per actor is ${maxConnections}`);
   const server = net.createServer(client => {
     track(client); client.setNoDelay(true);

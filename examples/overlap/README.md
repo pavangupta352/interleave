@@ -42,8 +42,14 @@ npx --no-install interleave run overlap/safe-scenario.mjs --overlap pairs --dock
 PostgreSQL decides how two released statements interleave, and Interleave cannot
 force it. A paired run can therefore pass when one statement happens to finish
 before the other starts, and a replay can pass where the recording failed.
-__RATES__
+On the host described below, 20 of 20 paired searches found the double claim
+on their third run, and 20 of 20 exact replays of one of those failures repeated
+it. Another host or server can differ.
 
 ## What was verified
 
-__VERIFIED__
+On 27 September 2026, with the package installed in an application and
+PostgreSQL 16.15 in Docker Desktop on macOS arm64, Node.js 24.7.0: the one-at-a-time
+search exhausted its 3 schedules without a violation, the paired searches and
+replays behaved as above, and the safe version passed all 4 sequential and paired
+schedules. `test/examples-pool-overlap.integration.test.ts` repeats this workflow.
