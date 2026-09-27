@@ -1,4 +1,5 @@
 import { ARTIFACT_LIMITS, parseRunArtifact } from '../artifact-schema.js';
+import { multiLaneActors, parseLaneLabel, parsePlanEntry } from '../lanes.js';
 import type { RunResult, TraceStep } from '../types.js';
 
 const PAGE_SIZE = 100;
@@ -6,6 +7,8 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 let run: RunResult;
 let replayCommand: string | null = null;
 let actors: string[] = [];
+/** Actors whose commands used several connections; only these need lane labels. */
+let laneActors = new Set<string>();
 let selected = 0;
 let page = 0;
 let query = '';
@@ -35,7 +38,13 @@ function announce(message: string, error = false): void {
   status.textContent = message;
 }
 function formatMs(value: number): string { return `${Number(value.toFixed(2)).toLocaleString('en-US')} ms`; }
-function actorNames(value: RunResult): string[] { return [...new Set([...value.actors.map(actor => actor.actor), ...value.trace.flatMap(step => [step.actor, ...step.available]), ...value.plan])]; }
+function actorOf(entry: string): string { return parsePlanEntry(entry)?.actor ?? entry; }
+function actorNames(value: RunResult): string[] { return [...new Set([...value.actors.map(actor => actor.actor), ...value.trace.flatMap(step => [step.actor, ...step.available.map(actorOf)]), ...value.plan.map(actorOf)])]; }
+function multiProducer(): boolean { return run.limits.connectionProfile === 'multi-producer-v1'; }
+/** `alice #1` for an actor that used several connections, otherwise the actor alone. */
+function owner(actor: string, connection: number): string { return laneActors.has(actor) ? `${actor} #${connection}` : actor; }
+function stepOwner(step: TraceStep): string { return owner(step.actor, step.connection); }
+function availableOwner(entry: string): string { const lane = parseLaneLabel(entry); return lane ? owner(lane.actor, lane.connection) : entry; }
 function shortSql(value: string): string { return value.replace(/\s+/g, ' ').trim() || '(empty command)'; }
 function stageLabel(step: TraceStep): string {
   return ({ complete: 'Complete query', describe: 'Describe', execute: 'Execute', recover: 'Recover' })[step.stage ?? 'complete'];
@@ -52,6 +61,7 @@ function commandLabels(step: TraceStep): { protocol: string; stage?: string; com
 }
 function setRun(value: RunResult, command: string | null): void {
   run = value; replayCommand = command; actors = actorNames(run); query = ''; actorFilter = ''; page = 0;
+  laneActors = multiProducer() ? multiLaneActors(run.trace) : new Set();
   selected = run.trace.find(step => step.completion?.error || step.waits.length)?.index ?? 0;
   page = Math.floor(selected / PAGE_SIZE);
   document.title = `${run.scenario} · Interleave`;
@@ -76,7 +86,9 @@ function renderShell(): void {
   const subtitle = run.failure?.message ?? run.reason ?? (run.outcome === 'passed' ? 'The invariant held in this recorded execution.' : 'Inspect the recorded execution and its limits below.');
   const text = evidenceText('p', 'summary-message', subtitle, 'Execution outcome message');
   const metadata = node('div', 'metadata');
-  for (const value of [`${run.trace.length.toLocaleString('en-US')} ${protocolProfile() === 'describe-flush-v1' ? 'releases' : 'commands'}`, `${actors.length} actors`, `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
+  const commandConnections = new Set(run.trace.map(step => `${step.actor}#${step.connection}`)).size;
+  for (const value of [`${run.trace.length.toLocaleString('en-US')} ${protocolProfile() === 'describe-flush-v1' ? 'releases' : 'commands'}`, `${actors.length} actors`,
+    ...(laneActors.size ? [`${commandConnections} command connections`] : []), `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
   const cleanup = node('span', run.cleanup.complete ? 'cleanup-complete' : 'cleanup-incomplete', run.cleanup.complete ? 'Cleanup complete' : 'Cleanup incomplete'); metadata.append(cleanup);
   summary.append(heading, text, metadata);
   if (!run.cleanup.complete) summary.append(node('p', 'cleanup-warning', run.cleanup.error ?? 'Owned resource cleanup did not complete.'));
@@ -106,7 +118,7 @@ function renderShell(): void {
   selectionTools.append(selectionLabel, inspect);
   const ledger = node('div', 'ledger'); ledger.id = 'ledger';
   const pagination = node('div', 'pagination'); pagination.id = 'pagination';
-  const scope = node('p', 'scope-note', `${protocolProfile() === 'describe-flush-v1' ? 'Each row is a scheduled release. A query may have separate description and execution stages.' : 'Each row is a client command released to PostgreSQL.'} PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.`);
+  const scope = node('p', 'scope-note', `${protocolProfile() === 'describe-flush-v1' ? 'Each row is a scheduled release. A query may have separate description and execution stages.' : 'Each row is a client command released to PostgreSQL.'}${laneActors.size ? ' An actor’s connections share its column; each is labeled by its connection number and runs its commands in order.' : ''} PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.`);
   evidence.append(toolbar, hint, selectionTools, ledger, pagination, scope);
   const inspector = node('aside', 'inspector'); inspector.id = 'inspector'; inspector.setAttribute('aria-label', 'Selected command evidence'); inspector.tabIndex = -1;
   workspace.append(evidence, inspector); main.append(summary, workspace);
@@ -135,7 +147,10 @@ function renderShell(): void {
     addFact(info, 'Installed dependencies', `${source.components.dependencies.packages.length.toLocaleString('en-US')} packages · ${source.components.dependencies.fingerprint}`);
     addFact(info, 'Harness runtime', `${source.components.runtime.mode} mode · ${source.components.runtime.fingerprint}`);
   }
-  addFact(info, 'Connection profile', `${run.limits.maxConnectionsPerActor ?? 1} physical ${(run.limits.maxConnectionsPerActor ?? 1) === 1 ? 'connection' : 'connections'} per actor; one live command producer`);
+  const connectionLimit = run.limits.maxConnectionsPerActor ?? 1;
+  addFact(info, 'Connection profile', multiProducer()
+    ? `Up to ${connectionLimit} physical ${connectionLimit === 1 ? 'connection' : 'connections'} per actor; each issues its own ordered commands (multi-producer-v1)`
+    : `${connectionLimit} physical ${connectionLimit === 1 ? 'connection' : 'connections'} per actor; one live command producer`);
   addFact(info, 'Protocol profile', protocolProfile());
   const upstream = run.environment.transport?.upstream;
   addFact(info, 'Upstream transport', upstream === undefined ? 'Not recorded in this artifact'
@@ -144,7 +159,7 @@ function renderShell(): void {
   if (upstream?.profile === 'tls-verify-full-v1') addFact(info, 'Trusted CA set', upstream.trustFingerprint);
   if (upstream !== undefined) addFact(info, 'Actor endpoints', 'Loopback plaintext');
   addFact(info, 'Actor startups', run.connections === undefined ? 'Not recorded in this artifact' : `${run.connections.length.toLocaleString('en-US')} recorded`);
-  for (const connection of run.connections ?? []) addFact(info, `${connection.actor} · ${connection.connection}`, connection.fingerprint);
+  for (const connection of run.connections ?? []) addFact(info, multiProducer() ? `${connection.actor} #${connection.connection}` : `${connection.actor} · ${connection.connection}`, connection.fingerprint);
   recordBody.append(info);
   if (replayCommand) {
     const command = node('pre', 'replay-command', replayCommand);
@@ -156,7 +171,7 @@ function renderShell(): void {
   app.replaceChildren(header, main, footer, status);
 }
 function updateLedger(): void {
-  filtered = run.trace.filter(step => (!actorFilter || step.actor === actorFilter) && (!query || `${step.actor}\n${step.sql}\n${step.completion?.error?.message ?? ''}\n${step.completion?.error?.code ?? ''}`.toLowerCase().includes(query)));
+  filtered = run.trace.filter(step => (!actorFilter || step.actor === actorFilter) && (!query || `${stepOwner(step)}\n${step.sql}\n${step.completion?.error?.message ?? ''}\n${step.completion?.error?.code ?? ''}`.toLowerCase().includes(query)));
   page = Math.min(page, Math.max(0, Math.ceil(filtered.length / PAGE_SIZE) - 1));
   const subset = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const ledger = document.querySelector<HTMLDivElement>('#ledger')!;
@@ -181,15 +196,17 @@ function updateLedger(): void {
         if (actor === step.actor) {
           const evidenceLabels = commandLabels(step);
           const command = button('', () => selectStep(step.index), 'command'); command.dataset.step = String(step.index); command.tabIndex = step.index === focusIndex ? 0 : -1;
-          command.setAttribute('aria-pressed', String(step.index === selected)); command.setAttribute('aria-label', `Step ${step.index + 1}, ${step.actor}: ${shortSql(step.sql).slice(0, 160)}. ${[evidenceLabels.stage, evidenceLabels.protocol, evidenceLabels.completion, evidenceLabels.waits].filter(Boolean).join('. ')}`);
+          command.setAttribute('aria-pressed', String(step.index === selected)); command.setAttribute('aria-label', `Step ${step.index + 1}, ${stepOwner(step)}: ${shortSql(step.sql).slice(0, 160)}. ${[evidenceLabels.stage, evidenceLabels.protocol, evidenceLabels.completion, evidenceLabels.waits].filter(Boolean).join('. ')}`);
           command.setAttribute('aria-controls', 'inspector');
-          command.append(node('span', 'mobile-actor', step.actor), node('code', 'sql-preview', shortSql(step.sql)));
+          command.append(node('span', 'mobile-actor', stepOwner(step)), node('code', 'sql-preview', shortSql(step.sql)));
           const summary = node('span', 'command-summary');
           summary.append(node('span', 'protocol', evidenceLabels.protocol));
           if (step.completion?.error) summary.append(node('span', 'command-error', step.completion.error.code));
           else if (evidenceLabels.waits) summary.append(node('span', 'command-wait', evidenceLabels.waits));
           else summary.append(node('span', undefined, evidenceLabels.completion));
           if (evidenceLabels.stage) summary.prepend(node('span', undefined, evidenceLabels.stage));
+          // The column names the actor; the narrow layout shows the full label instead.
+          if (laneActors.has(step.actor)) summary.prepend(node('span', 'lane-tag', `Connection #${step.connection}`));
           command.append(summary); command.addEventListener('keydown', navigate); cell.append(command);
         }
         row.append(cell);
@@ -221,7 +238,7 @@ function selectStep(index: number, focus = false): void {
     command.setAttribute('aria-pressed', String(active)); command.tabIndex = active ? 0 : -1; command.closest('tr')?.classList.toggle('selected-row', active);
     if (active && focus) command.focus({ preventScroll: true });
   }
-  renderInspector(); announce(`Step ${index + 1}, ${run.trace[index]!.actor} selected. Command evidence updated.`);
+  renderInspector(); announce(`Step ${index + 1}, ${stepOwner(run.trace[index]!)} selected. Command evidence updated.`);
 }
 function navigate(event: KeyboardEvent): void {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
@@ -238,10 +255,10 @@ function renderInspector(): void {
   const identityOpen = inspector.querySelector<HTMLDetailsElement>('.identity')?.open ?? false;
   const observationsOpen = inspector.querySelector<HTMLDetailsElement>('.observations')?.open ?? false;
   const step = run.trace[selected];
-  document.querySelector('#selection-label')!.textContent = step ? `Selected: step ${step.index + 1} · ${step.actor}` : 'No command selected';
+  document.querySelector('#selection-label')!.textContent = step ? `Selected: step ${step.index + 1} · ${stepOwner(step)}` : 'No command selected';
   (document.querySelector('#inspect-selection') as HTMLButtonElement).disabled = !step;
   const header = node('div', 'inspector-heading'); header.append(node('h2', undefined, step ? `Step ${step.index + 1}` : 'Execution evidence'));
-  if (step) header.append(node('span', 'actor-label', step.actor));
+  if (step) header.append(node('span', 'actor-label', stepOwner(step)));
   const contents: HTMLElement[] = [header];
   if (step) contents.push(button('Back to selected command', () => {
     query = ''; actorFilter = ''; (document.querySelector('#search') as HTMLInputElement).value = ''; (document.querySelector('#actor-filter') as HTMLSelectElement).value = '';
@@ -277,7 +294,7 @@ function renderInspector(): void {
     if (!step.waits.length) waits.append(node('p', 'detail-note', 'No scheduler wait observation was recorded for this command.'));
     for (const wait of step.waits) {
       const item = node('div', 'wait-observation'); item.append(node('p', 'wait-title', `${wait.waitEventType} · ${wait.waitEvent}`));
-      const blockerActors = [...new Set(wait.blockerPids.flatMap(pid => run.trace.filter(candidate => candidate.backendPid === pid).map(candidate => candidate.actor)))];
+      const blockerActors = [...new Set(wait.blockerPids.flatMap(pid => run.trace.filter(candidate => candidate.backendPid === pid).map(stepOwner)))];
       item.append(node('p', undefined, `Blocked by ${blockerActors.join(', ')} (backend ${wait.blockerPids.join(', ')}).`)); waits.append(item);
     }
     contents.push(waits);
@@ -288,7 +305,7 @@ function renderInspector(): void {
       const prefix = run.trace.find(candidate => candidate.actor === step.actor && candidate.connection === step.connection && candidate.ordinal === step.prefixOrdinal);
       if (prefix) addFact(identityFacts, 'Description release', `Step ${prefix.index + 1}`);
     }
-    addFact(identityFacts, 'Backend PID', String(step.backendPid)); addFact(identityFacts, 'Available actors', step.available.join(', ')); addFact(identityFacts, 'Fingerprint', step.fingerprint); identity.append(identityFacts); contents.push(identity);
+    addFact(identityFacts, 'Backend PID', String(step.backendPid)); addFact(identityFacts, 'Available actors', step.available.map(availableOwner).join(', ')); addFact(identityFacts, 'Fingerprint', step.fingerprint); identity.append(identityFacts); contents.push(identity);
   } else contents.push(node('p', 'detail-note', 'There is no command to inspect. Review the execution outcome and actor observations.'));
   const observations = node('details', 'observations'); observations.open = observationsOpen; observations.append(node('summary', undefined, 'All actor observations'));
   observations.append(node('p', 'detail-note', 'Values explicitly returned by scenario actors. Database result rows are not automatically captured.'));

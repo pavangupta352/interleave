@@ -102,6 +102,7 @@ pre { overflow: auto; tab-size: 2; }
 .command-summary { display: flex; gap: 5px 12px; flex-wrap: wrap; font-size: 10px; color: var(--muted); }
 .command-wait { color: var(--amber); }
 .command-error { color: var(--red); font-family: var(--mono); }
+.lane-tag { color: var(--ink); font-weight: 600; }
 .mobile-actor { display: none; overflow-wrap: anywhere; }
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 26px 0 32px; }
 .record-count { color: var(--muted); font-size: 11px; }
@@ -187,6 +188,7 @@ pre { overflow: auto; tab-size: 2; }
   .active-cell { min-width: 0; }
   .command { min-height: 104px; padding: 12px; gap: 6px; }
   .mobile-actor { display: block; font-size: 11px; font-weight: 600; color: var(--blue); }
+  .lane-tag { display: none; }
   .sql-preview { font-size: 11px; }
   .command-summary { font-size: 9px; gap: 5px; }
   .pagination { padding: 16px 20px 0; }

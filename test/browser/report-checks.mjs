@@ -176,6 +176,57 @@ export async function checkReport(page, url, artifact) {
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }
 
+/** Connections of one actor are labeled only where an actor used several of them. */
+export async function checkLaneReport(page, url, artifact, legacy) {
+  const errors = [], requests = [];
+  const onError = error => errors.push(error.message);
+  const onRequest = request => { if (request.url() !== url) requests.push(request.url()); };
+  page.on('pageerror', onError); page.on('request', onRequest);
+  try {
+    await page.goto(url);
+    await page.getByRole('heading', { name: artifact.scenario, exact: true }).waitFor();
+    const narrow = page.viewportSize().width <= 780;
+    const waiting = artifact.trace.find(step => step.waits.length);
+    assert.ok(waiting && waiting.actor === 'alice' && waiting.connection === 1, 'The real run records a wait on alice #1');
+    const blocker = artifact.trace.find(step => step.backendPid === waiting.waits[0].blockerPids[0]);
+    assert.equal(blocker.actor, 'alice');
+    assert.equal(await page.locator('.command[aria-pressed="true"]').getAttribute('data-step'), String(waiting.index), 'The recorded wait opens selected');
+    assert.equal(await page.getByRole('button', { name: new RegExp(`^Step ${waiting.index + 1}, alice #1: UPDATE .*1 wait observation`) }).count(), 1);
+    assert.equal(await page.getByRole('button', { name: /^Step \d+, bob: / }).count(), artifact.trace.filter(step => step.actor === 'bob').length, 'A single-connection actor keeps its plain name');
+    assert.equal(await page.locator('#selection-label').textContent(), `Selected: step ${waiting.index + 1} · alice #1`);
+    assert.equal(await page.locator('.actor-label').textContent(), 'alice #1');
+    assert.ok((await page.locator('.wait-observation').textContent()).includes(`Blocked by alice #${blocker.connection} (backend ${blocker.backendPid}).`));
+    const cell = page.locator(`.command[data-step="${waiting.index}"]`);
+    assert.equal(await cell.locator('.lane-tag').isVisible(), !narrow, 'The column layout shows the connection tag');
+    assert.equal(await cell.locator('.mobile-actor').isVisible(), narrow, 'The narrow layout shows the full lane label');
+    if (narrow) assert.equal(await cell.locator('.mobile-actor').textContent(), 'alice #1');
+    else assert.equal(await cell.locator('.lane-tag').textContent(), 'Connection #1');
+    assert.equal(await page.locator('.metadata').getByText('3 command connections', { exact: true }).count(), 1);
+    await page.locator('.identity summary').click();
+    assert.equal(await page.locator('.identity dd').filter({ hasText: /^alice #0, alice #1, bob$/ }).count(), 1, 'Available choices use lane labels only where needed');
+    await page.getByRole('searchbox').fill('alice #1');
+    await page.waitForFunction(() => document.querySelectorAll('.command').length === 1);
+    assert.equal(await page.locator('.command').getAttribute('data-step'), String(waiting.index));
+    await page.getByRole('searchbox').fill('');
+    await page.waitForFunction(count => document.querySelectorAll('.command').length === count, artifact.trace.length);
+    await page.locator('.record-details summary').click();
+    const record = await page.locator('.record-body').textContent();
+    assert.ok(record.includes(`Connection profileUp to ${artifact.limits.maxConnectionsPerActor} physical connections per actor; each issues its own ordered commands (multi-producer-v1)`));
+    for (const connection of artifact.connections) assert.ok(record.includes(`${connection.actor} #${connection.connection}${connection.fingerprint}`));
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Lane labels and record details fit the viewport');
+    assert.equal(await page.getByText(/undefined|NaN/).count(), 0);
+    await page.locator('#import-file').evaluate((element, data) => {
+      const transfer = new DataTransfer(); transfer.items.add(new File([JSON.stringify(data)], 'legacy.json', { type: 'application/json' }));
+      element.files = transfer.files; element.dispatchEvent(new Event('change', { bubbles: true }));
+    }, legacy);
+    await page.getByRole('heading', { name: legacy.scenario, exact: true }).waitFor();
+    assert.equal(await page.locator('.lane-tag').count(), 0, 'Single-producer records have no lane labels');
+    assert.ok((await page.locator('.mobile-actor').allTextContents()).every(text => !text.includes('#')));
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    return { checks: ['real own-connection wait selected', 'lane accessible names', 'plain single-connection names', 'lane wait attribution', 'responsive lane label', 'lane-qualified available choices', 'lane search', 'connection profile and startup identities', 'overflow', 'legacy import without lanes', 'no errors or external requests'], passed: true };
+  } finally { page.off('pageerror', onError); page.off('request', onRequest); }
+}
+
 /** Actual driver metadata must never be presented as a completed SQL execution. */
 export async function checkStagedReport(page, url, artifact, legacy) {
   const errors = [], requests = [];

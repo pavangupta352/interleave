@@ -210,6 +210,8 @@ Commands are full-cell buttons within a ruled table. Each shows a two-line SQL p
 
 Accessible command names retain step, actor and SQL while also naming the protocol, any separate stage, completion or error, and recorded wait count. This keeps those outcomes available during keyboard and screen-reader navigation, including when a command records both an error and waits.
 
+**The Lane Label Rule.** A multi-producer record can show several connections of one actor in that actor's column. Only an actor whose commands used more than one connection is labeled by lane, written `alice #1` with the zero-based connection number used by plans. In the column layout the actor is already named, so the command metadata opens with an ink, semibold `Connection #1` tag; the narrow layout hides that tag and its blue actor label becomes `alice #1`. Accessible names, the selection label, the inspector heading, search, wait blockers and available choices use the same label. Single-connection actors and every single-producer record keep plain actor names, and the summary adds a command-connection count only when lanes appear.
+
 Arrow keys and Home/End navigate the filtered order, including across the 100-command page boundary. The keyboard sequence uses one command tab stop at a time. Previous and Next controls show whether traversal is available and reveal the next page's opening command when used. Selecting a command updates the inspector and a polite status message.
 
 ### Inspector and SQL field
@@ -222,7 +224,7 @@ Native disclosures hold command identity, actor observations, and record/replay 
 
 Command identity and All actor observations retain their independent open or closed state when another command is selected. Opening a different artifact starts with fresh disclosures. The observations disclosure contains every recorded actor result. Outcome messages, PostgreSQL error messages and actor observation fields are named, focusable evidence regions so keyboard users can scroll their complete text.
 
-Record details include the captured fixture profile, digest, object and row counts; source, installed dependency and runtime identities; the connection profile; and actor startup digests. Missing identities in older records are labeled explicitly. Long digests wrap within the existing fact layout on narrow screens.
+Record details include the captured fixture profile, digest, object and row counts; source, installed dependency and runtime identities; the connection profile; and actor startup digests. A multi-producer record states that each connection issues its own ordered commands and labels startups as `alice #0`. Missing identities in older records are labeled explicitly. Long digests wrap within the existing fact layout on narrow screens.
 
 The only selection animation is a brief background wash (180ms). It runs only when reduced motion is not requested. Focus and result state do not depend on animation. Print styles hide interactive controls; the rendered ledger page and currently displayed details remain the print content.
 
