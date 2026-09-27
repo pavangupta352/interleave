@@ -229,6 +229,20 @@ test('rejects local and installed dependency symlink escapes', async () => {
   await expect(captureSourceIdentity(join(root, 'scenario.mjs'))).rejects.toMatchObject({ kind: 'unsupported' });
 });
 
+test('default byte budget admits a 75 MiB package graph and rejects 135 MiB before reading past it', async () => {
+  const root = await project(), client = await dependency(root, 'large-client');
+  await writeFile(join(root, 'scenario.mjs'), "import 'large-client';");
+  // Sparse files keep the fixture cheap to create; capture still reads and hashes every byte.
+  const add = async (index: number) => { const path = join(client, `runtime-${index}.bin`); await writeFile(path, ''); await fs.truncate(path, 15 * 1024 * 1024); };
+  for (let index = 0; index < 5; index++) await add(index);
+  const captured = await captureSourceIdentity(join(root, 'scenario.mjs'));
+  expect(captured.byteCount).toBeGreaterThan(64 * 1024 * 1024);
+  expect(captured.components.dependencies.packages.find(item => item.name === 'large-client')!.fileCount).toBe(7);
+  await expect(captureSourceIdentity(join(root, 'scenario.mjs'), { maxBytes: 64 * 1024 * 1024 })).rejects.toMatchObject({ kind: 'budget' });
+  for (let index = 5; index < 9; index++) await add(index);
+  await expect(captureSourceIdentity(join(root, 'scenario.mjs'))).rejects.toMatchObject({ kind: 'budget', message: 'Source identity byte limit exceeded' });
+});
+
 test('enforces caller file/byte bounds and pre-aborted cancellation', async () => {
   const root = await project(); const file = join(root, 'scenario.mjs');
   await expect(captureSourceIdentity(file, { maxFiles: 1 })).rejects.toMatchObject({ kind: 'budget' });

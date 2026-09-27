@@ -23,6 +23,11 @@
 
 ### Changes
 
+- The default source identity budget is 128 MiB (previously 64 MiB), matching the
+  export archive and verification bounds. File count (10,000) and per-file
+  (16 MiB) bounds are unchanged, and every captured byte is still hashed.
+  `@prisma/client` 7.10.0 alone installs 74,458,946 bytes, so the previous
+  default rejected every recording that loads it.
 - Multi-producer runs and runs with overlap pairs use schema version 4, which
   requires `limits.connectionProfile` and `limits.maxConnectionsPerActor`,
   permits `actor#n` and `alice+bob` plan entries, records available lanes for

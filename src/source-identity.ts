@@ -173,7 +173,10 @@ class CaptureState {
   private failure: SourceIdentityError | undefined;
   constructor(options: CaptureSourceIdentityOptions) {
     this.maxFiles = limit(options.maxFiles, 10_000, 100_000, 'maxFiles');
-    this.maxBytes = limit(options.maxBytes, 64 * 1024 * 1024, 256 * 1024 * 1024, 'maxBytes');
+    // The default matches the 128 MiB export archive/verification bounds. Some
+    // ordinary runtime packages are large on their own: @prisma/client 7.10.0
+    // installs 74,458,946 bytes. Every captured byte is still hashed.
+    this.maxBytes = limit(options.maxBytes, 128 * 1024 * 1024, 256 * 1024 * 1024, 'maxBytes');
     this.timeoutMs = limit(options.timeoutMs, 10_000, 120_000, 'timeoutMs');
     this.signal = options.signal;
   }
