@@ -34,7 +34,7 @@ async function fixture(variable = false) {
   const cli = `#!/usr/bin/env node\nimport{mkdir,writeFile}from'node:fs/promises';import{join}from'node:path';
     const args=process.argv.slice(2);if(args.includes('--version'))console.log('${version}');
     else if(args.includes('--help'))console.log('Interleave help run replay init');
-    else if(args[0]==='init'){await mkdir(args[1]);await writeFile(join(args[1],'package.json'),JSON.stringify({dependencies:{'${name}':'${version}'}}));await writeFile(join(args[1],'scenario.mjs'),'export default {};');await writeFile(join(args[1],'README.md'),'fixture');}
+    else if(args[0]==='init'){await mkdir(args[1]);await writeFile(join(args[1],'package.json'),JSON.stringify({devDependencies:{'${name}':'${version}'}}));await writeFile(join(args[1],'scenario.mjs'),'export default {};');await writeFile(join(args[1],'README.md'),'fixture');}
     else process.exitCode=2;`;
   files['build.mjs'] = `import{mkdir,writeFile,chmod}from'node:fs/promises';import{dirname}from'node:path';
     for(const path of ${JSON.stringify(required)}){await mkdir(dirname(path),{recursive:true});await writeFile(path,'fixture\\n');}
