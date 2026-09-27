@@ -1,0 +1,11 @@
+{
+  "name": "interleave-historical-node-pg-migrate-before-fix",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "node-pg-migrate 5.10.0, published before the migrations-table lock fix in salsita/node-pg-migrate#830",
+  "dependencies": {
+    "node-pg-migrate": "5.10.0",
+    "pg": "8.23.0"
+  }
+}

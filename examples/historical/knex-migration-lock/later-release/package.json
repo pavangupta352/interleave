@@ -1,0 +1,11 @@
+{
+  "name": "interleave-historical-knex-later-release",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Knex 3.3.0, a later release whose lock-row insert comes from knex/knex#4865",
+  "dependencies": {
+    "knex": "3.3.0",
+    "pg": "8.23.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "interleave-historical-sequelize-after-fix",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sequelize 6.8.0, the first release containing the findCreateFind transaction fix from sequelize/sequelize#13482",
+  "dependencies": {
+    "pg": "8.23.0",
+    "sequelize": "6.8.0"
+  }
+}

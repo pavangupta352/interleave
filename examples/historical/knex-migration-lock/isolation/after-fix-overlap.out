@@ -1,0 +1,26 @@
+Parsed test spec with 4 sessions
+
+starting permutation: alice_read bob_read blocker_begin blocker_lock alice_insert bob_insert blocker_commit check
+step alice_read: select * from "public"."knex_migrations_lock";
+index|is_locked
+-----+---------
+(0 rows)
+
+step bob_read: select * from "public"."knex_migrations_lock";
+index|is_locked
+-----+---------
+(0 rows)
+
+step blocker_begin: BEGIN;
+step blocker_lock: ALTER SEQUENCE "public"."knex_migrations_lock_index_seq" INCREMENT BY 1;
+step alice_insert: insert into "public"."knex_migrations_lock" ("is_locked") select 0 where not exists (select * from "public"."knex_migrations_lock"); <waiting ...>
+step bob_insert: insert into "public"."knex_migrations_lock" ("is_locked") select 0 where not exists (select * from "public"."knex_migrations_lock"); <waiting ...>
+step blocker_commit: COMMIT;
+step alice_insert: <... completed>
+step bob_insert: <... completed>
+step check: select count(*) as lock_rows from "public"."knex_migrations_lock";
+lock_rows
+---------
+        2
+(1 row)
+

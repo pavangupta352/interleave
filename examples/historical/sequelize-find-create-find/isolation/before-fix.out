@@ -1,0 +1,63 @@
+Parsed test spec with 3 sessions
+
+starting permutation: alice_begin bob_begin alice_find bob_find alice_insert bob_insert alice_commit bob_find_again bob_rollback check
+step alice_begin: START TRANSACTION;
+step bob_begin: START TRANSACTION;
+step alice_find: SELECT "id", "claim_key" AS "claimKey" FROM "claims" AS "Claim" WHERE "Claim"."claim_key" = 'winner';
+id|claimKey
+--+--------
+(0 rows)
+
+step bob_find: SELECT "id", "claim_key" AS "claimKey" FROM "claims" AS "Claim" WHERE "Claim"."claim_key" = 'winner';
+id|claimKey
+--+--------
+(0 rows)
+
+step alice_insert: INSERT INTO "claims" ("id","claim_key") VALUES (DEFAULT,'winner') RETURNING "id","claim_key";
+id|claim_key
+--+---------
+ 1|winner   
+(1 row)
+
+step bob_insert: INSERT INTO "claims" ("id","claim_key") VALUES (DEFAULT,'winner') RETURNING "id","claim_key"; <waiting ...>
+step alice_commit: COMMIT;
+step bob_insert: <... completed>
+ERROR:  duplicate key value violates unique constraint "claims_claim_key_key"
+step bob_find_again: SELECT "id", "claim_key" AS "claimKey" FROM "claims" AS "Claim" WHERE "Claim"."claim_key" = 'winner';
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+step bob_rollback: ROLLBACK;
+step check: SELECT count(*) AS claim_rows FROM claims WHERE claim_key = 'winner';
+claim_rows
+----------
+         1
+(1 row)
+
+
+starting permutation: alice_begin alice_find alice_insert alice_commit bob_begin bob_find bob_commit check
+step alice_begin: START TRANSACTION;
+step alice_find: SELECT "id", "claim_key" AS "claimKey" FROM "claims" AS "Claim" WHERE "Claim"."claim_key" = 'winner';
+id|claimKey
+--+--------
+(0 rows)
+
+step alice_insert: INSERT INTO "claims" ("id","claim_key") VALUES (DEFAULT,'winner') RETURNING "id","claim_key";
+id|claim_key
+--+---------
+ 1|winner   
+(1 row)
+
+step alice_commit: COMMIT;
+step bob_begin: START TRANSACTION;
+step bob_find: SELECT "id", "claim_key" AS "claimKey" FROM "claims" AS "Claim" WHERE "Claim"."claim_key" = 'winner';
+id|claimKey
+--+--------
+ 1|winner  
+(1 row)
+
+step bob_commit: COMMIT;
+step check: SELECT count(*) AS claim_rows FROM claims WHERE claim_key = 'winner';
+claim_rows
+----------
+         1
+(1 row)
+

@@ -1,0 +1,11 @@
+{
+  "name": "interleave-historical-knex-before-fix",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Knex 0.95.11, published before the migration lock fix in knex/knex#4694",
+  "dependencies": {
+    "knex": "0.95.11",
+    "pg": "8.23.0"
+  }
+}
