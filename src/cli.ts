@@ -181,10 +181,13 @@ function describeExport(result: ExportRegressionResult, run: RunResult): string 
     ...result.replay.install,
     result.replay.command,
   ].map((args) => args.map((argument) => `'${argument.replaceAll("'", "'\\''")}'`).join(' '));
+  const pairs = run.trace.some(step => step.overlap !== undefined)
+    ? '\nThis run released overlapped pairs. Replay sends each pair together again, but PostgreSQL may interleave it differently, so replay the export several times before relying on it.'
+    : '';
   const tls = run.environment.transport?.upstream.profile === 'tls-verify-full-v1'
     ? `\nThis run used verified upstream TLS. Add --database-url <url> --upstream-tls${run.environment.transport.upstream.trustSource === 'custom-ca' ? ' --upstream-ca <same-ca.pem>' : ''} when replaying; the export contains no CA files or credentials.`
     : '';
-  return `Exported verified regression to ${result.destination}\nManifest: ${result.manifestPath}\nFingerprint: ${result.fingerprint}\nReplay from that directory:\n${commands.join('\n')}${tls}`;
+  return `Exported verified regression to ${result.destination}\nManifest: ${result.manifestPath}\nFingerprint: ${result.fingerprint}\nReplay from that directory:\n${commands.join('\n')}${tls}${pairs}`;
 }
 function describe(result: RunResult | ExplorationResult | MinimizationResult): string {
   if ('explored' in result) {
