@@ -19,6 +19,8 @@ import { defaultConnectionLimit, recordedConnectionProfile, resolveConnectionPro
 import type { OwnedDatabase, RunOptions, RunResult } from './types.js';
 
 const GRACE_MS = 250;
+/** The parent's backstop fires this long after the worker's own execution deadline. */
+const WORKER_DEADLINE_GRACE_MS = 1_000;
 /** Each source identity capture, before and after execution, is bounded separately. */
 const SOURCE_IDENTITY_TIMEOUT_MS = 60_000;
 
@@ -93,7 +95,10 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   // before and after execution is evidence binding with its own bound, so a slow
   // capture on a loaded machine cannot consume the scenario's execution time.
   let deadline: ReturnType<typeof setTimeout> | undefined;
-  const armDeadline = (): void => { deadline ??= setTimeout(() => interrupt(`Execution exceeded its ${timeoutMs} ms deadline`), timeoutMs); };
+  const armDeadline = (milliseconds = timeoutMs): void => {
+    clearTimeout(deadline);
+    deadline = setTimeout(() => interrupt(`Execution exceeded its ${timeoutMs} ms deadline`), milliseconds);
+  };
   options.signal?.addEventListener('abort', onAbort, { once: true });
   if (options.signal?.aborted) onAbort();
   let sourceIdentity: SourceIdentity | undefined;
@@ -217,6 +222,10 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
               };
             }
             catch { protocolFailure = true; terminateGroup(workerChild); }
+          } else if (message.type === 'running' && received === undefined) {
+            // The worker's own deadline starts now and names what it was waiting
+            // for; the parent backstop fires shortly after it.
+            if (!interruption) armDeadline(timeoutMs + WORKER_DEADLINE_GRACE_MS);
           } else if (message.type === 'error') {
             result.reason = 'Scenario loading or worker execution failed';
           } else { protocolFailure = true; terminateGroup(workerChild); }

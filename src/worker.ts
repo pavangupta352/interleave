@@ -41,6 +41,8 @@ async function execute(message: StartMessage): Promise<void> {
     const scenario = defineScenario(loaded.default as Scenario);
     const database = await attachOwnedDatabase(message.connectionString, restorePostgresTransport(message.transport));
     try {
+      // The execution deadline starts now; the parent's backstop follows it.
+      process.send?.({ type: 'running', token: message.token });
       const result = await runInOwnedDatabase(scenario, {
         ...message.options, databaseUrl: message.connectionString, signal: controller.signal,
       }, database, message.sourceIdentity);
