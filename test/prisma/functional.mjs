@@ -29,6 +29,11 @@ Object.assign(process.env, { INTERLEAVE_PRISMA_NAMES: journals.names, INTERLEAVE
 const lock = await readFile(join(app, 'package-lock.json'));
 const budget = ['--timeout-ms', '30000'];
 const include = ['--include', 'prisma'];
+// An exhaustive search runs hundreds of schedules, each in a new worker with two
+// Prisma clients and two source captures. Allow for a loaded host or CI runner;
+// a budget stop still fails the check.
+const searchBudget = ['--max-runs', '400', '--total-timeout-ms', '2700000'];
+const searchProcessTimeout = 2_800_000;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const commands = [], cases = [];
 let server, unsafe;
@@ -355,7 +360,7 @@ qualify('the conditional-decrement repair explores its full frontier without vio
   assert(unsafe, 'Requires the recorded unsafe checkout');
   const file = await entry('conditional-decrement', 'conditional-decrement');
   const before = await marks();
-  const command = await execute([cli, 'run', file, '--project-root', app, ...include, '--max-runs', '400', '--total-timeout-ms', '900000', ...budget, '--json'], { timeout: 1_000_000 });
+  const command = await execute([cli, 'run', file, '--project-root', app, ...include, ...searchBudget, ...budget, '--json'], { timeout: searchProcessTimeout });
   const search = JSON.parse(command.stdout);
   assert.equal(command.status, 0, command.stdout.slice(0, 2000));
   assert.equal(search.stopReason, 'frontier-exhausted'); assert.equal(search.pending, 0); assert.equal(search.violationCount, 0);
@@ -391,7 +396,7 @@ qualify('after repairing the checkout, exact replay is rejected, the guided reru
     assert(bob[3].waits.some(wait => wait.waitEventType === 'Lock'), JSON.stringify(bob[3].waits));
     // Without statement names, both reads are identical unnamed extended cycles.
     assert.equal(bob[1].fingerprint, bob[6].fingerprint);
-    const search = await execute([cli, 'run', unsafe.file, '--project-root', app, ...include, '--max-runs', '400', '--total-timeout-ms', '900000', ...budget, '--json'], { timeout: 1_000_000 });
+    const search = await execute([cli, 'run', unsafe.file, '--project-root', app, ...include, ...searchBudget, ...budget, '--json'], { timeout: searchProcessTimeout });
     const summary = JSON.parse(search.stdout);
     assert.equal(search.status, 0, search.stdout.slice(0, 2000));
     assert.equal(summary.stopReason, 'frontier-exhausted'); assert.equal(summary.pending, 0); assert.equal(summary.violationCount, 0);

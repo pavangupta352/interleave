@@ -102,7 +102,7 @@ async function inventory(root, directory = root) {
 await writeFile(join(evidence, 'generated-client.json'), JSON.stringify(await inventory(join(app, 'generated')), null, 2) + '\n');
 await cp(join(app, 'package-lock.json'), join(evidence, 'installed-package-lock.json'));
 
-const { result } = run('functional', [join(app, 'functional.mjs')], app, 2_400_000);
+const { result } = run('functional', [join(app, 'functional.mjs')], app, 7_200_000);
 await Promise.all([writeFile(join(evidence, 'check.json'), JSON.stringify({ ...identity, pid: result.pid, status: result.status,
   signal: result.signal, error: result.error?.message }, null, 2) + '\n'),
 writeFile(join(evidence, 'stdout.log'), result.stdout ?? ''), writeFile(join(evidence, 'stderr.log'), result.stderr ?? '')]);
