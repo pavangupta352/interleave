@@ -104,7 +104,7 @@ describe('CLI real PostgreSQL integration', () => {
     expect((await execute(['replay', scenario, out])).code).toBe(1);
     const minimized = await execute(['minimize', scenario, out]);
     expect(minimized.code).toBe(1); expect(JSON.parse(minimized.stdout).locallyMinimal).toBe(true);
-  });
+  }, 120_000);
   test('reports minimization attempt and whole-operation budgets', async () => {
     const out = join(await directory(), 'failed run.json');
     const scenario = fixture('counter');
