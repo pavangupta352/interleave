@@ -191,7 +191,7 @@ function describe(result: RunResult | ExplorationResult | MinimizationResult): s
     return `${result.scenario}: ${metrics.attemptedRuns} attempted, ${metrics.completedRuns} completed; violations: ${result.violationCount}; ${result.stopReason}.\n`
       + `Search: ${selector}; pending prefixes: ${result.pending}; maximum attempted depth: ${metrics.maxAttemptedDepth}.\n`
       + `Recorded release units: ${metrics.recordedReleasedSteps}; actor switches: ${metrics.recordedActorSwitches}${metrics.traceCountsComplete ? '' : '; partial evidence (lower bounds)'}.\n`
-      + result.coverage;
+      + result.coverage + incompleteRun(result);
   }
   if ('reducedChoices' in result) {
     const failed = result.attemptFailure;
@@ -228,4 +228,11 @@ function describeTransport(run: RunResult): string {
   if (!upstream) return 'unrecorded (legacy artifact)';
   if (upstream.profile === 'plaintext-v1') return 'plaintext upstream; loopback plaintext actors';
   return `verified TLS (${upstream.minVersion}-${upstream.maxVersion}, ${upstream.trustSource === 'custom-ca' ? 'supplied CA bundle' : "Node's bundled roots"}, hostname checked); loopback plaintext actors`;
+}
+
+
+/** Surface why a run could not be evaluated, such as a scenario that failed to import. */
+function incompleteRun(result: ExplorationResult): string {
+  const run = result.runs.find(item => item.outcome !== 'passed' && item.outcome !== 'violation');
+  return run ? `\nFirst ${run.outcome} run: ${run.reason ?? 'no reason was recorded'}` : '';
 }

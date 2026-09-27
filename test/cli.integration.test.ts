@@ -51,6 +51,11 @@ describe('CLI real PostgreSQL integration', () => {
     expect(result.stdout).toContain('Recorded release units: 0; actor switches: 0');
     expect(result.stdout).not.toContain('partial evidence');
   });
+  test('human search output names why a run could not be evaluated', async () => {
+    const result = await start(['run', fixture('import-error'), '--max-runs', '1'], {}, false).result;
+    expect(result.code).not.toBe(0);
+    expect(result.stdout).toMatch(/First (?:harness-error|inconclusive) run: Scenario loading or worker execution failed/);
+  });
   test('human search output labels incomplete trace counts as lower bounds', async () => {
     const result = await start(['run', fixture('counter'), '--seed', '0', '--max-steps', '1'], {}, false).result;
     expect(result.code, result.stdout + result.stderr).toBe(4);

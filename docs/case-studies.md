@@ -392,8 +392,9 @@ fixed Knex release.
 
 ## Findings about Interleave
 
-These came from the study and are recorded for repair. The study did not change
-Interleave.
+These came from the study. The study itself did not change Interleave; the
+development version after it addresses the first three as noted below. The
+measurements above are unchanged and describe the archive that was measured.
 
 - **Portable export rejects `@types` archives.** The shared-installation export
   requires every package archive's entries to start with `package/`. npm accepts
@@ -403,6 +404,9 @@ Interleave.
   the package nor the lock entry. This blocked the offline regression for
   node-pg-migrate and Sequelize; the separate installation profile, which
   needs npm access to install, worked for both.
+  *Addressed after this study:* shared exports now strip whichever single
+  top-level directory a package archive uses, as npm does, and still reject
+  archives with more than one. The two shared exports have not been re-measured.
 - **A scenario that fails to load gives little guidance.** The first Sequelize
   scenario used a named ESM import from the CommonJS package, which Node.js
   rejects. `interleave run` reported "1 attempted, 0 completed; violations: 0;
@@ -411,6 +415,8 @@ Interleave.
   `--json` output. Interleave withholds the exception text on purpose, because it
   may contain credentials; the human summary could still name the outcome and
   suggest importing the scenario directly with Node.js to see the error.
+  *Addressed after this study:* the human summary now names the first run that
+  could not be evaluated, with its outcome and recorded reason.
 - **Exporting from a checkout packs everything under `examples/`.** A
   recording made with a checkout's CLI exports by packing that checkout. While
   installed `node_modules` directories existed under `examples/historical`,
@@ -418,6 +424,8 @@ Interleave.
   incomplete folder; after removing them, the same export succeeded. The
   package's `files` list includes `examples`, so a local `npm pack` of such a
   checkout would also include those dependencies.
+  *Addressed after this study:* `examples/.npmignore` now excludes installed
+  `node_modules` directories from the package.
 - **Statement overlap is outside the scheduling model.** This is documented
   behavior, not a defect, but the Knex case shows its cost: a fix that is only
   correct when statements do not overlap passes every Interleave schedule of

@@ -14,6 +14,7 @@ export function readRuntimeArchive(compressed: Buffer): Map<string, Buffer> {
   const files = new Map<string, Buffer>();
   const paths = new Set<string>();
   const directories = new Set<string>();
+  let packageRoot: string | undefined;
   let offset = 0, entries = 0;
   let extended: Record<string, string> | undefined;
   const field = (block: Buffer, start: number, length: number) => decodeUtf8(block.subarray(start, start + length), 'Archive header').split('\0')[0]!;
@@ -64,19 +65,28 @@ export function readRuntimeArchive(compressed: Buffer): Map<string, Buffer> {
     const raw = extended?.path ?? `${prefix ? `${prefix}/` : ''}${field(block, 0, 100)}`;
     extended = undefined;
     const path = safeBundlePath(type === '5' ? raw.replace(/\/$/, '') : raw, 'Archive path');
-    if (!path.startsWith('package/') || paths.has(path)) throw new Error('Runtime archive contains an unsafe or duplicate package path');
+    // Like npm, strip one top-level directory: `package/` from npm pack, or the
+    // package's own name in some registry tarballs (for example @types/*).
+    const top = path.split('/')[0]!;
+    packageRoot ??= top;
+    if (top !== packageRoot || paths.has(path)) throw new Error('Runtime archive contains an unsafe or duplicate package path');
     paths.add(path);
+    if (path === packageRoot) {
+      if (type !== '5' || size !== 0) throw new Error('Runtime archive contains an unsafe or duplicate package path');
+      continue;
+    }
+    const strip = packageRoot.length + 1;
     const parts = path.split('/');
     if (parts[1] === 'node_modules') throw new Error('Package-root archive node_modules entries are unsupported bundled dependencies');
     for (let index = 1; index < parts.length; index += 1) {
       const parent = parts.slice(0, index).join('/');
-      if (files.has(parent.slice(8))) throw new Error('Runtime archive file conflicts with a parent directory');
+      if (files.has(parent.slice(strip))) throw new Error('Runtime archive file conflicts with a parent directory');
       directories.add(parent);
     }
     if (type === '5') { if (size !== 0) throw new Error('Runtime archive directory contains payload'); continue; }
     if (directories.has(path)) throw new Error('Runtime archive file conflicts with a directory');
     if (files.size >= MAX_FILES) throw new Error('Runtime archive exceeds its file limit');
-    files.set(path.slice(8), payload);
+    files.set(path.slice(strip), payload);
   }
   throw new Error('Runtime archive is truncated or missing its terminator');
 }

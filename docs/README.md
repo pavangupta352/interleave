@@ -26,6 +26,8 @@ package routes.
 | [neveroversell](../examples/neveroversell/README.md) | Exercise the original unsafe purchase and safe reservation APIs | Native PostgreSQL, node-postgres Pool |
 | [Postgres.js](../examples/postgresjs/README.md) | Parameterized tagged templates and interrupted-client shutdown | `describe-flush-v1`, Postgres.js 3.4.9 |
 | [pghybrid](../examples/pghybrid/README.md) | The pinned library's four public search adapters | PostgreSQL 17, pgvector 0.8.6, stated caller versions |
+| [TypeORM](../examples/typeorm/README.md) | A per-actor DataSource helper, transactions and whole-transaction 40001 retry (TypeORM 1.1.1 and [0.3.31](../examples/typeorm-0.3/README.md)) | Native PostgreSQL, node-postgres 8.23.0, Node.js 22.18 |
+| [Python actors](../examples/python/README.md) | Run programs in another language as actors with `processActor` | Native PostgreSQL, Python 3 with psycopg 3.3.6 |
 | [Historical cases](../examples/historical/README.md) | Knex, node-pg-migrate and Sequelize defects before and after their upstream fixes, with baselines | Native PostgreSQL, node-postgres 8.23.0 through each library |
 
 The counter and neveroversell are constructed race examples. pghybrid is a
