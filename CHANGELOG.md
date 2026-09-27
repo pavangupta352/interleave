@@ -19,7 +19,7 @@
   entries. Replay releases recorded pairs together again, but cannot force the
   same interleaving, so an overlap failure may reproduce only some of the time.
   Reports mark paired commands and state that their row order is not execution
-  order.
+  order. With it, exploration finds the Knex 0.95.12 case-study miss.
 
 ### Changes
 

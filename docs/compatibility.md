@@ -84,7 +84,11 @@ snapshot:
 
 The pause makes those checks deterministic. Real statements overlap for much less
 time, so a real overlap failure can reproduce only some of the time. PostgreSQL
-chooses how a pair interleaves; replay cannot force it.
+chooses how a pair interleaves; replay cannot force it. On the unchanged Knex
+0.95.12 case study, overlap exploration found the duplicate lock row on its seventh
+run and 30 of 30 exact replays repeated it, while 17 of the 46 explored runs that
+paired the two inserts raced; see the
+[case studies](case-studies.md#what-the-fix-left-open).
 
 ## PostgreSQL 17 with pgvector 0.8.6
 

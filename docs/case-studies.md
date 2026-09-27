@@ -54,7 +54,9 @@ What these results show:
   barrier in 20 of 20. The fixed insert is not atomic when two copies run at the
   same time, and neither Interleave's scenario nor the isolation spec ran them at
   the same time. A deliberately added blocker session made the overlap
-  repeatable under both.
+  repeatable under both. Interleave's statement overlap mode, added after this
+  study, finds it without a blocker: its seventh run released both inserts
+  together and produced two lock rows, and 30 of 30 exact replays repeated it.
 - Knex changed this code again two months later. With the unchanged scenario, which starts with both tables present and the lock
   row missing,
   Knex 3.3.0, the latest release at the time of measurement, produced two lock
@@ -244,6 +246,25 @@ blocker committed early and the run passed, and an unseeded exploration of 60
 schedules found no violation. Knowing where to hold the lock was the test
 author's contribution, as it is for the barrier.
 
+*Measured after this study* with the 0.2.0 branch's
+[statement overlap](api.md#statement-overlap) mode (`--overlap pairs`), on
+PostgreSQL 16.15 in Docker Desktop on macOS arm64 with Node.js 24.7.0, on a shared
+host with 1-minute load averages between 7 and 17. It used the unchanged
+`after-fix/scenario.mjs`, with no blocker:
+
+| Knex 0.95.12 | Result |
+| --- | --- |
+| One statement at a time, 100 explored schedules | No violation (164 prefixes still pending) |
+| With `--overlap pairs`, first failure | Seventh run: the plan releases both conditional inserts together after four alternating choices each (`alice,bob,…,alice+bob`); two lock rows |
+| Exact replays of that failure | 30 of 30 repeated it |
+| Continued exploration with overlap | 17 violations in 267 completed runs. Every violation released the two inserts together; 46 runs did, so 17 of 46 (37%) of those pairs raced. The search stopped after 268 runs, when one run was inconclusive because a file in the Interleave checkout changed during its source capture |
+| Knex 0.95.11, with overlap | Violation, as without overlap |
+
+PostgreSQL decides how a released pair interleaves, so these rates describe this
+host and server; they are not guarantees. The recorded schedule replayed
+reliably here, while other schedules that paired the same inserts raced less
+often.
+
 Knex changed this insert again in [knex/knex#4865](https://github.com/knex/knex/pull/4865),
 released in 0.95.15, because the `SELECT` without `FROM` failed on Oracle and
 MariaDB. That version reads the lock table a second time and inserts only if
@@ -431,6 +452,9 @@ measurements above are unchanged and describe the archive that was measured.
   behavior, not a defect, but the Knex case shows its cost: a fix that is only
   correct when statements do not overlap passes every Interleave schedule of
   the application's own commands.
+  *Addressed after this study:* `--overlap pairs` releases two commands
+  together; with it, exploration found the Knex 0.95.12 failure on its seventh
+  run (see [what the fix left open](#what-the-fix-left-open)).
 
 ## Harness and scenario problems during the study
 

@@ -151,8 +151,9 @@ isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize
 - Interleave releases one command at a time unless PostgreSQL reports a lock
   wait, or you enable `--overlap pairs`. Without it, races that need two
   statements executing at the same instant are missed; the case studies include
-  one such miss. With it, PostgreSQL chooses how a released pair interleaves, so
-  replaying such a failure can succeed only some of the time.
+  one such miss, which `--overlap pairs` finds. With it, PostgreSQL chooses how a
+  released pair interleaves, so replaying such a failure can succeed only some of
+  the time.
 - By default each actor holds one command-producing connection at a time; the
   `multi-producer-v1` profile schedules several. COPY, pipelining and cancel
   requests are not supported and fail explicitly.

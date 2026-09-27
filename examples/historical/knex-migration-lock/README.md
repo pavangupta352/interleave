@@ -83,8 +83,23 @@ isolation tester has the same limit. Ordinary concurrency and the manual
 barrier do run them at the same time, and both still produced two lock rows
 with 0.95.12.
 
+With statement overlap (`--overlap pairs`), Interleave can release both inserts
+together and let PostgreSQL run them at once, with the unchanged scenario:
+
+```sh
+node dist/cli.js run $case/after-fix/scenario.mjs --overlap pairs --timeout-ms 30000 \
+  --out knex-overlap.interleave.json
+node dist/cli.js replay $case/after-fix/scenario.mjs knex-overlap.interleave.json --timeout-ms 30000
+```
+
+In the measurement recorded in the [case studies](../../../docs/case-studies.md#what-the-fix-left-open),
+the seventh run released both inserts together and produced two lock rows, and 30
+of 30 exact replays repeated it. PostgreSQL decides how the pair interleaves, so
+the run on which it fails, and how often a replay repeats it, can differ on
+another host.
+
 [`after-fix/overlap-scenario.mjs`](after-fix/overlap-scenario.mjs) makes that
-overlap repeatable. It adds a third actor that is test scaffolding, not Knex
+overlap repeatable without the overlap mode. It adds a third actor that is test scaffolding, not Knex
 code: inside a transaction it runs `ALTER SEQUENCE` on the lock table's sequence,
 so each conditional insert waits at `nextval()` after its `NOT EXISTS` check.
 Release both inserts while the blocker holds the lock:
