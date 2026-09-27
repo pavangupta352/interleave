@@ -27,7 +27,7 @@ an arbitrary driver, application schema or external service.
 | Symptom | Check | Next action |
 | --- | --- | --- |
 | `interleave` is not found | Are you in a built checkout or an installed application? | Use `node dist/cli.js` in the former, `npx --no-install interleave` in the latter. Follow [installation](getting-started.md) if the executable is absent. |
-| npm cannot find the package, or installs something unrelated | Check the exact name: `@pavangupta352/interleave` is scoped | The unscoped `interleave` package is unrelated. You can also install the archive from a [GitHub release](getting-started.md#install-a-release) after checking `SHA256SUMS`, or [build from source](getting-started.md#install-a-source-build-into-an-application). | |
+| npm cannot find the package, or installs something unrelated | Check the exact name: `@pavangupta352/interleave` is scoped | The unscoped `interleave` package is unrelated. You can also install the archive from a [GitHub release](getting-started.md#install-a-release) after checking `SHA256SUMS`, or [build from source](getting-started.md#install-a-source-build-into-an-application). |
 | No database URL is selected | Was `--docker` omitted? | Use `--docker`, or supply a dedicated administrator URL. The CLI never chooses an existing local database implicitly. |
 | `--docker` conflicts with a URL | Check `TEST_DATABASE_URL` and `--database-url` | Keep the URL route and remove `--docker`, or unset the variable and remove the URL flag before using Docker. |
 | Docker cannot start or be reached | Check that the engine is running and your user can access it | Start/fix the engine, or use the dedicated-server route. The first image download can take time. |

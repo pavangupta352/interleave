@@ -6,7 +6,8 @@ same counter value and overwrite each other's increment. The example is small
 so that the application boundary is visible; it is not a historical defect.
 
 Start with the separate application created by
-[the local-package installation route](getting-started.md#install-a-source-build-into-an-application).
+[installing a release](getting-started.md#install-a-release) or
+[a source build](getting-started.md#install-a-source-build-into-an-application).
 Run the following commands from `interleave-race`, where Interleave and
 `pg@8.23.0` are installed and `package-lock.json` exists. Keep the same Node
 version and installed dependencies for record, replay and reduction.

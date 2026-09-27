@@ -8,7 +8,7 @@
 
 **Tech stack:** Existing Node.js 22.18+/24 TypeScript, Docker CLI, pg 8.23.0, Vitest and actual PostgreSQL. No production dependency is added.
 
-**Spec:** This document defines the complete bounded subsystem under the broader `.local/expansion/BRIEF.md`. The existing `docs/architecture/specification.md` remains authoritative for execution and evidence.
+**Spec:** This document defines the complete bounded subsystem within the broader expansion plan. The existing `docs/architecture/specification.md` remains authoritative for execution and evidence.
 
 ## User-visible contract
 
