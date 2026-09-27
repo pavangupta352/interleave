@@ -1,0 +1,9 @@
+{
+  "name": "interleave-prisma-generator",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned Prisma CLI and TypeScript used to generate and type-check the example. Kept out of the application's installed dependency graph.",
+  "type": "module",
+  "engines": { "node": "^22.18.0 || >=24.0.0" },
+  "devDependencies": { "prisma": "7.10.0", "typescript": "5.9.3" }
+}

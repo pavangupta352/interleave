@@ -1,0 +1,35 @@
+// Prisma 7 generates this client into the application source tree. Node.js
+// 22.18+ and 24 load the generated TypeScript directly, so the generated files
+// are part of the scenario's recorded source identity.
+generator client {
+  provider               = "prisma-client"
+  output                 = "../generated/prisma"
+  runtime                = "nodejs"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Product {
+  id     Int     @id
+  name   String
+  stock  Int
+  orders Order[]
+
+  @@map("products")
+}
+
+model Order {
+  id        Int     @id @default(autoincrement())
+  productId Int     @map("product_id")
+  buyer     String
+  quantity  Int
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@unique([productId, buyer])
+  @@map("orders")
+}
