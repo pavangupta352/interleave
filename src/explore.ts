@@ -3,10 +3,13 @@ import { frontierIndex, normalizeExplorationSearch } from './exploration-search.
 import { runTarget } from './run-target.js';
 import { defineScenario } from './scenario.js';
 import { integerLimit, searchBudget } from './search-budget.js';
-import { multiLaneActors, planChoice, planFromTrace, resolveConnectionProfile, validatePlanEntries } from './lanes.js';
+import {
+  decisionChoices, decisionsFromTrace, MAX_PLAN_CHOICE_LENGTH, multiLaneActors, recordedConnectionProfile, resolveConnectionProfile,
+  resolveOverlap, validatePlanEntries,
+} from './lanes.js';
 import type { Scenario, ExploreOptions, ExplorationResult } from './types.js';
 
-/** Explore observed actor-choice prefixes; a bounded search is not a safety proof. */
+/** Explore observed choice prefixes; a bounded search is not a safety proof. */
 export async function explore(input: Scenario | string, options: ExploreOptions): Promise<ExplorationResult> {
   const search = normalizeExplorationSearch(options);
   const scenario = typeof input === 'string' ? input : defineScenario(input);
@@ -14,8 +17,9 @@ export async function explore(input: Scenario | string, options: ExploreOptions)
   const maxCandidates = integerLimit(options.maxCandidates, 10_000, 100_000, 'maxCandidates');
   const maxSearchBytes = integerLimit(options.maxSearchBytes, 64 * 1024 * 1024, 256 * 1024 * 1024, 'maxSearchBytes', 1024);
   if (options.replay || (options.mode && options.mode !== 'explore')) throw new TypeError('Exploration cannot use replay or guided mode');
-  if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000 || options.plan.some(actor => typeof actor !== 'string' || actor.length > 58))) throw new TypeError('Invalid initial schedule');
-  validatePlanEntries(options.plan, resolveConnectionProfile(options.connectionProfile));
+  if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000 || options.plan.some(actor => typeof actor !== 'string' || actor.length > MAX_PLAN_CHOICE_LENGTH))) throw new TypeError('Invalid initial schedule');
+  const overlap = resolveOverlap(options.overlap);
+  validatePlanEntries(options.plan, resolveConnectionProfile(options.connectionProfile), undefined, overlap);
   // Search configuration belongs to this process, never to a runner or worker.
   const { strategy: _strategy, seed: _seed, maxRuns: _maxRuns, maxCandidates: _maxCandidates,
     maxSearchBytes: _maxSearchBytes, totalTimeoutMs: _totalTimeoutMs, stopOnFailure: _stopOnFailure,
@@ -80,16 +84,17 @@ export async function explore(input: Scenario | string, options: ExploreOptions)
       if (run.outcome === 'violation' && options.stopOnFailure !== false) { result.stopReason = 'failure'; break; }
       if (['inconclusive', 'harness-error', 'actor-error'].includes(run.outcome)) { result.stopReason = 'inconclusive'; break; }
       // Multi-producer choices name lanes only for actors that used several connections.
-      const choices = planFromTrace(run);
-      const multi = multiLaneActors(run.trace);
+      // Branch on decisions: an overlapped pair is one choice covering two steps.
+      const decisions = decisionsFromTrace(run);
+      const choices = decisions.map(decision => decision.choice);
+      const multi = recordedConnectionProfile(run) === 'multi-producer-v1' ? multiLaneActors(run.trace) : new Set<string>();
       const prefixBytes = [1];
-      for (const actor of choices) prefixBytes.push(prefixBytes.at(-1)! + Buffer.byteLength(JSON.stringify(actor)) + 1);
+      for (const choice of choices) prefixBytes.push(prefixBytes.at(-1)! + Buffer.byteLength(JSON.stringify(choice)) + 1);
       // Latest deviations first; the loop checks elapsed time even without an await.
-      for (let index = run.trace.length - 1; index >= 0; index--) {
+      for (let index = decisions.length - 1; index >= 0; index--) {
         const stopped = budget.reason();
         if (stopped) { result.stopReason = stopped; break search; }
-        for (const available of run.trace[index]!.available) {
-          const alternative = planChoice(available, multi);
+        for (const alternative of decisionChoices(decisions[index]!.available, multi, overlap)) {
           if (alternative === choices[index]) continue;
           const keyBytes = prefixBytes[index]! + Buffer.byteLength(JSON.stringify(alternative)) + 1;
           const key = JSON.stringify([...choices.slice(0, index), alternative]);

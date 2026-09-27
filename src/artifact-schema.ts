@@ -101,9 +101,17 @@ export function parseRunArtifact(input: unknown): RunResult {
       '$.limits.protocolProfile', ['sync-cycle-v1', 'describe-flush-v1'])
     : version === 2 ? 'describe-flush-v1' : 'sync-cycle-v1';
   const traceVersion = protocolProfile === 'describe-flush-v1' ? 2 : 1;
-  // Schema 4 is the multi-producer connection profile: plans and available
-  // choices may name lanes, and lanes of one actor may block each other.
-  const lanes = version === 4;
+  // Schema 4 records the connection profile and overlap mode. Multi-producer plans
+  // and available choices name lanes, and lanes of one actor may block each other.
+  // Overlap plans may name pairs, and paired steps record their shared release.
+  const limitsRecord = plainRecord(field(root, 'limits', '$'), '$.limits');
+  const lanes = version === 4 && enumValue(field(limitsRecord, 'connectionProfile', '$.limits'), '$.limits.connectionProfile',
+    ['single-producer-v1', 'multi-producer-v1']) === 'multi-producer-v1';
+  const overlap = version === 4 && hasOwn(limitsRecord, 'overlap')
+    && enumValue(limitsRecord.overlap, '$.limits.overlap', ['pairs']) === 'pairs';
+  if (version === 4 && !lanes && !overlap) {
+    throw new TypeError('$.limits.overlap: a version 4 single-producer record requires overlap pairs; use version 3');
+  }
   const scenario = field(root, 'scenario', '$');
   assertScenarioName(scenario, '$.scenario');
   const outcome = enumValue(field(root, 'outcome', '$'), '$.outcome', [
@@ -113,16 +121,23 @@ export function parseRunArtifact(input: unknown): RunResult {
   const durationMs = finiteNumber(field(root, 'durationMs', '$'), '$.durationMs', 0);
 
   const plan = arrayValue(field(root, 'plan', '$'), '$.plan', MAX_ARRAY_ITEMS);
-  const planActors: string[] = [];
+  const planActors: { index: number; actor: string }[] = [];
   const planLanes: { index: number; key: string }[] = [];
   const allActorNames = new Set<string>();
   for (let index = 0; index < plan.length; index += 1) {
     const path = `$.plan[${index}]`;
-    const lane = lanes ? laneValue(plan[index], path, true) : undefined;
-    const actor = lane?.actor ?? actorId(plan[index], path);
-    if (lane?.connection !== undefined) planLanes.push({ index, key: `${actor}\0${lane.connection}` });
-    planActors.push(actor);
-    allActorNames.add(actor);
+    const parts = overlap ? boundedString(plan[index], path, 1, 117).split('+') : [plan[index]];
+    if (parts.length > 2) throw new TypeError(`${path}: a pair names exactly two entries`);
+    const entries = parts.map((part): { actor: string; connection?: number } => lanes ? laneValue(part, path, true) : { actor: actorId(part, path) });
+    if (entries.length === 2 && entries[0]!.actor === entries[1]!.actor
+      && (!lanes || (entries[0]!.connection !== undefined && entries[0]!.connection === entries[1]!.connection))) {
+      throw new TypeError(`${path}: a pair must name two different ${lanes ? 'lanes' : 'actors'}`);
+    }
+    for (const entry of entries) {
+      if (entry.connection !== undefined) planLanes.push({ index, key: `${entry.actor}\0${entry.connection}` });
+      planActors.push({ index, actor: entry.actor });
+      allActorNames.add(entry.actor);
+    }
   }
 
   let connections: ConnectionIdentity[] | undefined;
@@ -162,7 +177,7 @@ export function parseRunArtifact(input: unknown): RunResult {
   const ordinalByConnection = new Map<string, number>();
   const trace: TraceStep[] = [];
   for (let index = 0; index < traceValues.length; index += 1) {
-    const step = validateTraceStep(traceValues[index], index, traceVersion, lanes);
+    const step = validateTraceStep(traceValues[index], index, traceVersion, lanes, overlap);
     if (connections !== undefined && !connectionKeys.has(`${step.actor}\0${step.connection}`)) {
       throw new TypeError(`$.trace[${index}]: command references an unrecorded actor startup`);
     }
@@ -187,6 +202,7 @@ export function parseRunArtifact(input: unknown): RunResult {
     for (const availableActor of step.available) allActorNames.add(lanes ? laneValue(availableActor, '$', false).actor : availableActor);
   }
 
+  if (overlap) validateOverlapPairs(trace, lanes);
   for (let index = 0; index < trace.length; index += 1) {
     const step = trace[index]!;
     if (index > 0 && step.releasedAt < trace[index - 1]!.releasedAt) {
@@ -257,8 +273,8 @@ export function parseRunArtifact(input: unknown): RunResult {
     throw new TypeError('$.actors: completed executions require at least two actor results');
   }
   if (requiresCompleteActors) {
-    for (let index = 0; index < planActors.length; index += 1) {
-      if (!actorNames.has(planActors[index]!)) {
+    for (const { index, actor } of planActors) {
+      if (!actorNames.has(actor)) {
         throw new TypeError(`$.plan[${index}]: actor is absent from recorded actor results`);
       }
     }
@@ -325,17 +341,16 @@ export function parseRunArtifact(input: unknown): RunResult {
   validateTimestamp(field(root, 'startedAt', '$'), '$.startedAt');
 
   const limits = shape(
-    field(root, 'limits', '$'),
+    limitsRecord,
     '$.limits',
     ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor', ...(version !== 1 ? ['protocolProfile'] : []),
-      ...(lanes ? ['connectionProfile'] : [])],
+      ...(version === 4 ? ['connectionProfile', 'overlap'] : [])],
     ['maxSteps', 'timeoutMs', ...(version !== 1 ? ['protocolProfile'] : []),
-      ...(lanes ? ['maxConnectionsPerActor', 'connectionProfile'] : [])],
+      ...(version === 4 ? ['maxConnectionsPerActor', 'connectionProfile'] : [])],
   );
   if (version === 2 && limits.protocolProfile !== 'describe-flush-v1') {
     throw new TypeError('$.limits.protocolProfile: version 2 requires describe-flush-v1');
   }
-  if (lanes) enumValue(limits.connectionProfile, '$.limits.connectionProfile', ['multi-producer-v1']);
   safeInteger(limits.maxSteps, '$.limits.maxSteps', 1);
   safeInteger(limits.timeoutMs, '$.limits.timeoutMs', 1);
   if (hasOwn(limits, 'maxConnectionsPerActor') && safeInteger(limits.maxConnectionsPerActor, '$.limits.maxConnectionsPerActor', 1) > 8) {
@@ -392,12 +407,33 @@ function validateTransportIdentity(value: unknown, path: string): void {
   fingerprintValue(upstream.referenceFingerprint, `${upstreamPath}.referenceFingerprint`);
 }
 
-function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes: boolean): TraceStep {
+/** Paired steps are adjacent, name the first's index, share one decision and use two lanes. */
+function validateOverlapPairs(trace: TraceStep[], lanes: boolean): void {
+  for (let index = 0; index < trace.length; index += 1) {
+    const first = trace[index]!;
+    if (first.overlap === undefined) continue;
+    const path = `$.trace[${index}].overlap`;
+    if (first.overlap !== index) throw new TypeError(`${path}: a pair is named by the index of its first step`);
+    const second = trace[index + 1];
+    if (second?.overlap !== index) throw new TypeError(`${path}: a pair requires a second step with the same overlap index`);
+    if (second.actor === first.actor && (!lanes || second.connection === first.connection)) {
+      throw new TypeError(`${path}: a pair must release two different ${lanes ? 'lanes' : 'actors'}`);
+    }
+    if (second.releasedAt !== first.releasedAt) throw new TypeError(`$.trace[${index + 1}].releasedAt: paired steps are released together`);
+    if (second.available.length !== first.available.length || second.available.some((entry, item) => entry !== first.available[item])) {
+      throw new TypeError(`$.trace[${index + 1}].available: paired steps share one scheduling decision`);
+    }
+    index += 1;
+  }
+}
+
+function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes: boolean, overlap: boolean): TraceStep {
   const path = `$.trace[${index}]`;
   const step = shape(value, path, [
     'index', 'actor', 'connection', 'ordinal', 'protocol', 'sql', 'fingerprint',
     'backendPid', 'available', 'releasedAt', 'completedAt', 'completion', 'waits',
     ...(version === 2 ? ['stage', 'cycle', 'prefixOrdinal'] : []),
+    ...(overlap ? ['overlap'] : []),
   ], [
     'index', 'actor', 'connection', 'ordinal', 'protocol', 'sql', 'fingerprint',
     'backendPid', 'available', 'releasedAt', 'waits',
@@ -469,6 +505,7 @@ function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes:
     `${path}.waits[${waitIndex}]`,
     backendPid,
   ));
+  const pair = hasOwn(step, 'overlap') ? safeInteger(step.overlap, `${path}.overlap`, 0) : undefined;
 
   return {
     index: stepIndex,
@@ -486,6 +523,7 @@ function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes:
     ...(completedAt === undefined ? {} : { completedAt }),
     ...(completion === undefined ? {} : { completion }),
     waits,
+    ...(pair === undefined ? {} : { overlap: pair }),
   };
 }
 

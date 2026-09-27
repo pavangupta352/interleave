@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { normalizeExplorationSearch } from '../exploration-search.js';
-import { parsePlanEntry } from '../lanes.js';
+import { parsePlanChoice } from '../lanes.js';
 
 const definitions = {
   help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
@@ -15,6 +15,7 @@ const definitions = {
   'max-connections-per-actor': { type: 'string' },
   'connection-profile': { type: 'string' },
   'protocol-profile': { type: 'string' },
+  overlap: { type: 'string' },
   'fixture-profile': { type: 'string' },
   'max-runs': { type: 'string' }, 'total-timeout-ms': { type: 'string' },
   strategy: { type: 'string' }, seed: { type: 'string' },
@@ -25,7 +26,7 @@ export const POSTGRES_IMAGES = ['postgres:16', 'postgres:17', 'postgres:18', 'pg
 const searchFlags = ['max-runs', 'total-timeout-ms', 'max-candidates', 'max-search-bytes', 'keep-going', 'plan', 'strategy', 'seed'];
 const sourceFlags = ['project-root', 'include'];
 const allowed: Record<string, string[]> = {
-  init: [], run: [...runFlags, ...searchFlags, ...sourceFlags],
+  init: [], run: [...runFlags, ...searchFlags, ...sourceFlags, 'overlap'],
   replay: [...runFlags, 'guided', ...sourceFlags], minimize: [...runFlags, 'max-attempts', 'total-timeout-ms', ...sourceFlags],
   doctor: [...runFlags], demo: [...runFlags, 'safe'], report: ['out', 'force'],
   export: ['out', 'project-root', 'include', 'runtime-archive', 'dependency-archive'],
@@ -66,6 +67,7 @@ export function parseCliArgs(args: string[]) {
   if (parsed.values['connection-profile'] !== undefined && !['single-producer-v1', 'multi-producer-v1'].includes(parsed.values['connection-profile'])) {
     throw new TypeError('--connection-profile must be single-producer-v1 or multi-producer-v1');
   }
+  if (parsed.values.overlap !== undefined && parsed.values.overlap !== 'pairs') throw new TypeError('--overlap must be pairs');
   if (parsed.values['fixture-profile'] !== undefined && !['native', 'postgresql17-pgvector0.8.6-v1'].includes(parsed.values['fixture-profile'])) {
     throw new TypeError('--fixture-profile must be native or postgresql17-pgvector0.8.6-v1');
   }
@@ -80,9 +82,13 @@ export function parseCliArgs(args: string[]) {
     ...(parsed.values.seed === undefined ? {} : { seed: Number(parsed.values.seed) }),
   });
   const plan = parsed.values.plan?.split(',');
-  if (plan && (plan.length > 100_000 || plan.some(entry => parsePlanEntry(entry) === undefined))) throw new TypeError('--plan must be comma-separated actor names');
-  if (plan?.some(entry => parsePlanEntry(entry)!.connection !== undefined) && parsed.values['connection-profile'] !== 'multi-producer-v1') {
+  if (plan && (plan.length > 100_000 || plan.some(entry => parsePlanChoice(entry) === undefined))) throw new TypeError('--plan must be comma-separated actor names');
+  const choices = plan?.map(entry => parsePlanChoice(entry)!) ?? [];
+  if (choices.some(choice => choice.some(item => item.connection !== undefined)) && parsed.values['connection-profile'] !== 'multi-producer-v1') {
     throw new TypeError('--plan lanes such as alice#1 require --connection-profile multi-producer-v1');
+  }
+  if (choices.some(choice => choice.length > 1) && parsed.values.overlap !== 'pairs') {
+    throw new TypeError('--plan pairs such as alice+bob require --overlap pairs');
   }
   return { command, values: parsed.values, positionals: parsed.positionals.slice(1), plan };
 }
@@ -116,6 +122,9 @@ Per run: --max-steps <n>, --timeout-ms <n>, --max-evidence-bytes <n>
 Connections: --max-connections-per-actor <1..8>; extra sessions must remain queryless
              --connection-profile multi-producer-v1 schedules every actor connection as
              its own lane (default cap 8); --plan may then name lanes such as alice#1
+Overlap: --overlap pairs (run) also explores releasing two actors' next commands
+         together, so statements can race inside PostgreSQL; --plan may then name
+         pairs such as alice+bob. Off by default.
 Protocol: --protocol-profile <sync-cycle-v1|describe-flush-v1>; default sync-cycle-v1
 Fixture: --fixture-profile <native|postgresql17-pgvector0.8.6-v1>; default native
 Search: --max-runs <n>, --total-timeout-ms <n>, --max-candidates <n>,

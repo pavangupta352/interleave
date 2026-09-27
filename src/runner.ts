@@ -15,8 +15,8 @@ import { resolveProtocolProfile } from './protocol-profile.js';
 import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile.js';
 import { missingReplayIdentity } from './replay-readiness.js';
 import {
-  defaultConnectionLimit, fairLane, LaneBinder, laneLabel, parsePlanEntry, recordedConnectionProfile, resolveConnectionProfile,
-  resolvePlanEntry, validatePlanEntries, type Lane, type LiveLane, type PlanResolution,
+  defaultConnectionLimit, fairLane, LaneBinder, laneLabel, parsePlanChoice, recordedConnectionProfile, resolveConnectionProfile,
+  resolveOverlap, resolvePlanEntry, validatePlanEntries, type Lane, type LiveLane,
 } from './lanes.js';
 import type { ActorProxy, ActorResult, DatabaseContext, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
 
@@ -54,8 +54,8 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   if (maxEvidenceBytes < 1024) throw new TypeError('maxEvidenceBytes must be at least 1024');
   if (!options.databaseUrl) throw new TypeError('databaseUrl must explicitly name a dedicated test PostgreSQL administrator connection');
   const names = Object.keys(scenario.actors).sort();
-  // Lane grammar is checked here; its profile requirement once the profile is known.
-  validatePlanEntries(options.plan, 'multi-producer-v1', names);
+  // Lane and pair grammar is checked here; profile requirements once they are known.
+  validatePlanEntries(options.plan, 'multi-producer-v1', names, 'pairs');
   if (Buffer.byteLength(JSON.stringify(options.plan ?? [])) > maxEvidenceBytes / 2) throw new TypeError('Initial schedule exceeds the evidence byte limit');
   const mode = options.mode ?? (options.replay ? 'replay' : 'explore');
   if (mode === 'replay' && !options.replay) throw new TypeError('replay mode requires a recorded run');
@@ -68,7 +68,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const recordedConnections = options.replay ? recordedConnectionProfile(options.replay) : 'single-producer-v1';
   const connectionProfile = resolveConnectionProfile(options.connectionProfile, mode === 'replay' ? recordedConnections : undefined);
   const multi = connectionProfile === 'multi-producer-v1';
-  validatePlanEntries(options.plan, connectionProfile, names);
+  const recordedOverlap = options.replay?.limits.overlap;
+  const overlap = resolveOverlap(options.overlap, mode === 'replay' ? recordedOverlap : undefined);
+  validatePlanEntries(options.plan, connectionProfile, names, overlap);
   if (options.maxConnectionsPerActor !== undefined && !Number.isSafeInteger(options.maxConnectionsPerActor)) {
     throw new TypeError('maxConnectionsPerActor must be an integer from 1 to 8');
   }
@@ -82,11 +84,12 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const started = performance.now();
   const controller = new AbortController();
   const result: RunResult = {
-    schemaVersion: multi ? 4 : 3, scenario: scenario.name, outcome: 'harness-error', mode,
+    schemaVersion: multi || overlap ? 4 : 3, scenario: scenario.name, outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
     environment: { serverVersion: 'unknown', nodeVersion: process.version, ...(source ? { source } : {}), transport: runTransportIdentity(transport) },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, ...(multi ? { connectionProfile } : {}) },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile,
+      ...(multi || overlap ? { connectionProfile } : {}), ...(overlap ? { overlap } : {}) },
     cleanup: { complete: false },
   };
   let database: OwnedDatabase | undefined = providedDatabase;
@@ -118,6 +121,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const lastConnection = new Map<string, number>();
   let laneWait: string | undefined;
   let runtimeEpoch = 0;
+  // Plan entries are decisions; an overlapped pair is one decision and two steps.
+  let decisions = 0;
+  let overlapped = false;
   let evidenceBytes = Buffer.byteLength(JSON.stringify(result)) + 256;
   assertEvidenceEnvelope(result, maxEvidenceBytes);
 
@@ -166,6 +172,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     }
     if (mode === 'replay' && protocolProfile !== recordedProtocol) throw new Interrupted('incompatible', 'Replay protocol profile differs from the recorded run');
     if (mode === 'replay' && connectionProfile !== recordedConnections) throw new Interrupted('incompatible', 'Replay connection profile differs from the recorded run');
+    if (mode === 'replay' && overlap !== recordedOverlap) throw new Interrupted('incompatible', 'Replay overlap mode differs from the recorded run');
     if (expectedEnvironment?.fixture && fixtureProfile !== recordedFixtureProfile(expectedEnvironment.fixture)) {
       throw new Interrupted('incompatible', 'Replay fixture profile differs from the recorded run');
     }
@@ -314,75 +321,101 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       const availableLanes = current.filter(lane => lane.head !== undefined && !lane.running);
       if (!availableLanes.length) { await pause(); continue; }
       if (result.trace.length >= maxSteps) throw new Interrupted('inconclusive', `Execution reached its ${maxSteps}-step limit`);
-      const expected = mode === 'replay' ? options.replay!.trace[result.trace.length] : undefined;
-      if (mode === 'replay' && !expected) throw new Interrupted('incompatible', 'Application emitted more queries than the replay contains');
-      let chosen: Lane;
+      const first = mode === 'replay' ? options.replay!.trace[result.trace.length] : undefined;
+      if (mode === 'replay' && !first) throw new Interrupted('incompatible', 'Application emitted more queries than the replay contains');
+      // A recorded pair is released together again; PostgreSQL still chooses how it interleaves.
+      const expectedGroup = first === undefined ? undefined
+        : first.overlap === first.index ? [first, options.replay!.trace[first.index + 1]!] : [first];
+      const entry = mode === 'replay' ? undefined : options.plan?.[decisions];
+      const choice = entry === undefined ? undefined : parsePlanChoice(entry)!;
+      const chosen: Lane[] = [];
       let available: string[];
       if (!multi) {
         available = names.filter(actor => availableLanes.some(lane => lane.actor === actor));
-        const requested = expected?.actor ?? options.plan?.[result.trace.length];
-        if (requested && !available.includes(requested)) {
-          throw new Interrupted('incompatible', `Schedule asks for ${requested}, which cannot issue its next query at step ${result.trace.length}`);
+        const requested = expectedGroup?.map(step => step.actor) ?? choice?.map(item => item.actor);
+        for (const actor of requested ?? []) {
+          if (!available.includes(actor)) throw new Interrupted('incompatible', `Schedule asks for ${actor}, which cannot issue its next query at step ${result.trace.length}`);
+          chosen.push(availableLanes.find(lane => lane.actor === actor)!);
         }
-        chosen = requested === undefined ? fairLane(names, availableLanes, lastActor, lastConnection) : availableLanes.find(lane => lane.actor === requested)!;
+        if (!requested) chosen.push(fairLane(names, availableLanes, lastActor, lastConnection));
       } else {
         available = availableLanes.map(lane => laneLabel(lane.actor, lane.connection));
-        const entry = options.plan?.[result.trace.length];
-        const choice = entry === undefined ? undefined : parsePlanEntry(entry)!;
-        const resolution: PlanResolution = expected
-          ? binder!.resolve(expected, current, settled.has(expected.actor), result.trace.length)
-          : choice ? resolvePlanEntry(choice, current, settled.has(choice.actor), lastConnection, result.trace.length)
-            : { kind: 'release', lane: fairLane(names, availableLanes, lastActor, lastConnection) };
-        if (resolution.kind === 'incompatible') throw new Interrupted('incompatible', resolution.reason);
-        // Waiting is bounded by the run deadline and never becomes a pass.
-        if (resolution.kind === 'wait') { laneWait = resolution.reason; await pause(); continue; }
-        chosen = resolution.lane;
+        const members = expectedGroup ?? choice;
+        if (!members) chosen.push(fairLane(names, availableLanes, lastActor, lastConnection));
+        // Resolve members in order; a later member cannot take a lane chosen earlier.
+        const view = current.map(lane => ({ ...lane }));
+        for (const [index, member] of (members ?? []).entries()) {
+          const resolution = expectedGroup
+            ? binder!.resolve(expectedGroup[index]!, view, settled.has(member.actor), result.trace.length + index)
+            : resolvePlanEntry(member, view, settled.has(member.actor), lastConnection, result.trace.length + index);
+          if (resolution.kind === 'incompatible') throw new Interrupted('incompatible', resolution.reason);
+          // Waiting is bounded by the run deadline and never becomes a pass.
+          if (resolution.kind === 'wait') { laneWait = resolution.reason; await pause(); continue executionLoop; }
+          chosen.push(resolution.lane);
+          view.find(lane => lane.actor === resolution.lane.actor && lane.connection === resolution.lane.connection)!.running = true;
+        }
       }
       laneWait = undefined;
-      const lane = lanes.get(laneLabel(chosen.actor, chosen.connection))!;
-      const actor = lane.actor;
-      const unit = lane.queue.shift()!;
-      if (Buffer.byteLength(unit.sql) > ARTIFACT_LIMITS.maxSqlBytes) throw new Interrupted('inconclusive', 'SQL exceeds the supported evidence byte limit');
-      if (expected && !multi && (expected.actor !== unit.actor || expected.connection !== unit.connection || expected.ordinal !== unit.ordinal || expected.protocol !== unit.protocol || expected.sql !== unit.sql || expected.fingerprint !== unit.fingerprint)) {
-        throw new Interrupted('incompatible', `Replay query or actor startup identity changed for ${actor} at step ${result.trace.length}`);
-      }
-      const stage = unit.stage ?? 'complete';
-      const cycle = unit.cycle ?? unit.ordinal;
-      if (expected && ((expected.stage ?? 'complete') !== stage || (expected.cycle ?? expected.ordinal) !== cycle || expected.prefixOrdinal !== unit.prefixOrdinal)) {
-        throw new Interrupted('incompatible', `Replay protocol stage changed for ${actor} at step ${result.trace.length}`);
-      }
-      // The binder released only a head identical to the recorded step; the
-      // binding is final for the rest of this execution.
-      if (expected && binder) binder.bind(actor, expected.connection, unit.connection);
-      const step: TraceStep = {
-        index: result.trace.length, actor, connection: unit.connection, ordinal: unit.ordinal,
-        protocol: unit.protocol, sql: unit.sql, fingerprint: unit.fingerprint, backendPid: unit.backendPid,
-        available, releasedAt: performance.now() - started, waits: [],
-        ...(protocolProfile === 'describe-flush-v1' ? { stage, cycle,
-          ...(unit.prefixOrdinal === undefined ? {} : { prefixOrdinal: unit.prefixOrdinal }) } : {}),
-      };
-      if (!retain(step)) { check(); }
-      result.trace.push(step);
-      lastActor = actor;
-      lastConnection.set(actor, unit.connection);
-      const state = { step, blocked: false };
-      lane.running = state;
-      runtimeEpoch++;
-      unit.release().then(completion => {
-        if (retain(completion)) {
-          step.completedAt = performance.now() - started;
-          step.completion = protocolProfile === 'describe-flush-v1' && completion.kind !== 'metadata'
-            ? { ...completion, kind: 'ready' } : completion;
+      if (result.trace.length + chosen.length > maxSteps) throw new Interrupted('inconclusive', `Execution reached its ${maxSteps}-step limit`);
+      const releasedAt = performance.now() - started;
+      const group: { lane: LaneState; unit: PendingUnit; step: TraceStep }[] = [];
+      for (const [index, selected] of chosen.entries()) {
+        const lane = lanes.get(laneLabel(selected.actor, selected.connection))!;
+        const actor = lane.actor;
+        const unit = lane.queue.shift()!;
+        const position = result.trace.length + index;
+        const expected = expectedGroup?.[index];
+        if (Buffer.byteLength(unit.sql) > ARTIFACT_LIMITS.maxSqlBytes) throw new Interrupted('inconclusive', 'SQL exceeds the supported evidence byte limit');
+        if (expected && !multi && (expected.actor !== unit.actor || expected.connection !== unit.connection || expected.ordinal !== unit.ordinal || expected.protocol !== unit.protocol || expected.sql !== unit.sql || expected.fingerprint !== unit.fingerprint)) {
+          throw new Interrupted('incompatible', `Replay query or actor startup identity changed for ${actor} at step ${position}`);
         }
-        delete lane.running;
-        runtimeEpoch++;
-        wake();
-      }, error => {
-        delete lane.running;
-        runtimeEpoch++;
-        if (!finished) stop('inconclusive', `${describeLane(lane)} query did not complete: ${message(error)}`);
-        wake();
-      });
+        const stage = unit.stage ?? 'complete';
+        const cycle = unit.cycle ?? unit.ordinal;
+        if (expected && ((expected.stage ?? 'complete') !== stage || (expected.cycle ?? expected.ordinal) !== cycle || expected.prefixOrdinal !== unit.prefixOrdinal)) {
+          throw new Interrupted('incompatible', `Replay protocol stage changed for ${actor} at step ${position}`);
+        }
+        // The binder released only a head identical to the recorded step; the
+        // binding is final for the rest of this execution.
+        if (expected && binder) binder.bind(actor, expected.connection, unit.connection);
+        const step: TraceStep = {
+          index: position, actor, connection: unit.connection, ordinal: unit.ordinal,
+          protocol: unit.protocol, sql: unit.sql, fingerprint: unit.fingerprint, backendPid: unit.backendPid,
+          available, releasedAt, waits: [],
+          ...(protocolProfile === 'describe-flush-v1' ? { stage, cycle,
+            ...(unit.prefixOrdinal === undefined ? {} : { prefixOrdinal: unit.prefixOrdinal }) } : {}),
+          ...(chosen.length > 1 ? { overlap: result.trace.length } : {}),
+        };
+        group.push({ lane, unit, step });
+      }
+      // Retain the whole group before releasing any of it, so evidence never holds half a pair.
+      if (!group.every(item => retain(item.step))) check();
+      decisions++;
+      if (group.length > 1) overlapped = true;
+      for (const { lane, step } of group) {
+        result.trace.push(step);
+        lastActor = lane.actor;
+        lastConnection.set(lane.actor, lane.connection);
+        lane.running = { step, blocked: false };
+      }
+      runtimeEpoch++;
+      // Release in one synchronous pass: a pair's commands are written upstream together.
+      for (const { lane, unit, step } of group) {
+        unit.release().then(completion => {
+          if (retain(completion)) {
+            step.completedAt = performance.now() - started;
+            step.completion = protocolProfile === 'describe-flush-v1' && completion.kind !== 'metadata'
+              ? { ...completion, kind: 'ready' } : completion;
+          }
+          delete lane.running;
+          runtimeEpoch++;
+          wake();
+        }, error => {
+          delete lane.running;
+          runtimeEpoch++;
+          if (!finished) stop('inconclusive', `${describeLane(lane)} query did not complete: ${message(error)}`);
+          wake();
+        });
+      }
     }
     check();
     if (binder) {
@@ -392,7 +425,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       throw new Interrupted('incompatible', 'Application finished before consuming every recorded actor connection');
     }
     if (mode === 'replay' && result.trace.length !== options.replay!.trace.length) throw new Interrupted('incompatible', 'Application finished before consuming every replay step');
-    if (mode !== 'replay' && (options.plan?.length ?? 0) > result.trace.length) throw new Interrupted('incompatible', 'Application finished before consuming every requested schedule choice');
+    if (mode !== 'replay' && (options.plan?.length ?? 0) > decisions) throw new Interrupted('incompatible', 'Application finished before consuming every requested schedule choice');
     if (mode === 'replay') {
       // Single-producer blockers are actors. Multi-producer blockers are recorded
       // lanes; live lanes are translated through the replay's bijection.
@@ -413,6 +446,8 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       };
       for (const step of result.trace) {
         const recorded = options.replay!.trace[step.index]!;
+        // PostgreSQL chose how an overlapped pair interleaved; its waits and states may differ.
+        if (recorded.overlap !== undefined) continue;
         if (describeWaits(recorded, recordedIdentity) !== describeWaits(step, liveIdentity)) {
           throw new Interrupted('incompatible', `Replay lock-wait evidence changed for ${step.actor} at step ${step.index}`);
         }
@@ -442,7 +477,10 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     // An interrupted execution cannot claim complete actor-error evidence, but
     // must retain a failure already observed before the harness stopped it.
     result.outcome = error instanceof Interrupted && !applicationRejected ? error.outcome : 'harness-error';
-    const reason = error instanceof Interrupted ? message(error) : connectionFailureMessage(error) ?? message(error);
+    let reason = error instanceof Interrupted ? message(error) : connectionFailureMessage(error) ?? message(error);
+    if (mode === 'replay' && overlapped && error instanceof Interrupted && error.outcome === 'incompatible') {
+      reason = message(`${reason}; this run released overlapped pairs, and PostgreSQL may interleave them differently on each replay`);
+    }
     result.reason = applicationRejected
       ? message(`One or more application operations rejected before execution was interrupted; ${reason}`)
       : reason;

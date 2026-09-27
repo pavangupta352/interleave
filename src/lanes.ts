@@ -1,4 +1,4 @@
-import type { ConnectionProfile, ProtocolKind, RunResult, StepIdentity, StepStage } from './types.js';
+import type { ConnectionProfile, OverlapMode, ProtocolKind, RunResult, StepIdentity, StepStage, TraceStep } from './types.js';
 
 /** A lane is one admitted connection generation of an actor, written `actor#n`. */
 export interface Lane { actor: string; connection: number }
@@ -33,6 +33,10 @@ export type PlanResolution =
 
 const PROTOTYPE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const PLAN_ENTRY = /^([a-zA-Z][a-zA-Z0-9_-]{0,47})(?:#(0|[1-9][0-9]{0,8}))?$/;
+/** Longest plan choice: two lane labels joined by `+`. */
+export const MAX_PLAN_CHOICE_LENGTH = 117;
+
+type PlanEntry = { actor: string; connection?: number };
 
 /** Resolve only an omitted option; null and unknown strings are invalid input. */
 export function resolveConnectionProfile(value: unknown, fallback: ConnectionProfile = 'single-producer-v1'): ConnectionProfile {
@@ -40,6 +44,13 @@ export function resolveConnectionProfile(value: unknown, fallback: ConnectionPro
   if (selected !== 'single-producer-v1' && selected !== 'multi-producer-v1') {
     throw new TypeError('connectionProfile must be single-producer-v1 or multi-producer-v1');
   }
+  return selected;
+}
+
+/** Resolve only an omitted option; overlap is off unless selected. */
+export function resolveOverlap(value: unknown, fallback?: OverlapMode): OverlapMode | undefined {
+  const selected = value === undefined ? fallback : value;
+  if (selected !== undefined && selected !== 'pairs') throw new TypeError('overlap must be pairs');
   return selected;
 }
 
@@ -58,11 +69,25 @@ export function laneLabel(actor: string, connection: number): string {
 }
 
 /** Parse `actor` or `actor#n`; malformed and prototype-sensitive names return undefined. */
-export function parsePlanEntry(value: unknown): { actor: string; connection?: number } | undefined {
+export function parsePlanEntry(value: unknown): PlanEntry | undefined {
   if (typeof value !== 'string') return undefined;
   const match = PLAN_ENTRY.exec(value);
   if (!match || PROTOTYPE_KEYS.has(match[1]!)) return undefined;
   return match[2] === undefined ? { actor: match[1]! } : { actor: match[1]!, connection: Number(match[2]) };
+}
+
+/** Parse one choice: an entry, or with overlap two entries joined by `+`. */
+export function parsePlanChoice(value: unknown): PlanEntry[] | undefined {
+  if (typeof value !== 'string' || value.length > MAX_PLAN_CHOICE_LENGTH) return undefined;
+  const parts = value.split('+');
+  if (parts.length > 2) return undefined;
+  const entries: PlanEntry[] = [];
+  for (const part of parts) {
+    const entry = parsePlanEntry(part);
+    if (!entry) return undefined;
+    entries.push(entry);
+  }
+  return entries;
 }
 
 /** Parse an `actor#n` lane label; a bare actor id is not a lane. */
@@ -72,16 +97,26 @@ export function parseLaneLabel(value: unknown): Lane | undefined {
 }
 
 /** Shared API/CLI/worker validation before any database work. */
-export function validatePlanEntries(plan: unknown, profile: ConnectionProfile, actors?: readonly string[]): void {
+export function validatePlanEntries(plan: unknown, profile: ConnectionProfile, actors?: readonly string[], overlap?: OverlapMode): void {
   if (plan === undefined) return;
   if (!Array.isArray(plan) || plan.length > 100_000) throw new TypeError('Invalid initial schedule');
   for (const value of plan) {
-    const entry = parsePlanEntry(value);
-    if (!entry) throw new TypeError('plan contains an invalid actor');
-    if (entry.connection !== undefined && profile !== 'multi-producer-v1') {
-      throw new TypeError('Connection-qualified plan entries such as alice#1 require connectionProfile multi-producer-v1');
+    const choice = parsePlanChoice(value);
+    if (!choice) throw new TypeError('plan contains an invalid actor');
+    for (const entry of choice) {
+      if (entry.connection !== undefined && profile !== 'multi-producer-v1') {
+        throw new TypeError('Connection-qualified plan entries such as alice#1 require connectionProfile multi-producer-v1');
+      }
+      if (actors && !actors.includes(entry.actor)) throw new TypeError('plan contains an unknown actor');
     }
-    if (actors && !actors.includes(entry.actor)) throw new TypeError('plan contains an unknown actor');
+    if (choice.length === 2) {
+      if (overlap !== 'pairs') throw new TypeError('Pair plan entries such as alice+bob require overlap pairs');
+      const [first, second] = choice as [PlanEntry, PlanEntry];
+      // One single-producer actor has one command connection; a lane cannot pair with itself.
+      if (first.actor === second.actor && (profile !== 'multi-producer-v1' || (first.connection !== undefined && first.connection === second.connection))) {
+        throw new TypeError(`A pair plan entry must name two different ${profile === 'multi-producer-v1' ? 'lanes' : 'actors'}`);
+      }
+    }
   }
 }
 
@@ -97,14 +132,36 @@ export function multiLaneActors(trace: readonly StepIdentity[]): Set<string> {
   return multi;
 }
 
+/** One recorded scheduler decision: a single release, or an overlapped pair of steps. */
+export interface Decision {
+  /** Index of the decision's first trace step. */
+  step: number;
+  /** The choice in plan notation. */
+  choice: string;
+  /** Entries that could proceed, as recorded. */
+  available: string[];
+}
+
 /**
- * Choices equivalent to a recorded trace. Only actors that released commands on
+ * Decisions equivalent to a recorded trace. Only actors that released commands on
  * more than one connection are lane-qualified; everything else keeps actor ids.
  */
+export function decisionsFromTrace(run: Pick<RunResult, 'limits' | 'trace'>): Decision[] {
+  const multi = recordedConnectionProfile(run) === 'multi-producer-v1' ? multiLaneActors(run.trace) : new Set<string>();
+  const name = (step: TraceStep): string => multi.has(step.actor) ? laneLabel(step.actor, step.connection) : step.actor;
+  const decisions: Decision[] = [];
+  for (let index = 0; index < run.trace.length; index++) {
+    const step = run.trace[index]!;
+    const pair = step.overlap === index ? run.trace[index + 1] : undefined;
+    decisions.push({ step: index, choice: pair ? `${name(step)}+${name(pair)}` : name(step), available: step.available });
+    if (pair) index++;
+  }
+  return decisions;
+}
+
+/** Choices equivalent to a recorded trace; see decisionsFromTrace(). */
 export function planFromTrace(run: Pick<RunResult, 'limits' | 'trace'>): string[] {
-  if (recordedConnectionProfile(run) !== 'multi-producer-v1') return run.trace.map(step => step.actor);
-  const multi = multiLaneActors(run.trace);
-  return run.trace.map(step => multi.has(step.actor) ? laneLabel(step.actor, step.connection) : step.actor);
+  return decisionsFromTrace(run).map(decision => decision.choice);
 }
 
 /** Convert a recorded available entry to the plan notation used for that trace. */
@@ -112,6 +169,21 @@ export function planChoice(available: string, multi: ReadonlySet<string>): strin
   const lane = parseLaneLabel(available);
   if (!lane) return available;
   return multi.has(lane.actor) ? available : lane.actor;
+}
+
+/**
+ * Choices at one recorded decision in plan notation: each available entry, and
+ * with overlap each unordered pair of them.
+ */
+export function decisionChoices(available: readonly string[], multi: ReadonlySet<string>, overlap: OverlapMode | undefined): string[] {
+  const singles = available.map(entry => planChoice(entry, multi));
+  const choices = new Set(singles);
+  if (overlap === 'pairs') {
+    for (let first = 0; first < singles.length; first++) {
+      for (let second = first + 1; second < singles.length; second++) choices.add(`${singles[first]}+${singles[second]}`);
+    }
+  }
+  return [...choices];
 }
 
 /**
@@ -135,7 +207,7 @@ export function fairLane(names: readonly string[], available: readonly Lane[], l
  * that actor's available lanes. A lane entry waits, bounded by the run deadline,
  * while its connection may still queue a command; it never becomes a pass.
  */
-export function resolvePlanEntry(entry: { actor: string; connection?: number }, lanes: readonly LiveLane[], settled: boolean,
+export function resolvePlanEntry(entry: PlanEntry, lanes: readonly LiveLane[], settled: boolean,
   lastConnection: ReadonlyMap<string, number>, step: number): PlanResolution {
   const label = entry.connection === undefined ? entry.actor : laneLabel(entry.actor, entry.connection);
   const blocked: PlanResolution = { kind: 'incompatible', reason: `Schedule asks for ${label}, which cannot issue its next query at step ${step}` };

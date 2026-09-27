@@ -15,7 +15,7 @@ import { missingReplayIdentity } from './replay-readiness.js';
 import { transportMatches } from './environment.js';
 import { resolvePostgresTransport, runTransportIdentity } from './postgres-transport.js';
 import { connectionFailureMessage } from './protocol/upstream-transport.js';
-import { defaultConnectionLimit, recordedConnectionProfile, resolveConnectionProfile, validatePlanEntries } from './lanes.js';
+import { defaultConnectionLimit, recordedConnectionProfile, resolveConnectionProfile, resolveOverlap, validatePlanEntries } from './lanes.js';
 import type { OwnedDatabase, RunOptions, RunResult } from './types.js';
 
 const GRACE_MS = 250;
@@ -60,18 +60,22 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   const connectionProfileMismatch = mode === 'replay'
     && ((options.maxConnectionsPerActor !== undefined && options.maxConnectionsPerActor !== replayConnections)
       || connectionProfile !== recordedConnections);
+  const recordedOverlap = mode === 'replay' ? options.replay!.limits.overlap : undefined;
+  const overlap = resolveOverlap(options.overlap, recordedOverlap);
+  const overlapMismatch = mode === 'replay' && overlap !== recordedOverlap;
   if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000)) throw new TypeError('plan contains an invalid actor');
-  validatePlanEntries(options.plan, connectionProfile);
+  validatePlanEntries(options.plan, connectionProfile, undefined, overlap);
   // Resolve trust once; the parent and worker use this snapshot for every connection.
   const transport = resolvePostgresTransport(options.databaseUrl, options.upstreamTls);
   const started = performance.now();
   const multi = connectionProfile === 'multi-producer-v1';
   const result: RunResult = {
-    schemaVersion: multi ? 4 : 3, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
+    schemaVersion: multi || overlap ? 4 : 3, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
     environment: { serverVersion: 'unknown', nodeVersion: process.version, transport: runTransportIdentity(transport) },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, ...(multi ? { connectionProfile } : {}) },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile,
+      ...(multi || overlap ? { connectionProfile } : {}), ...(overlap ? { overlap } : {}) },
     cleanup: { complete: false },
   };
   assertEvidenceEnvelope(result, maxEvidenceBytes);
@@ -119,6 +123,9 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     } else if (!interruption && connectionProfileMismatch) {
       result.outcome = 'incompatible';
       result.reason = 'Replay actor connection profile differs from the recorded run';
+    } else if (!interruption && overlapMismatch) {
+      result.outcome = 'incompatible';
+      result.reason = 'Replay overlap mode differs from the recorded run';
     } else if (!interruption && expectedEnvironment?.nodeVersion !== undefined && expectedEnvironment.nodeVersion !== process.version) {
       result.outcome = 'incompatible';
       result.reason = 'Replay Node.js version differs from the recorded environment';
@@ -194,6 +201,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
                 || !isDeepStrictEqual(candidate.environment.transport, result.environment.transport)
                 || (candidate.limits.protocolProfile ?? 'sync-cycle-v1') !== protocolProfile
                 || recordedConnectionProfile(candidate) !== connectionProfile
+                || candidate.limits.overlap !== overlap
                 || candidate.limits.maxConnectionsPerActor !== maxConnectionsPerActor
                 || (candidate.environment.fixture !== undefined && recordedFixtureProfile(candidate.environment.fixture) !== fixtureProfile)
               ) throw new TypeError('Worker result changed parent-owned environment identity');
@@ -235,7 +243,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
         workerChild.send({
           type: 'start', token: protocolToken, scenarioFile: resolve(scenarioFile), connectionString: database!.connectionString,
           transport: database!.transport, sourceIdentity,
-          options: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, connectionProfile, fixtureProfile, mode, ...(options.plan ? { plan: options.plan } : {}), ...(options.replay ? { replay: options.replay } : {}), ...(options.expectedEnvironment ? { expectedEnvironment: options.expectedEnvironment } : {}) },
+          options: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, connectionProfile, ...(overlap ? { overlap } : {}), fixtureProfile, mode, ...(options.plan ? { plan: options.plan } : {}), ...(options.replay ? { replay: options.replay } : {}), ...(options.expectedEnvironment ? { expectedEnvironment: options.expectedEnvironment } : {}) },
         }, error => { if (error) { result.reason = 'Could not initialize scenario worker'; terminateGroup(workerChild); } });
         if (interruption) stopChild();
       });

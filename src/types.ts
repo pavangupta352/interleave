@@ -7,6 +7,8 @@ export type ProtocolKind = 'simple' | 'extended';
 export type ProtocolProfile = 'sync-cycle-v1' | 'describe-flush-v1';
 /** Single-producer allows one live command connection per actor; multi-producer schedules every connection as a lane. */
 export type ConnectionProfile = 'single-producer-v1' | 'multi-producer-v1';
+/** Opt-in release of two queued command units in the same instant. */
+export type OverlapMode = 'pairs';
 export type StepStage = 'complete' | 'describe' | 'execute' | 'recover';
 export type TransactionStatus = 'I' | 'T' | 'E';
 export type Outcome = 'passed' | 'violation' | 'actor-error' | 'incompatible' | 'inconclusive' | 'harness-error';
@@ -159,6 +161,12 @@ export interface TraceStep extends StepIdentity {
   completedAt?: number;
   completion?: UnitCompletion;
   waits: WaitObservation[];
+  /**
+   * Version 4 with overlap pairs: both steps of a pair carry the index of the
+   * first. They were written upstream together and PostgreSQL chose how their
+   * execution interleaved.
+   */
+  overlap?: number;
 }
 
 export interface Failure {
@@ -176,12 +184,12 @@ export interface RunTransportIdentity {
 }
 
 export interface RunResult {
-  /** Version 4 records the multi-producer connection profile; 1-3 remain readable. */
+  /** Version 4 records the connection profile and overlap mode; 1-3 remain readable. */
   schemaVersion: 1 | 2 | 3 | 4;
   scenario: string;
   outcome: Outcome;
   mode: 'explore' | 'replay' | 'guided';
-  /** Actor choices; version 4 may name a connection lane, such as `alice#1`. */
+  /** Choices; version 4 may name a lane such as `alice#1` or, with overlap, a pair such as `alice+bob`. */
   plan: string[];
   /** Accepted actor startup attempts. Optional only for reading legacy artifacts. */
   connections?: ConnectionIdentity[];
@@ -196,6 +204,8 @@ export interface RunResult {
     maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number; maxConnectionsPerActor?: number; protocolProfile?: ProtocolProfile;
     /** Present, and required, only in version 4. */
     connectionProfile?: ConnectionProfile;
+    /** Version 4 only: pairs may be released together. */
+    overlap?: OverlapMode;
   };
   cleanup: { complete: boolean; error?: string };
 }
@@ -222,6 +232,8 @@ export interface RunOptions {
   protocolProfile?: ProtocolProfile;
   /** Opt in to scheduling every admitted actor connection as its own sequential lane. */
   connectionProfile?: ConnectionProfile;
+  /** Allow plan entries such as `alice+bob` that release two actors' next commands together. */
+  overlap?: OverlapMode;
   signal?: AbortSignal;
 }
 

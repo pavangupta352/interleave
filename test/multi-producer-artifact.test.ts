@@ -73,7 +73,11 @@ describe('version 4 multi-producer artifacts', () => {
 
   test.each([
     ['missing connection profile', (r: any) => { delete r.limits.connectionProfile; }, /connectionProfile: required/],
-    ['single-producer profile', (r: any) => { r.limits.connectionProfile = 'single-producer-v1'; }, /connectionProfile: expected one of multi-producer-v1/],
+    ['single-producer profile without overlap', (r: any) => { r.limits.connectionProfile = 'single-producer-v1'; }, /single-producer record requires overlap pairs; use version 3/],
+    ['unknown connection profile', (r: any) => { r.limits.connectionProfile = 'pooled-v1'; }, /connectionProfile: expected one of single-producer-v1, multi-producer-v1/],
+    ['unknown overlap mode', (r: any) => { r.limits.overlap = 'triples'; }, /overlap: expected one of pairs/],
+    ['pair plan without overlap', (r: any) => { r.plan = ['alice#0+bob#0']; }, /expected an actor connection lane|invalid actor id/],
+    ['step overlap without overlap mode', (r: any) => { r.trace[0].overlap = 0; }, /overlap: unknown field/],
     ['unknown profile', (r: any) => { r.limits.connectionProfile = 'pool'; }, /connectionProfile/],
     ['missing connection limit', (r: any) => { delete r.limits.maxConnectionsPerActor; }, /maxConnectionsPerActor: required/],
     ['unknown limits field', (r: any) => { r.limits.lanes = 2; }, /unknown field/],

@@ -43,6 +43,36 @@ describe('CLI real PostgreSQL integration', () => {
     expect(replayed.code, replayed.stdout + replayed.stderr).toBe(1);
     expect(JSON.parse(replayed.stdout).cleanup.complete).toBe(true);
   });
+  test('overlap pairs find a statement race that one-at-a-time release cannot, then replay, reduce and report it', async () => {
+    const folder = await directory();
+    const out = join(folder, 'claim.json');
+    const scenario = fixture('claim');
+    // Source capture shares each run's budget; allow for a loaded machine.
+    const budget = ['--timeout-ms', '60000'];
+    const sequential = await execute(['run', scenario, ...budget]);
+    expect(sequential.code, sequential.stdout + sequential.stderr).toBe(0);
+    expect(JSON.parse(sequential.stdout).violationCount).toBe(0);
+    const discovered = await execute(['run', scenario, '--overlap', 'pairs', '--out', out, ...budget]);
+    expect(discovered.code, discovered.stdout + discovered.stderr).toBe(1);
+    const recorded = await readRunArtifact(out);
+    expect(recorded).toMatchObject({ schemaVersion: 4, outcome: 'violation', plan: ['alice+bob'] });
+    expect(recorded.limits).toMatchObject({ connectionProfile: 'single-producer-v1', overlap: 'pairs' });
+    expect(recorded.trace.map(step => step.overlap)).toEqual([0, 0]);
+    expect(recorded.environment.source).toBeDefined();
+    const replayed = await start(['replay', scenario, out, ...budget], {}, false).result;
+    expect(replayed.code, replayed.stdout + replayed.stderr).toBe(1);
+    expect(replayed.stdout).toContain('cli-claim: violation (replay); 2 commands, 1 overlapped pair;');
+    const reduced = await execute(['minimize', scenario, out, ...budget]);
+    expect(reduced.code, reduced.stdout + reduced.stderr).toBe(1);
+    expect(JSON.parse(reduced.stdout)).toMatchObject({ reducedChoices: 1, plan: ['alice+bob'], stopReason: 'locally-minimal' });
+    // An explicit pair prefix is the first attempt.
+    const planned = await execute(['run', scenario, '--overlap', 'pairs', '--plan', 'alice+bob', '--max-runs', '1', ...budget]);
+    expect(planned.code, planned.stdout + planned.stderr).toBe(1);
+    expect(JSON.parse(planned.stdout)).toMatchObject({ explored: 1, violationCount: 1, stopReason: 'failure' });
+    const report = await execute(['report', out, '--out', join(folder, 'claim.html')]);
+    expect(report.code, report.stdout + report.stderr).toBe(0);
+    expect(await readFile(join(folder, 'claim.html'), 'utf8')).toContain('alice+bob');
+  }, 180_000);
   test('human search output distinguishes recorded activity and completed attempts', async () => {
     const result = await start(['run', fixture('passed'), '--seed', '0'], {}, false).result;
     expect(result.code, result.stdout + result.stderr).toBe(0);

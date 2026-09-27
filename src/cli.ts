@@ -15,7 +15,7 @@ import { doctor } from './cli/doctor.js';
 import { initializeProject } from './cli/init.js';
 import { loadNeveroversell } from './cli/demo.js';
 import { exportRegression, type ExportRegressionResult } from './export.js';
-import type { ConnectionProfile, ExplorationResult, ExplorationStrategy, MinimizationResult, ProtocolProfile, RunOptions, RunResult } from './types.js';
+import type { ConnectionProfile, ExplorationResult, ExplorationStrategy, MinimizationResult, OverlapMode, ProtocolProfile, RunOptions, RunResult } from './types.js';
 import type { FixtureIdentityProfile } from './fixture-identity.js';
 
 const metadata = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
@@ -123,6 +123,7 @@ async function main(args: string[]): Promise<number> {
       ...(values['max-connections-per-actor'] === undefined ? {} : { maxConnectionsPerActor: Number(values['max-connections-per-actor']) }),
       ...(values['connection-profile'] === undefined ? {} : { connectionProfile: values['connection-profile'] as ConnectionProfile }),
       ...(values['protocol-profile'] === undefined ? {} : { protocolProfile: values['protocol-profile'] as ProtocolProfile }),
+      ...(values.overlap === undefined ? {} : { overlap: values.overlap as OverlapMode }),
       ...(values['fixture-profile'] === undefined ? {} : { fixtureProfile: values['fixture-profile'] as FixtureIdentityProfile }),
     };
     let result: RunResult | ExplorationResult | MinimizationResult;
@@ -199,7 +200,9 @@ function describe(result: RunResult | ExplorationResult | MinimizationResult): s
     const attempt = failed ? `\nReduction trial failed (${failed.outcome}).${failed.reason ? `\n${failed.reason}` : ''}${!failed.cleanup.complete ? `\nCleanup incomplete: ${failed.cleanup.error ?? 'Owned resource cleanup could not be confirmed'}` : ''}` : '';
     return `Reduced ${result.originalChoices} choices to ${result.reducedChoices} in ${result.attempts} attempts; ${result.stopReason}.${result.reason ? `\n${result.reason}` : ''}\n${describe(result.run)}${attempt}`;
   }
-  return `${result.scenario}: ${result.outcome} (${result.mode}); ${result.trace.length} ${(result.limits.protocolProfile ?? (result.schemaVersion === 2 ? 'describe-flush-v1' : 'sync-cycle-v1')) === 'describe-flush-v1' ? 'releases' : 'commands'}; cleanup ${result.cleanup.complete ? 'complete' : 'incomplete'}.${result.reason ? `\n${result.reason}` : ''}${result.failure ? `\n${result.failure.message}` : ''}`;
+  const pairs = result.trace.filter(step => step.overlap === step.index).length;
+  const overlapped = pairs ? `, ${pairs} overlapped pair${pairs === 1 ? '' : 's'}` : '';
+  return `${result.scenario}: ${result.outcome} (${result.mode}); ${result.trace.length} ${(result.limits.protocolProfile ?? (result.schemaVersion === 2 ? 'describe-flush-v1' : 'sync-cycle-v1')) === 'describe-flush-v1' ? 'releases' : 'commands'}${overlapped}; cleanup ${result.cleanup.complete ? 'complete' : 'incomplete'}.${result.reason ? `\n${result.reason}` : ''}${result.failure ? `\n${result.failure.message}` : ''}`;
 }
 
 async function readCertificateBundle(path: string): Promise<string> {

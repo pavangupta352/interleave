@@ -24,7 +24,7 @@ export type {
 export type {
   ActorContext, ActorResult, ConnectionIdentity, ConnectionProfile, DatabaseContext, ExploreOptions, ExplorationResult,
   ExplorationStrategy, ExplorationSearch, ExplorationMetrics,
-  Failure, MinimizeOptions, MinimizationResult, Outcome, ProtocolKind, ProtocolProfile, RunOptions,
+  Failure, MinimizeOptions, MinimizationResult, Outcome, OverlapMode, ProtocolKind, ProtocolProfile, RunOptions,
   RunResult, Scenario, StepIdentity, TraceStep, TransactionStatus, UnitCompletion,
   WaitObservation, StepStage, ReadyCompletion, MetadataCompletion, RunTransportIdentity,
 } from './types.js';

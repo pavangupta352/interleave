@@ -3,7 +3,7 @@ import { runTarget } from './run-target.js';
 import { integerLimit, searchBudget } from './search-budget.js';
 import { environmentMatches } from './environment.js';
 import { resolveFixtureProfile } from './fixture-profile.js';
-import { planFromTrace, recordedConnectionProfile, resolveConnectionProfile } from './lanes.js';
+import { planFromTrace, recordedConnectionProfile, resolveConnectionProfile, resolveOverlap } from './lanes.js';
 import type { Scenario, RunResult, MinimizeOptions, MinimizationResult } from './types.js';
 
 type AttemptFailure = NonNullable<MinimizationResult['attemptFailure']>;
@@ -37,6 +37,7 @@ export async function minimize(scenario: Scenario | string, original: RunResult,
     fixtureProfile: resolveFixtureProfile(options.fixtureProfile, original.environment.fixture),
     protocolProfile: options.protocolProfile === undefined ? original.limits.protocolProfile ?? 'sync-cycle-v1' : options.protocolProfile,
     connectionProfile: resolveConnectionProfile(options.connectionProfile, recordedConnectionProfile(original)),
+    ...(resolveOverlap(options.overlap, original.limits.overlap) ? { overlap: resolveOverlap(options.overlap, original.limits.overlap)! } : {}),
     maxConnectionsPerActor: options.maxConnectionsPerActor === undefined ? original.limits.maxConnectionsPerActor ?? 1 : options.maxConnectionsPerActor };
   const budget = searchBudget(options.totalTimeoutMs, options.signal);
   try {
