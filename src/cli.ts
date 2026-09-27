@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFile, stat } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { open, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { explore } from './explore.js';
 import { replay } from './replay.js';
@@ -202,18 +203,24 @@ function describe(result: RunResult | ExplorationResult | MinimizationResult): s
 
 async function readCertificateBundle(path: string): Promise<string> {
   const MAX_BYTES = 1_048_576;
-  let bytes: Buffer;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const file = await stat(path);
-    if (!file.isFile()) throw new TypeError('--upstream-ca must name a regular PEM file');
-    if (file.size > MAX_BYTES) throw new TypeError('--upstream-ca exceeds the 1 MiB CA bundle limit');
-    bytes = await readFile(path);
+    // Inspect the opened file itself; non-blocking so a FIFO cannot stall the command.
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+    if (!(await handle.stat()).isFile()) throw new TypeError('--upstream-ca must name a regular PEM file');
+    const buffer = Buffer.alloc(MAX_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > MAX_BYTES) throw new TypeError('--upstream-ca exceeds the 1 MiB CA bundle limit');
+    return buffer.toString('utf8', 0, length);
   } catch (error) {
     if (error instanceof TypeError) throw error;
     throw new TypeError('--upstream-ca could not be read');
-  }
-  if (bytes.length > MAX_BYTES) throw new TypeError('--upstream-ca exceeds the 1 MiB CA bundle limit');
-  return bytes.toString('utf8');
+  } finally { await handle?.close(); }
 }
 
 function describeTransport(run: RunResult): string {

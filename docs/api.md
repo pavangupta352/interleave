@@ -99,9 +99,13 @@ connection. Actors keep receiving a loopback plaintext `connectionString`.
 Setup and invariant contexts include `connectionOptions`, a fresh node-postgres
 configuration for the generated database. Use it for additional clients:
 `new Client(context.connectionOptions)`. It carries the in-memory CA, which a URL
-cannot. For TLS runs, `context.connectionString` includes `sslmode=verify-full`,
-so URL-configured drivers verify against their own default trust store; with a
-private CA, use `connectionOptions` or give that driver its own CA setting.
+cannot. `context.connectionString` always states the selection explicitly:
+`sslmode=verify-full` for TLS runs and `sslmode=disable` for plaintext ones.
+URL-configured drivers then verify with their own TLS settings (for Node.js
+drivers, its default roots); with a private CA, use `connectionOptions` or give
+that driver its own CA setting. Actor endpoints always carry `sslmode=disable`;
+node-postgres gives that URL setting precedence over a client's `ssl` option, so
+actor code written for TLS in production still connects to its loopback endpoint.
 
 Every new run records `environment.transport`: the actor endpoint profile, the
 authentication boundary and the upstream policy. For TLS that includes the

@@ -241,7 +241,9 @@ integration('proxy integration with real PostgreSQL', () => {
   });
   test('rejects TLS-required clients and streaming COPY with actionable profile errors', async () => {
     const errors: Error[] = []; const proxy = await createProxy({ upstreamUrl: databaseUrl, actor: 'ssl', onUnit() {}, onError(e) { errors.push(e); } });
-    const tls = new Client({ connectionString: proxy.connectionString, ssl: { rejectUnauthorized: false } }); tls.on('error', () => {}); resources.push({ proxy, clients: [tls] });
+    // Without the endpoint's explicit sslmode, a client that requires TLS must be refused.
+    const tlsUrl = new URL(proxy.connectionString); tlsUrl.searchParams.delete('sslmode');
+    const tls = new Client({ connectionString: tlsUrl.toString(), ssl: { rejectUnauthorized: false } }); tls.on('error', () => {}); resources.push({ proxy, clients: [tls] });
     await expect(tls.connect()).rejects.toThrow(/SSL|TLS/i); await tls.end();
     await until(() => errors.find(e => /TLS|SSL/.test(e.message)));
     const h = await harness(true); await expect(h.client.query('COPY gate TO STDOUT')).rejects.toThrow(/COPY/i);
@@ -314,6 +316,29 @@ integration('proxy integration with real PostgreSQL', () => {
     const body = Buffer.concat([mechanism, length, initial]); const head = Buffer.alloc(5); head[0] = 112; head.writeInt32BE(4 + body.length, 1);
     socket.write(Buffer.concat([head, body]));
     await until(() => errors.find(e => /channel binding cannot pass through/i.test(e.message)));
+    socket.destroy();
+  });
+  test("the endpoint's sslmode=disable takes precedence over a node-postgres ssl option", async () => {
+    const proxy = await createProxy({ upstreamUrl: databaseUrl, actor: 'app-ssl', onUnit(unit) { void unit.release(); }, onError() {} });
+    const client = new Client({ connectionString: proxy.connectionString, ssl: { rejectUnauthorized: true } }); client.on('error', () => {});
+    resources.push({ proxy, clients: [client] });
+    await client.connect();
+    expect((await client.query('SELECT 1 AS one')).rows).toEqual([{ one: 1 }]);
+    await client.end();
+  });
+  test('refuses authentication data pipelined before the server requested it', async () => {
+    const errors: Error[] = [];
+    const proxy = await createProxy({ upstreamUrl: databaseUrl, actor: 'pipelined', onUnit() {}, onError(e) { errors.push(e); } });
+    resources.push({ proxy, clients: [] });
+    expect(new URL(proxy.connectionString).searchParams.get('sslmode')).toBe('disable');
+    const url = new URL(proxy.connectionString);
+    const socket = await rawSocket(proxy.connectionString);
+    const fields = Buffer.from(`user\0${decodeURIComponent(url.username)}\0database\0${decodeURIComponent(url.pathname.slice(1))}\0\0`);
+    const startup = Buffer.alloc(8); startup.writeInt32BE(8 + fields.length); startup.writeInt32BE(196608, 4);
+    const password = Buffer.from('pipelined-secret\0'); const head = Buffer.alloc(5); head[0] = 112; head.writeInt32BE(4 + password.length, 1);
+    socket.write(Buffer.concat([startup, fields, head, password]));
+    await until(() => errors.find(e => /authentication data sent before the server requested it/.test(e.message)));
+    expect(JSON.stringify(errors.map(e => e.message))).not.toContain('pipelined-secret');
     socket.destroy();
   });
   test('catches scheduling callback errors inside the transport', async () => {

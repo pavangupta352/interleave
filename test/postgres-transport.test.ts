@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   postgresClientConfig,
+  postgresContextUrl,
   postgresTlsOptions,
   resolvePostgresTransport,
   restorePostgresTransport,
@@ -157,8 +158,8 @@ describe('bounded canonical trust snapshots', () => {
 
   it('bounds the original CA input and certificate count before deduplication', () => {
     expectCode(() => resolvePostgresTransport(url, { mode: 'verify-full', ca: ' '.repeat(1_048_577) }), 'ca-too-large');
-    expectCode(() => resolvePostgresTransport(url, { mode: 'verify-full', ca: ca.repeat(65) }), 'ca-too-large');
-    expect(resolvePostgresTransport(url, { mode: 'verify-full', ca: ca.repeat(64) }).caCertificates).toHaveLength(1);
+    expectCode(() => resolvePostgresTransport(url, { mode: 'verify-full', ca: ca.repeat(257) }), 'ca-too-large');
+    expect(resolvePostgresTransport(url, { mode: 'verify-full', ca: ca.repeat(256) }).caCertificates).toHaveLength(1);
   });
 
   it('freezes the entire serializable snapshot and restores equivalent trusted data', () => {
@@ -207,6 +208,26 @@ describe('bounded canonical trust snapshots', () => {
     copy.identity.trustFingerprint = '0'.repeat(64);
     expectCode(() => postgresClientConfig(copy), 'invalid-snapshot');
     expectCode(() => postgresTlsOptions(copy), 'invalid-snapshot');
+  });
+});
+
+describe('URL credentials, native bindings and context URLs', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+  it('explains that user names and passwords must be percent-encoded', () => {
+    for (const input of ['postgresql://user:pa ss@db.fixture.test/fixture', 'postgresql://user:p%ss@db.fixture.test/fixture']) {
+      expectCode(() => resolvePostgresTransport(input), 'invalid-url-credentials');
+    }
+    expect(resolvePostgresTransport('postgresql://user:pa%20ss%25@db.fixture.test/fixture').connectionString).toContain('pa%20ss%25@');
+    expectCode(() => resolvePostgresTransport('postgresql://db.fixture.test'), 'invalid-url');
+  });
+  it('refuses the native pg binding, which would drop TLS verification settings', () => {
+    vi.stubEnv('NODE_PG_FORCE_NATIVE', '1');
+    expectCode(() => postgresClientConfig(resolvePostgresTransport(url, tlsInput)), 'native-client-unsupported');
+    expectCode(() => postgresClientConfig(resolvePostgresTransport(url)), 'native-client-unsupported');
+  });
+  it('gives setup and invariant URLs an explicit TLS selection', () => {
+    expect(new URL(postgresContextUrl(resolvePostgresTransport(url))).searchParams.get('sslmode')).toBe('disable');
+    expect(new URL(postgresContextUrl(resolvePostgresTransport(url, tlsInput))).searchParams.get('sslmode')).toBe('verify-full');
   });
 });
 
@@ -293,13 +314,13 @@ describe('strict live configuration without network access', () => {
   it('never attaches untrusted URL, certificate or path material to configuration errors', () => {
     for (const action of [
       () => resolvePostgresTransport('credential-sentinel'),
-      () => resolvePostgresTransport(`${url}?sslrootcert=/private/ca-sentinel.pem`),
+      () => resolvePostgresTransport(`${url}?sslrootcert=/interleave-path-sentinel/ca-sentinel.pem`),
       () => resolvePostgresTransport(url, { mode: 'verify-full', ca: `${ca}key-sentinel` }),
     ]) {
       let caught: unknown;
       try { action(); } catch (error) { caught = error; }
       expect(caught).toBeInstanceOf(Error);
-      for (const secret of ['credential-sentinel', 'key-sentinel', 'ca-sentinel', '/private', 'BEGIN CERTIFICATE']) {
+      for (const secret of ['credential-sentinel', 'key-sentinel', 'ca-sentinel', 'interleave-path-sentinel', 'BEGIN CERTIFICATE']) {
         expect(inspect(caught)).not.toContain(secret);
         expect(JSON.stringify(caught)).not.toContain(secret);
       }

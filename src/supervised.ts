@@ -14,6 +14,7 @@ import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile
 import { missingReplayIdentity } from './replay-readiness.js';
 import { transportMatches } from './environment.js';
 import { resolvePostgresTransport, runTransportIdentity } from './postgres-transport.js';
+import { connectionFailureMessage } from './protocol/upstream-transport.js';
 import type { OwnedDatabase, RunOptions, RunResult } from './types.js';
 
 const GRACE_MS = 250;
@@ -144,7 +145,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
       // Do not give scenario code an inherited administrator URL, libpq route or TLS
       // policy: actor connections are loopback plaintext and harness trust comes from IPC.
       for (const key of Object.keys(environment)) {
-        if (/DATABASE.*URL|^PG(?:HOST|HOSTADDR|PORT|USER|PASSWORD|DATABASE|SERVICE|SERVICEFILE|PASSFILE|SSLMODE|SSLNEGOTIATION|SSLCERT|SSLKEY|SSLROOTCERT|SSLCRL|SSLCRLDIR|SSLCOMPRESSION|REQUIRESSL|CHANNELBINDING|GSSENCMODE|TARGETSESSIONATTRS)$|^NODE_OPTIONS$/i.test(key)) delete environment[key];
+        if (/DATABASE.*URL|^PG(?:HOST|HOSTADDR|PORT|USER|PASSWORD|DATABASE|SERVICE|SERVICEFILE|PASSFILE|SSLMODE|SSLNEGOTIATION|SSLCERT|SSLCERTMODE|SSLKEY|SSLROOTCERT|SSLCRL|SSLCRLDIR|SSLSNI|SSLCOMPRESSION|REQUIRESSL|REQUIREAUTH|CHANNELBINDING|GSSENCMODE|TARGETSESSIONATTRS)$|^NODE_OPTIONS$|^NODE_PG_FORCE_NATIVE$/i.test(key)) delete environment[key];
       }
       child = fork(worker, [], {
         detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -237,7 +238,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     if (error instanceof SourceIdentityError) {
       result.outcome = error.kind === 'io' ? 'harness-error' : 'inconclusive';
       result.reason = error.message;
-    } else result.reason = creationFailure?.message ?? 'Could not prepare or supervise the scenario database and worker';
+    } else result.reason = creationFailure?.message ?? connectionFailureMessage(error) ?? 'Could not prepare or supervise the scenario database and worker';
   } finally {
     clearTimeout(deadline);
     options.signal?.removeEventListener('abort', onAbort);

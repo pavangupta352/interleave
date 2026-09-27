@@ -30,6 +30,8 @@ export interface ResolvedPostgresTransport {
 
 const messages = {
   'invalid-url': 'Use a bounded PostgreSQL URL with an explicit hostname and database.',
+  'invalid-url-credentials': 'Percent-encode the user name and password in the PostgreSQL URL (for example %20 for a space, %25 for %, %40 for @).',
+  'native-client-unsupported': 'NODE_PG_FORCE_NATIVE selects libpq bindings that ignore Interleave\'s connection settings; unset it for Interleave runs.',
   'unsupported-url-option': 'Unsupported PostgreSQL URL option. Use sslmode=verify-full or explicit upstream TLS with in-memory CA material; specify routing and credentials in the URL authority.',
   'conflicting-tls-options': 'Select upstream TLS through either the URL or structured configuration, not both.',
   'invalid-tls-options': 'Upstream TLS accepts only mode verify-full and optional PEM CA material.',
@@ -48,7 +50,8 @@ class PostgresTransportError extends TypeError {
 function fail(code: ErrorCode): never { throw new PostgresTransportError(code); }
 const MAX_URL_BYTES = 16_384;
 const MAX_CA_BYTES = 1_048_576;
-const MAX_CA_COUNT = 64;
+// Room for provider bundles such as the AWS RDS global CA bundle (100+ certificates).
+const MAX_CA_COUNT = 256;
 const MAX_SNAPSHOT_CA_BYTES = 2 * MAX_CA_BYTES;
 const MAX_BUNDLED_CA_COUNT = 1_024;
 const startupOptions = new Set([
@@ -90,7 +93,14 @@ function parseUrl(value: string): { url: URL; hostname: string; port: number } {
     url.port = String(port);
     if (Buffer.byteLength(url.toString()) > MAX_URL_BYTES) fail('invalid-url');
     return { url, hostname, port };
-  } catch { return fail('invalid-url'); }
+  } catch { return fail(credentialsNeedEncoding(value) ? 'invalid-url-credentials' : 'invalid-url'); }
+}
+function credentialsNeedEncoding(value: unknown): boolean {
+  if (typeof value !== 'string' || Buffer.byteLength(value) > MAX_URL_BYTES) return false;
+  const userinfo = /^postgres(?:ql)?:\/\/(.*)@[^@]*$/is.exec(value)?.[1];
+  if (userinfo === undefined) return false;
+  if (/\s/u.test(userinfo)) return true;
+  try { decodeURIComponent(userinfo); return false; } catch { return true; }
 }
 
 function certificates(pem: string, maxBytes: number, maxCount: number): readonly string[] {
@@ -192,12 +202,14 @@ export function withPostgresDatabase(resolved: ResolvedPostgresTransport, databa
     identity.profile === 'plaintext-v1' ? undefined : identity.trustSource);
 }
 
-/** Setup/invariant URL. TLS runs ask URL-configured drivers to verify too; a URL cannot carry an in-memory CA. */
+/**
+ * Setup/invariant URL with an explicit TLS selection, so ambient PGSSLMODE cannot
+ * change it. A URL cannot carry an in-memory CA; use connectionOptions for that.
+ */
 export function postgresContextUrl(resolved: ResolvedPostgresTransport): string {
   const validated = restorePostgresTransport(resolved);
-  if (validated.identity.profile === 'plaintext-v1') return validated.connectionString;
   const url = new URL(validated.connectionString);
-  url.searchParams.set('sslmode', 'verify-full');
+  url.searchParams.set('sslmode', validated.identity.profile === 'plaintext-v1' ? 'disable' : 'verify-full');
   return url.toString();
 }
 
@@ -229,6 +241,8 @@ export function postgresTlsOptions(resolved: ResolvedPostgresTransport): Connect
 }
 
 export function postgresClientConfig(resolved: ResolvedPostgresTransport): ClientConfig {
+  // pg's native binding builds a libpq conninfo that drops these TLS options.
+  if (process.env.NODE_PG_FORCE_NATIVE !== undefined) fail('native-client-unsupported');
   const validated = restorePostgresTransport(resolved);
   const url = new URL(validated.connectionString);
   // No connectionString merge: pg can replace ssl and retains IPv6 URL brackets.

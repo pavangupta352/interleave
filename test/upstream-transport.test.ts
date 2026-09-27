@@ -5,7 +5,7 @@ import { inspect } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
 import { resolvePostgresTransport } from '../src/postgres-transport.js';
-import { connectPostgresUpstream } from '../src/protocol/upstream-transport.js';
+import { connectPostgresUpstream, connectionFailureMessage, DeferredUpstream, UpstreamConnectionError } from '../src/protocol/upstream-transport.js';
 
 const sslRequest = Buffer.from([0, 0, 0, 8, 4, 210, 22, 47]);
 const ca = rootCertificates[0]!;
@@ -164,3 +164,72 @@ describe('owned upstream negotiation', () => {
     await rejection(connectPostgresUpstream(resolvePostgresTransport(url)), 'upstream-connection-failed');
   });
 });
+
+describe('DeferredUpstream', () => {
+  it('retains writes and end in order until the verified stream exists', async () => {
+    await withPeer(() => undefined, async (url, peers, received) => {
+      const upstream = new DeferredUpstream(resolvePostgresTransport(url));
+      const events: string[] = [];
+      upstream.on('error', () => events.push('error'));
+      upstream.once('close', () => events.push('close'));
+      expect(upstream.write(Buffer.from('first-'))).toBe(true);
+      upstream.write(Buffer.from('second-'));
+      upstream.end(Buffer.from('third'));
+      expect(upstream.writableLength).toBe(18);
+      const deadline = performance.now() + 2_000;
+      while (Buffer.concat(received).toString() !== 'first-second-third' && performance.now() < deadline) await delay(5);
+      expect(Buffer.concat(received).toString()).toBe('first-second-third');
+      for (const peer of peers) peer.end();
+      while (!events.includes('close') && performance.now() < deadline) await delay(5);
+      expect(events).toEqual(['close']);
+    });
+  });
+
+  it('closes exactly once without an error when destroyed before verification', async () => {
+    await withPeer(() => undefined, async (url, peers) => {
+      const upstream = new DeferredUpstream(resolvePostgresTransport(url));
+      const events: string[] = [];
+      upstream.on('error', () => events.push('error'));
+      upstream.on('close', () => events.push('close'));
+      upstream.write(Buffer.from('never sent'));
+      upstream.destroy(); upstream.destroy();
+      await delay(100);
+      expect(events).toEqual(['close']);
+      await peersAbsent(peers);
+    });
+  });
+
+  it('reports one bounded connection error followed by close', async () => {
+    const server = createServer(); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    const upstream = new DeferredUpstream(resolvePostgresTransport(`postgres://user:credential-sentinel@127.0.0.1:${port}/fixture`));
+    const events: unknown[] = [];
+    upstream.on('error', error => events.push(error));
+    upstream.on('close', () => events.push('close'));
+    const deadline = performance.now() + 2_000;
+    while (!events.includes('close') && performance.now() < deadline) await delay(5);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toBeInstanceOf(UpstreamConnectionError);
+    expect((events[0] as UpstreamConnectionError).code).toBe('upstream-connection-failed');
+    expect(events[1]).toBe('close');
+  });
+});
+
+describe('connectionFailureMessage', () => {
+  it('maps harness connection failures to bounded diagnostics without hosts or credentials', () => {
+    const coded = (code: string, message = 'private detail credential-sentinel 10.0.0.1:5432') => Object.assign(new Error(message), { code });
+    expect(connectionFailureMessage(coded('SELF_SIGNED_CERT_IN_CHAIN'))).toMatch(/certificate verification failed/);
+    expect(connectionFailureMessage(coded('INVALID_PURPOSE'))).toMatch(/certificate verification failed/);
+    expect(connectionFailureMessage(coded('ECONNREFUSED'))).toBe('Could not connect to the PostgreSQL server (ECONNREFUSED).');
+    expect(connectionFailureMessage(coded('28P01'))).toBe('PostgreSQL rejected the password (28P01).');
+    expect(connectionFailureMessage(coded('28000', 'pg_hba.conf rejects connection for host "172.17.0.1", user "postgres", database "postgres", no encryption'))).toMatch(/requires TLS/);
+    expect(connectionFailureMessage(new Error('The server does not support SSL connections'))).toMatch(/does not accept TLS/);
+    expect(connectionFailureMessage(new UpstreamConnectionError('upstream-timeout'))).toBe('Upstream PostgreSQL connection exceeded its deadline.');
+    expect(connectionFailureMessage(coded('42P01'))).toBeUndefined();
+    for (const code of ['SELF_SIGNED_CERT_IN_CHAIN', 'ECONNREFUSED', '28P01']) {
+      expect(connectionFailureMessage(coded(code))).not.toMatch(/credential-sentinel|10\.0\.0\.1/);
+    }
+  });
+});
+

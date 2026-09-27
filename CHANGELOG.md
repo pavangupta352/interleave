@@ -39,6 +39,15 @@ Interleave is in development. No stable version has been released.
   connecting. Upstream connection failures are reported with bounded messages.
 - Supervised scenario workers no longer inherit libpq TLS environment settings
   such as `PGSSLMODE`; the harness supplies its resolved policy explicitly.
+- Interleave's own PostgreSQL clients ignore ambient `PGSSLMODE` and related
+  settings in every process. Actor endpoints and plaintext setup/invariant URLs
+  now carry `sslmode=disable`, so actor drivers are not pushed into TLS by the
+  environment.
+- An actor proxy's upstream connection, including TLS negotiation, must complete
+  within 5 seconds. A trust or negotiation failure there is a harness error.
+- User names and passwords with unencoded special characters are rejected with a
+  percent-encoding hint. `NODE_PG_FORCE_NATIVE` is rejected for Interleave's own
+  connections because pg's native binding ignores their TLS settings.
 
 ### Qualified profiles
 

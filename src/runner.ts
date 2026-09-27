@@ -10,6 +10,7 @@ import { captureFixtureIdentity, FixtureIdentityError } from './fixture-identity
 import type { SourceIdentity } from './source-identity.js';
 import { environmentMatches, transportMatches } from './environment.js';
 import { postgresContextUrl, resolvePostgresTransport, runTransportIdentity } from './postgres-transport.js';
+import { connectionFailureMessage, HARD_UPSTREAM_FAILURES, UpstreamConnectionError } from './protocol/upstream-transport.js';
 import { resolveProtocolProfile } from './protocol-profile.js';
 import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile.js';
 import { missingReplayIdentity } from './replay-readiness.js';
@@ -218,7 +219,8 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           runtimeEpoch++;
           wake();
         },
-        onError(error) { if (!finished) stop('inconclusive', `${actor}: ${message(error)}`); },
+        // A trust or negotiation failure on an actor's upstream is a harness failure, not a timing artifact.
+        onError(error) { if (!finished) stop(error instanceof UpstreamConnectionError && HARD_UPSTREAM_FAILURES.has(error.code) ? 'harness-error' : 'inconclusive', `${actor}: ${message(error)}`); },
       });
       proxies.push(proxy);
     }
@@ -358,9 +360,10 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     // An interrupted execution cannot claim complete actor-error evidence, but
     // must retain a failure already observed before the harness stopped it.
     result.outcome = error instanceof Interrupted && !applicationRejected ? error.outcome : 'harness-error';
+    const reason = error instanceof Interrupted ? message(error) : connectionFailureMessage(error) ?? message(error);
     result.reason = applicationRejected
-      ? message(`One or more application operations rejected before execution was interrupted; ${message(error)}`)
-      : message(error);
+      ? message(`One or more application operations rejected before execution was interrupted; ${reason}`)
+      : reason;
   } finally {
     finished = true;
     clearTimeout(deadline);

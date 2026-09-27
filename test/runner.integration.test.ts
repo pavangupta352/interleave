@@ -44,6 +44,18 @@ describe('runner integration', () => {
     expect(run.cleanup.complete).toBe(true);
   });
 
+  test('actor and context URLs select plaintext explicitly, so an ambient PGSSLMODE cannot break actors', async () => {
+    const previous = process.env.PGSSLMODE;
+    process.env.PGSSLMODE = 'require';
+    try {
+      const run = await runOnce(counterScenario(), { databaseUrl, plan: ['alice', 'bob', 'alice', 'bob'] });
+      expect(run.outcome, run.reason).toBe('violation');
+      expect(run.environment.transport?.upstream.profile).toBe('plaintext-v1');
+    } finally {
+      if (previous === undefined) delete process.env.PGSSLMODE; else process.env.PGSSLMODE = previous;
+    }
+  });
+
   test('a serial order preserves both increments in the same application', async () => {
     const run = await runOnce(counterScenario(), { databaseUrl, plan: ['alice', 'alice', 'bob', 'bob'] });
     expect(run.outcome).toBe('passed');

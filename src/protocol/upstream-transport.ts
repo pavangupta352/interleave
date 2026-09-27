@@ -25,10 +25,39 @@ const certificateErrors = new Set([
   'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
   'UNABLE_TO_GET_ISSUER_CERT', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'ERR_TLS_CERT_SIGNATURE_ALGORITHM_UNSUPPORTED',
 ]);
+const certificateErrorPattern = /^(?:CERT_|UNABLE_TO_|DEPTH_ZERO_|SELF_SIGNED_|INVALID_PURPOSE|PATH_LENGTH_|ERR_TLS_CERT_)/;
+function certificateFailure(code: unknown): boolean {
+  return typeof code === 'string' && (certificateErrors.has(code) || certificateErrorPattern.test(code));
+}
 function tlsFailure(error: unknown): ErrorCode {
   const code = (error as { code?: unknown } | undefined)?.code;
   if (code === 'certificate-name-mismatch' || code === 'ERR_TLS_CERT_ALTNAME_INVALID') return 'upstream-certificate-name-mismatch';
-  return typeof code === 'string' && certificateErrors.has(code) ? 'upstream-tls-verification-failed' : 'upstream-tls-handshake-failed';
+  return certificateFailure(code) ? 'upstream-tls-verification-failed' : 'upstream-tls-handshake-failed';
+}
+
+/** Trust, negotiation and configuration failures; the rest may be transient. */
+export const HARD_UPSTREAM_FAILURES: ReadonlySet<string> = new Set([
+  'upstream-invalid-transport', 'upstream-tls-unavailable', 'upstream-negotiation-failed',
+  'upstream-tls-handshake-failed', 'upstream-tls-verification-failed', 'upstream-certificate-name-mismatch',
+]);
+
+/**
+ * A bounded diagnostic for a failed harness connection, without hosts, ports,
+ * certificate details or credentials. Undefined when the failure is not recognized.
+ */
+export function connectionFailureMessage(error: unknown): string | undefined {
+  if (error instanceof UpstreamConnectionError) return error.message;
+  const failure = error as { name?: unknown; code?: unknown; message?: unknown } | undefined;
+  if (failure?.name === 'PostgresTransportError' && typeof failure.message === 'string') return failure.message;
+  const code = failure?.code;
+  if (certificateFailure(code)) return 'PostgreSQL certificate verification failed. Supply the issuing CA with --upstream-ca or upstreamTls.ca.';
+  if (failure?.message === 'The server does not support SSL connections') return 'PostgreSQL does not accept TLS connections; enable TLS on the server or omit --upstream-tls.';
+  if (code === '28000' && typeof failure?.message === 'string' && failure.message.endsWith('no encryption')) return 'PostgreSQL requires TLS for this connection (pg_hba.conf hostssl); add --upstream-tls.';
+  if (code === '28P01') return 'PostgreSQL rejected the password (28P01).';
+  if (typeof code === 'string' && ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'ECONNRESET'].includes(code)) {
+    return `Could not connect to the PostgreSQL server (${code}).`;
+  }
+  return undefined;
 }
 
 /** Owns TCP/SSLRequest/TLS until verified handoff. It never accepts actor bytes. */
@@ -151,7 +180,7 @@ export class DeferredUpstream extends EventEmitter {
       .then(socket => this.#attach(socket), (error: unknown) => this.#fail(error));
   }
 
-  get writableLength(): number { return this.#socket ? this.#socket.writableLength : this.#pendingBytes; }
+  get writableLength(): number { return this.#socket ? this.#socket.writableLength : this.#pendingBytes + (this.#end?.bytes?.length ?? 0); }
 
   write(bytes: Buffer): boolean {
     if (this.#socket) return this.#socket.write(bytes);

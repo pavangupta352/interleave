@@ -121,7 +121,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     const connection = generation++; let ordinal = 0; let nextCycle = 0; let backendPid = 0; let startupFingerprint = '';
     let started = false; let ready = false; let negotiated = false; let terminated = false; let failed = false;
     let closed = false; let clientClosed = false; let upstreamClosed = false; let frontendEnded = false; let retainedBytes = 0;
-    let pendingTerminate: Buffer | undefined; let saslOffered = false; let saslSelected = false;
+    let pendingTerminate: Buffer | undefined; let saslOffered = false; let saslSelected = false; let authRequests = 0;
     const frontend = new FrameDecoder('startup', options); const backend = new FrameDecoder('typed', options); const assembler = new FrontendAssembler(options); const cycles = new FrontendCycleBuffer(options);
     const upstream = new DeferredUpstream(transport); track(upstream);
     interface Queued { frames: Buffer[]; byteLength: number; ordinal: number; unit?: PendingUnit }
@@ -236,6 +236,10 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
         const type = String.fromCharCode(frame[0]!);
         if (terminated) throw new Error('Actor sent protocol data after Terminate');
         if (type === 'p' && !ready) {
+          // Answer only a request already forwarded to the actor; pipelined authentication
+          // data could otherwise select mechanisms before this proxy can inspect them.
+          if (authRequests === 0) throw new Error('Unsupported profile: authentication data sent before the server requested it');
+          authRequests--;
           if (saslOffered && !saslSelected) {
             // SASLInitialResponse names its mechanism first. The loopback actor socket
             // has no upstream TLS channel, so a -PLUS binding cannot be passed through.
@@ -275,7 +279,12 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           backendPid = frame.readInt32BE(5); // Deliberately never retain or emit the secret key.
         }
         if (type === 'E' && inFlight) inFlight.errorSeen = true;
-        if (type === 'R' && !ready && frame.length >= 9 && frame.readInt32BE(5) === 10) { saslOffered = true; saslSelected = false; }
+        if (type === 'R' && !ready && frame.length >= 9) {
+          const request = frame.readInt32BE(5);
+          // Cleartext, MD5, GSS/SSPI and SASL requests each expect one frontend response.
+          if ([3, 5, 7, 8, 9, 10, 11].includes(request)) authRequests++;
+          if (request === 10) { saslOffered = true; saslSelected = false; }
+        }
         if (type === 'Z' && !ready) {
           if (!backendPid) throw new Error('Backend did not provide its process identity');
           ready = true; notifyEvent({ type: 'connected', actor: options.actor, connection, backendPid });
@@ -302,7 +311,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       }
     }));
     client.on('error', () => { if (!closing && !terminated && !failed) fail(new Error('Actor client connection failed')); });
-    upstream.on('error', (error: Error) => { if (!closing && !failed && (!terminated || inFlight)) fail(new Error(error instanceof UpstreamConnectionError ? error.message : 'PostgreSQL upstream connection failed')); });
+    upstream.on('error', (error: Error) => { if (!closing && !failed && (!terminated || inFlight)) fail(error instanceof UpstreamConnectionError ? error : new Error('PostgreSQL upstream connection failed')); });
     client.on('end', () => {
       if (closing || failed || closed) return;
       if (negotiated && !started) fail(new Error('Unsupported profile: TLS/GSS encryption required; configure this local actor connection with ssl:false'));
@@ -345,8 +354,10 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   const address = server.address();
   if (!address || typeof address === 'string') { server.close(); throw new Error('Actor proxy did not bind a TCP endpoint'); }
   const endpoint = new URL(transport.connectionString); endpoint.hostname = '127.0.0.1'; endpoint.port = String(address.port);
-  // The actor leg is loopback plaintext: no route or upstream TLS setting may escape to it.
+  // The actor leg is loopback plaintext: no route or upstream TLS setting may escape to it,
+  // and an explicit selection keeps ambient PGSSLMODE from requesting TLS here.
   for (const field of ['host', 'hostaddr', 'port', 'sslmode', 'ssl', 'sslcert', 'sslkey', 'sslrootcert', 'sslnegotiation']) endpoint.searchParams.delete(field);
+  endpoint.searchParams.set('sslmode', 'disable');
   return { connectionString: endpoint.toString(), close(): Promise<void> {
     if (closePromise) return closePromise; closing = true;
     if (pendingReplacement) {
