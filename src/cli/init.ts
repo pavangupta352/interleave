@@ -38,8 +38,9 @@ export default defineScenario({
     'README.md': `# Interleave scenario
 
 Install dependencies with npm install. No packages have been installed automatically.
-This scaffold requests Interleave ${version}; if that development version is not
-published, install a locally built package tarball with npm install /path/to/interleave.tgz.
+This scaffold requests Interleave ${version}. If that version is not available from
+npm, install the package archive from a GitHub release or a locally built tarball with
+npm install /path/to/interleave.tgz.
 
 With Docker installed and running, start a disposable local server and run:
 

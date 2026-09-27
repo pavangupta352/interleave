@@ -78,7 +78,7 @@ npm run build
 mkdir -p ../interleave-runtime
 npm pack --ignore-scripts --pack-destination ../interleave-runtime
 TEST_DATABASE_URL='<dedicated PostgreSQL administrator URL>' \
-INTERLEAVE_TYPEORM_RUNTIME_ARCHIVE=../interleave-runtime/pavangupta352-interleave-0.1.0-dev.0.tgz \
+INTERLEAVE_TYPEORM_RUNTIME_ARCHIVE=../interleave-runtime/pavangupta352-interleave-<version>.tgz \
 INTERLEAVE_TYPEORM_EVIDENCE=../typeorm-functional-evidence \
 INTERLEAVE_TYPEORM_PORTABLE=1 \
 npm run test:typeorm-functional

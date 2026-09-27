@@ -1,15 +1,34 @@
 # Getting started
 
-This guide gets you from a source checkout to a real failure and an offline
-report, then installs the current development package into a separate application.
-Interleave has no stable release or published installation promised by this guide.
-Use the scoped package name `@pavangupta352/interleave`; the unscoped npm name
-belongs to an unrelated package.
+This guide gets you from an installed release, or from a source checkout, to a
+real failure and an offline report. Use the scoped package name
+`@pavangupta352/interleave`; the unscoped npm name belongs to an unrelated package.
 
 The commands below use a POSIX shell, Git, Node.js 22.18+ and npm. Docker is needed
 for `--docker`; you can instead supply a dedicated PostgreSQL test server.
 The [compatibility guide](compatibility.md) records the exact qualified versions
 and platform limits.
+
+## Install a release
+
+Scaffold a scenario in a new directory, then install Interleave and the
+node-postgres driver the scaffold uses:
+
+```sh
+npx --yes @pavangupta352/interleave init interleave-race
+cd interleave-race
+npm install --save-dev --save-exact @pavangupta352/interleave pg@8.23.0
+unset TEST_DATABASE_URL
+npx --no-install interleave doctor --docker
+npm run race -- --docker        # exits 1: the scaffold deliberately loses an increment
+npx --no-install interleave report failure.interleave.json --out report.html
+```
+
+Every [GitHub release](https://github.com/pavangupta352/interleave/releases) also
+carries the npm archive and `SHA256SUMS`. To install from it, check the archive's
+hash and pass its path or URL to `npm install --save-dev`. Continue with the
+[application guide](application-guide.md) to test your own operation. The rest of
+this page builds from source.
 
 ## Build the checkout
 

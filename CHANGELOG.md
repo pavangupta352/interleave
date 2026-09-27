@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 27 September 2026
 
-Interleave is in development. No stable version has been released.
+The first public release. It finds, explains, replays and minimizes races in real
+PostgreSQL application code, and keeps them as regression tests.
 
-### Implemented
+### Features
 
 - Run existing application operations through a local PostgreSQL proxy, with
   disposable database setup, named actors and an application invariant.
@@ -34,8 +35,32 @@ Interleave is in development. No stable version has been released.
 - Use TypeORM 1.1.1 or 0.3.31 actors through a per-actor DataSource helper,
   qualified for transactions, serialization-failure retry, exact replay,
   minimization and portable export on PostgreSQL 16, 17 and 18.
+- Compare methods on real defects: the [case studies](docs/case-studies.md)
+  reproduce three historical bugs in Knex, node-pg-migrate and Sequelize and
+  measure ordinary concurrency, manual barriers and PostgreSQL's isolation
+  tester on the same scenarios.
 
-### Changed
+### Qualified profiles
+
+- Native PostgreSQL 16, 17 and 18 with node-postgres 8.23.0, tested on Node.js
+  22.18.0 and 24.7.0.
+- Postgres.js 3.4.9 parameterized queries and transactions through the explicit
+  `describe-flush-v1` profile, with its documented interruption lifecycle.
+- Drizzle 0.45.2 and Kysely 0.29.5 over node-postgres; TypeORM 1.1.1 and 0.3.31
+  on Node.js 22.18.0.
+- Verified upstream TLS on PostgreSQL 16, 17 and 18 with Node.js 22.18.0 and
+  24.7.0, against owned TLS-only servers; see the
+  [qualification record](docs/qualification/verified-upstream-tls-2026-09-27.md).
+- Python programs using psycopg 3.3.6 through `processActor`.
+- PostgreSQL 17.11 and pgvector 0.8.6 through the explicit fixture profile,
+  including the pinned pghybrid 0.1.4 search workload.
+- Desktop and mobile offline reports in Chromium, Firefox and WebKit.
+
+See [compatibility](docs/compatibility.md) for exact environments and
+[validation](docs/validation.md) for dated evidence. A passing bounded
+exploration does not prove an application has no races.
+
+### Changes since the September development builds
 
 - New run artifacts use schema version 3, with an explicit protocol profile and
   the upstream transport policy. Version 1 and 2 records stay readable; exact
@@ -55,42 +80,13 @@ Interleave is in development. No stable version has been released.
   percent-encoding hint. `NODE_PG_FORCE_NATIVE` is rejected for Interleave's own
   connections because pg's native binding ignores their TLS settings.
 
-### Qualified profiles
+### Known limits
 
-- Native PostgreSQL 16, 17 and 18 with node-postgres 8.23.0, tested on Node.js
-  22.18.0 and 24.7.0.
-- Postgres.js 3.4.9 parameterized queries and transactions through the explicit
-  `describe-flush-v1` profile, with its documented interruption lifecycle.
-- PostgreSQL 17.11 and pgvector 0.8.6 through the explicit fixture profile,
-  including the pinned pghybrid 0.1.4 search workload.
-- Desktop and mobile offline reports in Chromium, Firefox and WebKit.
-- The exact development candidate's installed CLI workflow on Node.js 22 and 24:
-  scaffold, record, exact replay, reduction, report, export and offline replay.
-  See the [candidate qualification](docs/qualification/canonical-package-workflow-2026-09-09.md)
-  for the archive identity and execution limits.
-
-See [compatibility](docs/compatibility.md) for completed CI results and exact
-environment records, and [validation](docs/validation.md) for development evidence.
-These profiles have specific protocol, source and fixture boundaries. A passing
-bounded exploration does not prove an application has no races.
-
-### Before a stable release
-
-Recent hardening preserves unknown cleanup after an unacknowledged database
-creation, applies completed-evidence checks to every exact replay entry point,
-and rejects incomplete or incorrectly encoded regression artifacts. Runtime
-identity also binds the CLI helpers required by exported replay commands.
-Completed legacy records missing fixture or connection identities are rejected
-before exact execution or export. Interrupted runs preserve application failures
-observed before cancellation or cleanup began.
-
-Pool reconnection now waits for the proxy to retire both sides of the previous
-connection before admitting its replacement. The pghybrid caller helper owns
-checked-out Client errors and interruption without destroying Kysely during
-acquisition. Installed adapter recording and replay use the same explicit
-verification budget.
-
-Historical application cases and comparative measurements, final distribution
-verification and the remaining [release checklist](docs/plans/implementation.md)
-are still open. Registry installation and stable release artifacts will be
-documented when they are published.
+- Interleave releases one command at a time unless PostgreSQL reports a lock
+  wait, so races that need two statements executing at the same instant can be
+  missed (the Knex 0.95.12 case study measures one).
+- An actor holds one command-producing connection at a time; configure pools with
+  a maximum of one connection per actor. COPY, pipelining and CancelRequest are
+  unsupported and fail explicitly.
+- Windows is not qualified. Clocks, randomness and external services are not
+  controlled.

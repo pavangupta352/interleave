@@ -2,7 +2,7 @@
 
 **Goal:** Deliver the complete real-Postgres race discovery, explanation and regression workflow described by the [specification](../architecture/specification.md).
 
-**25 September 2026 checkpoint:** Development is paused at the user's request. The [project status and full roadmap](https://github.com/pavangupta352/interleave/blob/main/PROJECT_STATUS.md) records the completed main-source qualification, unfinished TLS/TypeORM worktrees, current failures, broader compatibility work and exact resume sequence. The user explicitly rejected a feature freeze. This original acceptance checklist remains useful, but checked items apply to their qualified profiles and do not imply the expanded roadmap is finished.
+**27 September 2026:** Development resumed. Verified upstream TLS, `processActor` for other languages, TypeORM qualification and the historical case studies are integrated; see the [project status](https://github.com/pavangupta352/interleave/blob/main/PROJECT_STATUS.md) for the roadmap. Checked items apply to their qualified profiles and do not imply the expanded roadmap is finished.
 
 **Architecture:** A TypeScript library owns disposable databases, stable actor endpoints and a transparent wire proxy. A scheduler chooses protocol-unit release orders while PostgreSQL executes the actual work; exploration, strict replay and reduction use the same runner. Versioned artifacts feed the CLI and offline visual report.
 

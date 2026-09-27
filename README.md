@@ -1,87 +1,189 @@
 # Interleave
 
-Find a Postgres race in real application code, then keep the failing order as a regression test.
+Interleave reproduces race conditions in PostgreSQL application code. It records
+the order of SQL commands that broke your data and keeps that order as a
+regression test.
 
-Interleave runs your concurrent operations against real PostgreSQL through a local proxy. You supply setup and a business invariant; it controls command release order and records the evidence for replay. Use it to investigate intermittent database failures and test operations that must stay correct when they overlap.
+Two requests read the same row, both write, and one update disappears. It shows
+up in production and never in your test suite, because the tests never hit the
+one order that breaks it. Interleave runs your actual operations against a real
+PostgreSQL server and decides the order in which their SQL commands reach it, so
+you can produce that order deliberately and repeat it.
 
 ![Recorded neveroversell failure: two buyers read the same stock before either writes. The report shows released SQL, PostgreSQL completion, and the violated capacity invariant.](docs/assets/evidence-record.png)
 
-This actual run of [neveroversell's unchanged unsafe operation](examples/neveroversell/README.md) sold the last unit twice, with its optional delay set to zero. It is an owned demonstration, not a historical production defect.
+## What it looks like
 
-The library, CLI, offline viewer and supported regression exports are implemented. There is no stable release yet. Start from a source checkout or build a local package using the [installation guide](docs/getting-started.md).
+Take an ordinary read-then-write operation:
 
-See the [project status and full roadmap](https://github.com/pavangupta352/interleave/blob/main/PROJECT_STATUS.md) for completed work, current qualification, unfinished branches and the development pause checkpoint.
-
-## Run an example and open the evidence
-
-You need Git, Node.js 22.18+ and a running Docker engine. Run these commands in a POSIX shell:
-
-```sh
-git clone https://github.com/pavangupta352/interleave.git
-cd interleave
-npm ci
-npm run build
-unset TEST_DATABASE_URL
-node dist/cli.js doctor --docker
-
-if node dist/cli.js demo neveroversell --docker --out failure.interleave.json; then
-  interleave_status=0
-else
-  interleave_status=$?
-fi
-test "$interleave_status" -eq 1
-
-node dist/cli.js report failure.interleave.json --out failure.html
-node dist/cli.js demo neveroversell --docker --safe
+```js
+// counter.mjs — your application code, unchanged
+export async function incrementCounter(client, id) {
+  const { rows } = await client.query('SELECT value FROM counters WHERE id = $1', [id]);
+  const value = rows[0].value + 1;
+  await client.query('UPDATE counters SET value = $1 WHERE id = $2', [value, id]);
+  return value;
+}
 ```
 
-Open `failure.html` in your browser. The unsafe demo must exit 1 because its invariant fails; the explicit status check above treats any other result as an error. `doctor`, report creation and the safe demo should exit 0. Run the commands in order and stop if a check fails.
+A scenario names the concurrent operations (actors), sets up the database and
+states the rule that must hold. Each actor gets its own connection string and
+calls your code:
 
-`--docker` starts an owned PostgreSQL 16 container on a random loopback port and removes it and its volumes when the command ends, including failure or interruption. The first run may download the image. Each execution inside a command gets a fresh generated database. If you already have a dedicated test administrator URL, omit `--docker` and set `TEST_DATABASE_URL`; see [both setup routes](docs/getting-started.md#choose-your-postgresql-server).
+```js
+// scenario.mjs
+import assert from 'node:assert/strict';
+import { Client } from 'pg';
+import { defineScenario } from '@pavangupta352/interleave';
+import { incrementCounter } from './counter.mjs';
 
-Reports work offline without a server and never execute application code. Output files must be new, or explicitly replaced with `--force`. SQL, errors and selected actor observations can contain private data; review them before sharing.
+async function increment({ connectionString }) {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try { return { value: await incrementCounter(client, 1) }; }
+  finally { await client.end(); }
+}
 
-## Test your own operation
+export default defineScenario({
+  name: 'application-counter',
+  async setup({ db }) {
+    await db.query('CREATE TABLE counters (id int PRIMARY KEY, value int NOT NULL)');
+    await db.query('INSERT INTO counters VALUES (1, 0)');
+  },
+  actors: { alice: increment, bob: increment },
+  async invariant({ db }) {
+    const { rows } = await db.query('SELECT value FROM counters WHERE id = 1');
+    assert.equal(rows[0].value, 2, 'Both increments must be retained');
+  },
+});
+```
 
-A scenario has setup, two to eight named concurrent operations called actors, and an invariant. Each actor receives a proxy URL and calls your existing application function with its own database client. Setup and the invariant use a direct connection to the fresh database.
+Then let Interleave find the order that breaks it, replay it and shrink it. This
+is real output:
 
-The [application guide](docs/application-guide.md) walks through a complete imported business module, client injection, fixture setup, recording and replay. The [concepts guide](docs/concepts.md) explains plans, release versus completion, and the different outcomes.
+```console
+$ npx interleave run scenario.mjs --docker --out failure.json
+application-counter: 1 attempted, 1 completed; violations: 1; failure.
+Search: fifo; pending prefixes: 0; maximum attempted depth: 0.
+Recorded release units: 4; actor switches: 3.
 
-| Task | Command or API | What it establishes |
-| --- | --- | --- |
-| Look for a failing order | `run` / `explore` | Observations from bounded actor-choice exploration |
-| Reproduce recorded inputs and ordering | `replay` | The recorded command and wait contract against captured starting conditions |
-| Simplify a failure | `minimize` | Fewer explicit actor choices while retaining the same invariant failure |
-| Inspect or move a recorded case | `report` / `export` | Offline evidence, or the supported original-source regression bundle |
+$ npx interleave replay scenario.mjs failure.json --docker
+application-counter: violation (replay); 4 commands; cleanup complete.
+Both increments must be retained
 
-Prefer scenario files for supervised execution and source identity. Exact file replay checks source, installed dependencies, runtime, fixture and actor connections. It observes results again; row counts, actor values and the invariant outcome can differ. After a source repair, use a guided rerun or fresh exploration. The [regression and CI guide](docs/ci.md) shows how to retain the original case and check the changed code without treating an incompatible or budget-stopped run as a pass.
+$ npx interleave minimize scenario.mjs failure.json --docker --out minimal.json
+Reduced 4 choices to 0 in 4 attempts; locally-minimal.
 
-Minimization removes ordering instructions, while application SQL still executes under the runner's fallback policy. Its minimality is local to that policy. Search defaults to FIFO; an optional seed selects pending prefixes deterministically when observations match. Preserve the artifact for exact replay. A seed does not freeze external inputs, and a passing bounded search does not prove race freedom.
+$ npx interleave report failure.json --out failure.html
+Wrote offline evidence report: failure.html
+```
 
-## Tested scope
+Exit codes are meant for CI: `0` checked success, `1` invariant violation, `3`
+incompatible replay, `4` inconclusive or budget exhausted. `--docker` starts a
+throwaway PostgreSQL container and removes it afterwards; you can point Interleave
+at a dedicated test server instead.
 
-| Starting point | Scope and example |
+## How it works
+
+```text
+ alice ──► proxy A ──┐                                  ┌──► real PostgreSQL
+                     ├──► scheduler: releases one ──────┤    (executes, locks,
+ bob   ──► proxy B ──┘    command at a time, observes   │     reports waits)
+                          completions and lock waits    └──► invariant check
+```
+
+- Each actor connects to its own local proxy. The proxy forwards the original
+  protocol bytes and never rewrites or re-executes SQL.
+- The scheduler holds each command until it chooses to release it, then waits
+  for PostgreSQL to finish it or for a lock wait that PostgreSQL itself reports.
+- A bounded search tries different release orders. When the invariant fails,
+  the order, SQL, results and waits are saved as a JSON artifact.
+- The artifact records what makes the run repeatable: your source files,
+  installed dependencies, Node.js and PostgreSQL versions, the starting database
+  and the connection settings. If any of them changed, exact replay reports the
+  run as incompatible instead of executing it. After you fix the code, a guided
+  rerun or a fresh search checks the change as new evidence.
+
+## Commands
+
+| Command | What it does |
 | --- | --- |
-| node-postgres 8.23.0 | Native PostgreSQL 16/17/18; [application counter](examples/application/README.md) and [neveroversell](examples/neveroversell/README.md) |
-| Postgres.js 3.4.9 | Parameterized queries with the explicit [`describe-flush-v1` profile](examples/postgresjs/README.md) |
-| Verified upstream TLS | Chain and hostname checks on every PostgreSQL connection, with Node.js roots or your CA: `--upstream-tls [--upstream-ca ca.pem]`; see [compatibility](docs/compatibility.md#verified-upstream-tls) |
-| TypeORM 1.1.1 and 0.3.31 | Per-actor DataSource helper: CRUD, transactions, 40001 whole-transaction retry, exact replay, minimization and portable export on PostgreSQL 16/17/18 with Node.js 22.18; [example](examples/typeorm/README.md) |
-| pghybrid 0.1.4 | Four pinned public search adapters on PostgreSQL 17 with pgvector 0.8.6; [caller and shutdown boundaries](examples/pghybrid/README.md) |
-| Programs in other languages | `processActor` runs any program as an actor; qualified with Python and psycopg 3.3.6 ([example](examples/python/README.md)) |
-| Knex, node-pg-migrate and Sequelize over node-postgres 8.23.0 | Three historical library defects and their upstream fixes, with ordinary-concurrency, barrier and isolation-tester baselines; [case studies](docs/case-studies.md) |
+| `run` | Explores command orders and saves the first failing one |
+| `replay` | Reruns a saved failure exactly, or `--guided` against changed code |
+| `minimize` | Removes ordering choices while keeping the same failure |
+| `report` | Writes a standalone HTML evidence viewer that works offline |
+| `export` | Packages the failing source, lockfile and runtime so the failure replays elsewhere, offline |
+| `doctor`, `demo` | Checks your setup; runs a built-in oversell example |
+| `init` | Scaffolds a scenario in an existing project |
 
-The [compatibility matrix](docs/compatibility.md) records exact server/runtime versions, Node.js 22.18.0/24.7.0 qualification, and the limits of each profile. A qualified adapter workload does not establish support for every feature of its driver or ORM.
+The same workflow is available from JavaScript: `explore`, `runOnce`,
+`runScenarioFile`, `replay`, `minimize`, `exportRegression` and `renderReport`.
 
-The proxy preserves protocol bytes. PostgreSQL owns statement execution, locks and resumption. SQL batches remain intact; server-side functions are opaque. The native fixture profile permits `plpgsql` and rejects other extensions; pgvector has a separate explicit profile. Unsupported protocol and fixture features fail explicitly. Clocks, randomness and external services remain uncontrolled.
+## Works with
 
-## Documentation and help
+| | Tested scope |
+| --- | --- |
+| PostgreSQL | 16, 17 and 18, on Node.js 22.18 and 24.7 |
+| node-postgres 8.23.0 | The primary driver; [counter](examples/application/README.md) and [neveroversell](examples/neveroversell/README.md) examples |
+| Postgres.js 3.4.9 | Parameterized queries and transactions with the [`describe-flush-v1` profile](examples/postgresjs/README.md) |
+| Drizzle 0.45.2, Kysely 0.29.5 | Ordinary query-builder CRUD and transactions over node-postgres, each actor with its own pool |
+| TypeORM 1.1.1 and 0.3.31 | A per-actor DataSource helper with transactions and serialization-failure retry, on Node.js 22.18; [example](examples/typeorm/README.md) |
+| Any language | `processActor` runs a separate program as an actor; qualified with Python and psycopg 3.3.6 ([example](examples/python/README.md)) |
+| TLS-only servers | `--upstream-tls [--upstream-ca ca.pem]` verifies the certificate chain and host name on every connection |
+| pgvector 0.8.6 | An explicit fixture profile on PostgreSQL 17, with the pinned [pghybrid](examples/pghybrid/README.md) search adapters |
 
-Start with the [documentation index](docs/README.md), [CLI reference](docs/cli.md), or [API reference](docs/api.md). Use [troubleshooting](docs/troubleshooting.md) to interpret a stopped run, and [open a reproducible issue](https://github.com/pavangupta352/interleave/issues/new?template=bug_report.md) if needed. Report vulnerabilities through the [private security route](SECURITY.md).
+The [compatibility matrix](docs/compatibility.md) lists exact versions and the
+limits of each profile. A qualified workload does not establish support for every
+feature of its driver or ORM. The [case studies](docs/case-studies.md) measure
+Interleave against ordinary concurrency, manual barriers and PostgreSQL's
+isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize.
 
-`npm test` runs the native unit and integration suites with an owned PostgreSQL container unless you supply a dedicated URL. `npm run test:unit` needs neither PostgreSQL nor Docker. See [contributing](CONTRIBUTING.md) for checks, [validation](docs/validation.md) for dated evidence, and the [implementation checklist](docs/plans/implementation.md) for remaining acceptance work.
+## Limits
 
-## Related work and license
+- A search that passes is evidence about the orders it explored, not proof that
+  no race exists.
+- Interleave releases one command at a time unless PostgreSQL reports a lock
+  wait. Races that need two statements executing at the same instant can be
+  missed; the case studies include one such miss.
+- By default each actor holds one command-producing connection at a time. COPY,
+  pipelining and cancel requests are not supported and fail explicitly.
+- Clocks, randomness and external services are not controlled.
 
-[PostgreSQL's isolation tester](https://github.com/postgres/postgres/blob/master/src/test/isolation/README) already explores interleavings of authored SQL sessions. Interleave focuses on existing application operations and their replay evidence. [determined](https://github.com/glideapps/determined) provides deterministic TypeScript simulation primitives; [Antithesis](https://antithesis.com/) controls a broader execution environment.
+## Install
 
-[MIT](LICENSE) © Pavan Gupta. Vendored application source and bundled dependencies retain their own [neveroversell](examples/neveroversell/vendor/LICENSE), [pghybrid](examples/pghybrid/vendor/LICENSE) and other required license notices.
+Interleave needs Node.js 22.18 or later, and Docker if you use `--docker`.
+
+```sh
+npm install --save-dev @pavangupta352/interleave pg
+npx interleave doctor --docker
+```
+
+Each [GitHub release](https://github.com/pavangupta352/interleave/releases) also
+carries the package archive and its checksums; `npm install --save-dev <archive
+URL>` installs the same package. [Getting started](docs/getting-started.md)
+covers both routes and the source checkout.
+
+## Documentation
+
+Start with [getting started](docs/getting-started.md), then read the
+[concepts](docs/concepts.md) and the [application guide](docs/application-guide.md).
+The [CLI](docs/cli.md) and [API](docs/api.md) references cover every option;
+[regression checks and CI](docs/ci.md) shows how to keep a failure and check a
+repair; [troubleshooting](docs/troubleshooting.md) explains stopped runs. Report
+problems through [issues](https://github.com/pavangupta352/interleave/issues) and
+vulnerabilities through the [security policy](SECURITY.md).
+
+## Related work
+
+[PostgreSQL's isolation tester](https://github.com/postgres/postgres/blob/master/src/test/isolation/README)
+explores interleavings of hand-written SQL sessions. Interleave works on existing
+application operations and keeps replayable evidence.
+[determined](https://github.com/glideapps/determined) provides deterministic
+TypeScript simulation, and [Antithesis](https://antithesis.com/) controls a whole
+execution environment.
+
+## License
+
+[MIT](LICENSE) © Pavan Gupta. Vendored example source and bundled dependencies keep
+their own license notices, including [neveroversell](examples/neveroversell/vendor/LICENSE)
+and [pghybrid](examples/pghybrid/vendor/LICENSE).
