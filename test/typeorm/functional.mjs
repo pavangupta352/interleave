@@ -15,7 +15,10 @@ assert(evidence && databaseUrl, 'Run through scripts/test-typeorm-functional.mjs
 const portable = process.env.INTERLEAVE_TYPEORM_PORTABLE === '1';
 const installed = async name => JSON.parse(await readFile(join(app, 'node_modules', name, 'package.json'), 'utf8')).version;
 const versions = { typeorm: await installed('typeorm'), pg: await installed('pg'), interleave: await installed('@pavangupta352/interleave') };
-assert.equal(versions.typeorm, '1.1.1'); assert.equal(versions.pg, '8.23.0');
+// Installed versions must equal the example's exact pins, which must be qualified rows.
+const pins = JSON.parse(await readFile(join(app, 'package.json'), 'utf8')).dependencies;
+assert(['1.1.1', '0.3.31'].includes(pins.typeorm), `Unqualified TypeORM pin ${pins.typeorm}`); assert.equal(pins.pg, '8.23.0');
+assert.equal(versions.typeorm, pins.typeorm); assert.equal(versions.pg, pins.pg);
 const cli = join(app, 'node_modules/@pavangupta352/interleave/dist/cli.js');
 // Journals written by the generated entry modules: import, setup and invariant calls.
 const journals = { names: join(evidence, 'owned.txt'), imports: join(evidence, 'imports.txt'), invariants: join(evidence, 'invariants.jsonl') };
@@ -97,7 +100,7 @@ async function record(behavior, plan, { suffix = '', outcome, status, stopReason
   assert.deepEqual(run.plan, plan); assert.equal(run.cleanup.complete, true);
   assert.equal(run.environment.nodeVersion, process.version); server ??= run.environment.serverVersion;
   assert.equal(run.environment.serverVersion, server);
-  assert(run.environment.source.components.dependencies.packages.some(item => item.name === 'typeorm' && item.version === '1.1.1'));
+  assert(run.environment.source.components.dependencies.packages.some(item => item.name === 'typeorm' && item.version === versions.typeorm));
   const observed = await since(before);
   assert.equal(observed.names.length, 1); assert.deepEqual(observed.imports, [behavior]);
   return { run, file, artifact, observed };

@@ -1,6 +1,6 @@
 # TypeORM example
 
-This isolated example pins TypeORM **1.1.1** and node-postgres **8.23.0** and gives each actor its own PostgreSQL DataSource. It is separate from the Drizzle/Kysely examples and from the root development dependencies. TypeORM 1.1.1 declares Node `^20.19.0 || ^22.13.0 || >=24.11.0`, so it does not support Node 24.7.0. Both qualification jobs below run on Node 22.18.0 and fail explicitly on any other version.
+This isolated example pins TypeORM **1.1.1** and node-postgres **8.23.0** and gives each actor its own PostgreSQL DataSource. It is separate from the Drizzle/Kysely examples and from the root development dependencies. TypeORM 1.1.1 declares Node `^20.19.0 || ^22.13.0 || >=24.11.0`, so it does not support Node 24.7.0. Both qualification jobs below run on Node 22.18.0 and fail explicitly on any other version. The [`typeorm-0.3`](../typeorm-0.3/README.md) variant pins TypeORM 0.3.31 with its own lock and reuses this helper and scenario unchanged.
 
 ## Use the actor helper
 
@@ -40,7 +40,7 @@ Only SQLSTATE 40001 is retried. Every attempt runs on the actor's single connect
 
 ## Functional qualification
 
-`scripts/test-typeorm-functional.mjs` (`npm run test:typeorm-functional`) copies this example's `connection.mjs`, `scenario.mjs`, `package.json` and `package-lock.json` into a new application directory. It installs the supplied Interleave package archive there with the Node toolchain's own npm and then runs `test/typeorm/functional.mjs` inside that application. Every case runs the installed `interleave` CLI against real PostgreSQL. Generated entry modules wrap each behavior and append to journals when the scenario is imported, when setup creates a database, and when the invariant is called, returns or throws.
+`scripts/test-typeorm-functional.mjs` (`npm run test:typeorm-functional`) copies this example's `connection.mjs` and `scenario.mjs` into a new application directory, together with the `package.json` and `package-lock.json` of the example selected by `INTERLEAVE_TYPEORM_EXAMPLE`: `typeorm` (the default, TypeORM 1.1.1) or `typeorm-0.3` (TypeORM 0.3.31). It installs the supplied Interleave package archive there with the Node toolchain's own npm and then runs `test/typeorm/functional.mjs` inside that application. Every case runs the installed `interleave` CLI against real PostgreSQL. Generated entry modules wrap each behavior and append to journals when the scenario is imported, when setup creates a database, and when the invariant is called, returns or throws.
 
 | Case | Command and required observations |
 | --- | --- |
@@ -64,6 +64,9 @@ Observed on 2026-09-27 with the Interleave 0.1.0-dev.0 archive built from commit
 | 22.18.0 / 10.9.3 | 1.1.1 / 8.23.0 | 16.15 | 11/11, including minimization, drift and portable replay |
 | 22.18.0 / 10.9.3 | 1.1.1 / 8.23.0 | 17.11 | 11/11, including minimization, drift and portable replay |
 | 22.18.0 / 10.9.3 | 1.1.1 / 8.23.0 | 18.6 | 11/11, including minimization, drift and portable replay |
+| 22.18.0 / 10.9.3 | 0.3.31 / 8.23.0 | 16.15 | 11/11, including minimization, drift and portable replay |
+| 22.18.0 / 10.9.3 | 0.3.31 / 8.23.0 | 17.11 | 11/11, including minimization, drift and portable replay |
+| 22.18.0 / 10.9.3 | 0.3.31 / 8.23.0 | 18.6 | 11/11, including minimization, drift and portable replay |
 
 Each row recorded, replayed, minimized and exported against its own server. No artifact was replayed across PostgreSQL versions, and exact replay rejects a different server version.
 
@@ -85,7 +88,7 @@ npm run test:typeorm-functional
 
 ## Lifecycle qualification
 
-Run the separate lifecycle job from the repository root, with Node 22.18.0 selected and a dedicated PostgreSQL 16 administrator database:
+Run the separate lifecycle job from the repository root, with Node 22.18.0 selected and a dedicated PostgreSQL administrator database. It uses this checkout's own build of Interleave:
 
 ```sh
 npm ci --ignore-scripts
@@ -94,9 +97,16 @@ npm ci --prefix examples/typeorm --ignore-scripts
 TEST_DATABASE_URL='<dedicated PostgreSQL administrator URL>' npm run test:typeorm
 ```
 
-Use credentials for your dedicated test server. The job creates and removes its own generated application databases; it checks their absence independently. Neither job is silently included in or skipped by the root suite. The lifecycle job's source-bound check retains a copied exact-pin consumer under the system temporary directory, or under `INTERLEAVE_TYPEORM_RUN_DIRECTORY` when supplied. `INTERLEAVE_TYPEORM_JOURNAL` optionally records raw observations and run artifacts.
+Use credentials for your dedicated test server. The job creates and removes its own generated application databases; it checks their absence independently. Neither job is silently included in or skipped by the root suite. The lifecycle job's source-bound check retains a copied exact-pin consumer under the system temporary directory, or under `INTERLEAVE_TYPEORM_RUN_DIRECTORY` when supplied. `INTERLEAVE_TYPEORM_JOURNAL` optionally records raw observations and run artifacts. `INTERLEAVE_TYPEORM_EXAMPLE=typeorm-0.3` runs the same checks against the 0.3.31 installation; see that variant's README.
 
-Its checks cover normal rows, wire SQLSTATE 23505, real lock waits, cancellation/deadline actor settlement, queued initialization and queries, initial acquisition/timeout, queued QueryRunner acquisition, checked-out client failure, and in-process/supervised containment. It passed 14/14 on Node 22.18.0 / PostgreSQL 16.15. Transactions, retry and export/replay for this helper are qualified by the functional gate above, not by the lifecycle job.
+Its checks cover normal rows, wire SQLSTATE 23505, real lock waits, cancellation/deadline actor settlement, queued initialization and queries, initial acquisition/timeout, queued QueryRunner acquisition, checked-out client failure, and in-process/supervised containment. Transactions, retry and export/replay for this helper are qualified by the functional gate above, not by the lifecycle job.
+
+| Node | TypeORM / pg | PostgreSQL 16.15 | PostgreSQL 17.11 | PostgreSQL 18.6 |
+| --- | --- | --- | --- | --- |
+| 22.18.0 | 1.1.1 / 8.23.0 | 14/14 | 14/14 | 14/14 |
+| 22.18.0 | 0.3.31 / 8.23.0 | 14/14 | 14/14 | 14/14 |
+
+In every row, both blocked-query checks still found the server backend in a `Lock`/`transactionid` wait after the client closed. The pending-acquisition check settled at the real pg timeout, after about five seconds.
 
 ## Limits
 

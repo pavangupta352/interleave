@@ -35,15 +35,19 @@ async function toolchainNpm() {
 }
 const npm = await toolchainNpm();
 
+// Dependency pins come from the selected example; the helper and scenario are shared.
+const example = process.env.INTERLEAVE_TYPEORM_EXAMPLE ?? 'typeorm';
+assert(['typeorm', 'typeorm-0.3'].includes(example), 'INTERLEAVE_TYPEORM_EXAMPLE must be typeorm or typeorm-0.3');
 const app = join(evidence, 'application'); await mkdir(app);
-const example = new URL('../examples/typeorm/', import.meta.url);
-for (const file of ['connection.mjs', 'scenario.mjs', 'package.json', 'package-lock.json']) await cp(new URL(file, example), join(app, file));
+const shared = new URL('../examples/typeorm/', import.meta.url), pinned = new URL(`../examples/${example}/`, import.meta.url);
+for (const file of ['connection.mjs', 'scenario.mjs']) await cp(new URL(file, shared), join(app, file));
+for (const file of ['package.json', 'package-lock.json']) await cp(new URL(file, pinned), join(app, file));
 await cp(new URL('../test/typeorm/functional.mjs', import.meta.url), join(app, 'functional.mjs'));
 const originalArchive = join(evidence, 'runtime.tgz'); await cp(archive, originalArchive);
 const env = { ...process.env, PATH: dirname(process.execPath) + delimiter + process.env.PATH, NODE_OPTIONS: '',
   npm_config_ignore_scripts: 'true', npm_config_audit: 'false', npm_config_fund: 'false', npm_config_update_notifier: 'false',
   INTERLEAVE_TYPEORM_RUNTIME_ARCHIVE: originalArchive, INTERLEAVE_TYPEORM_EVIDENCE: evidence };
-const identity = { node: process.version, platform: process.platform, arch: process.arch, npm,
+const identity = { example, node: process.version, platform: process.platform, arch: process.arch, npm,
   archive: { source: archive, bytes: archiveBytes.length, sha256: archiveSha256 } };
 
 let result = spawnSync(process.execPath, [npm.path, 'install', originalArchive, '--ignore-scripts'],

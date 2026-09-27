@@ -14,15 +14,31 @@ import { runScenarioFile } from '../../dist/supervised.js';
 import { parseRunArtifact } from '../../dist/artifact.js';
 
 assert.equal(process.version, 'v22.18.0', 'This separate TypeORM qualification requires Node22.18.0; it must not silently skip');
-const require = createRequire(new URL('../../examples/typeorm/package.json', import.meta.url));
+// The helper runs against the selected exact-pin installation. The typeorm-0.3
+// example has no helper of its own: a private copy of that installation
+// receives the shared helper, so it resolves that example's typeorm and pg.
+const exampleName = process.env.INTERLEAVE_TYPEORM_EXAMPLE ?? 'typeorm';
+assert(['typeorm', 'typeorm-0.3'].includes(exampleName), 'INTERLEAVE_TYPEORM_EXAMPLE must be typeorm or typeorm-0.3');
+let consumer = new URL(`../../examples/${exampleName}/`, import.meta.url);
+if (exampleName !== 'typeorm') {
+  const parent = process.env.INTERLEAVE_TYPEORM_RUN_DIRECTORY ?? tmpdir();
+  await mkdir(parent, { recursive: true });
+  const directory = await mkdtemp(join(parent, 'interleave-typeorm-helper-'));
+  await cp(consumer, directory, { recursive: true });
+  await cp(new URL('../../examples/typeorm/connection.mjs', import.meta.url), join(directory, 'connection.mjs'));
+  consumer = pathToFileURL(directory + '/');
+}
+const require = createRequire(new URL('package.json', consumer));
 const pg = require('pg');
 assert.equal(require('pg/package.json').version, '8.23.0');
-assert.equal(JSON.parse(await readFile(new URL('../../examples/typeorm/node_modules/typeorm/package.json', import.meta.url))).version, '1.1.1');
+const typeormVersion = JSON.parse(await readFile(new URL('package.json', consumer))).dependencies.typeorm;
+assert(['1.1.1', '0.3.31'].includes(typeormVersion), `Unqualified TypeORM pin ${typeormVersion}`);
+assert.equal(JSON.parse(await readFile(new URL('node_modules/typeorm/package.json', consumer))).version, typeormVersion);
 const databaseUrl = process.env.TEST_DATABASE_URL;
 assert(databaseUrl, 'TEST_DATABASE_URL must identify an explicit dedicated PostgreSQL administrator database');
 const helperUrl = process.env.INTERLEAVE_TYPEORM_BASELINE
   ? pathToFileURL(process.env.INTERLEAVE_TYPEORM_BASELINE)
-  : new URL('../../examples/typeorm/connection.mjs', import.meta.url);
+  : new URL('connection.mjs', consumer);
 const { withTypeOrmActor } = await import(helperUrl.href);
 const journal = async record => {
   if (process.env.INTERLEAVE_TYPEORM_JOURNAL) await appendFile(process.env.INTERLEAVE_TYPEORM_JOURNAL, JSON.stringify(record) + '\n');
@@ -127,7 +143,7 @@ test('source-bound supervised cancellation contains the installed TypeORM actor'
   await mkdir(directory, { recursive: true });
   // Retain a complete copy of the exact installation; no symlinked dependency
   // tree or fabricated identity. The original example install stays unchanged.
-  await cp(new URL('../../examples/typeorm/', import.meta.url), directory, { recursive: true });
+  await cp(consumer, directory, { recursive: true });
   await cp(new URL('./queued-scenario.mjs', import.meta.url), join(directory, 'scenario.mjs'));
   const namesFile = join(directory, 'owned-databases.txt'); await writeFile(namesFile, '');
   const previous = process.env.INTERLEAVE_TYPEORM_NAMES;
@@ -145,7 +161,7 @@ test('source-bound supervised cancellation contains the installed TypeORM actor'
     controller.abort();
     const run = await running;
     assert.equal(run.outcome, 'inconclusive', run.reason); assert.match(run.reason, /cancel/i); assert.equal(run.cleanup.complete, true);
-    assert(run.environment.source.components.dependencies.packages.some(node => node.name === 'typeorm' && node.version === '1.1.1'));
+    assert(run.environment.source.components.dependencies.packages.some(node => node.name === 'typeorm' && node.version === typeormVersion));
     assert.deepEqual(parseRunArtifact(run), run);
     const databases = (await admin.query('SELECT datname FROM pg_database WHERE datname = ANY($1::text[])', [names])).rows;
     const backends = (await admin.query('SELECT pid FROM pg_stat_activity WHERE datname = ANY($1::text[])', [names])).rows;
@@ -259,7 +275,8 @@ for (const acquisition of ['late-success', 'timeout']) test(`cancelled acquisiti
 test('cancellation settles a QueryRunner waiting for the actor pool lease', { concurrency: false }, () => observedPools(pools => owned(async database => {
   const controller = new AbortController(); let acquired = false;
   const running = observed(withTypeOrmActor({ connectionString: database.connectionString, signal: controller.signal }, [], async runner => {
-    const waitingRunner = runner.dataSource.createQueryRunner();
+    // TypeORM 1.x names the runner's DataSource `dataSource`; 0.3.x names it `connection`.
+    const waitingRunner = (runner.dataSource ?? runner.connection).createQueryRunner();
     try { await waitingRunner.connect(); acquired = true; }
     finally { await waitingRunner.release(); }
   }));
