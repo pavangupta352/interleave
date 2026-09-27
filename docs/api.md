@@ -207,6 +207,43 @@ a different one for exact replay is `incompatible` before any database work. The
 profile combines with `describe-flush-v1`: each Postgres.js connection keeps its
 own metadata and execution stages.
 
+## Statement overlap
+
+```js
+const search = await explore(scenario, { databaseUrl: process.env.TEST_DATABASE_URL, overlap: 'pairs' });
+const first = await runOnce(scenario, { databaseUrl: process.env.TEST_DATABASE_URL, overlap: 'pairs', plan: ['alice+bob'] });
+```
+
+By default a unit is released only when every running unit has completed or is
+confirmed blocked on a lock, so exploration covers orders *between* statements.
+Some races live *inside* one statement's execution: `INSERT ... WHERE NOT
+EXISTS` without a unique constraint, an upsert emulated in a CTE, or a read and a
+write in one statement. They need two statements running at once, which
+one-at-a-time release never produces.
+
+`overlap: 'pairs'` adds a second kind of choice: release the next units of two
+available actors, or two lanes, together. Both are written to PostgreSQL in one
+synchronous pass; PostgreSQL decides how their execution interleaves, and each
+completion and lock wait is observed as usual. The plan entry `alice+bob` asks for
+that pair, `alice#0+alice#1` pairs two lanes of one multi-producer actor, and
+exploration offers every unordered pair of available entries as an alternative
+at each decision. Fair fallback never pairs, so a run without pair entries still
+releases one unit at a time. Reduction treats a pair as one choice.
+
+Both steps of a pair record `overlap`, the index of the pair's first step, with
+one release time and one list of available entries. Runs with overlap use schema
+version 4, with `limits.overlap: 'pairs'` and an explicit `limits.connectionProfile`
+even when it is `single-producer-v1`.
+
+Exact replay, guided replay and reduction inherit the recorded mode; asking exact
+replay for a different one is `incompatible` before any database work. Replay
+releases a recorded pair together again and checks each command's identity, but
+it cannot make PostgreSQL interleave the pair the same way. It therefore does not
+compare lock waits or transaction states inside a pair, and the invariant result
+can differ from the recording. Replay an overlap failure several times before
+relying on it in CI, and read a mismatch after a pair as a changed interleaving:
+such an `incompatible` reason says so.
+
 ## File identity
 
 Before importing a scenario, the supervisor captures its literal local module graph, controlling package metadata and lockfile, actual installed dependency files and declared dependency relationships, and the Interleave runtime. It checks the same inputs after execution. Changed files prevent a completed result from being presented as bound evidence. Source and compiled runtimes have different identities.

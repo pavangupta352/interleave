@@ -48,7 +48,9 @@ requiring two detects the lost update.
 A **plan** is a prefix of actor choices. After its explicit choices end, the
 runner rotates fairly among actors that can proceed. With connection lanes, a
 choice can name one lane (`alice#1`), and rotation also alternates among an
-actor's lanes. An **exploration** tries
+actor's lanes. With overlap pairs, a choice can name two entries (`alice+bob`):
+both next commands are released together and PostgreSQL decides how they
+interleave, which reaches races inside a single statement. An **exploration** tries
 alternative prefixes from observed choices until it finds a failure, exhausts
 its modeled frontier, or reaches a configured limit. FIFO is the default search
 order. A seed makes pending-prefix selection repeatable when the observed choices

@@ -278,3 +278,55 @@ export async function checkStagedReport(page, url, artifact, legacy) {
     return { checks: ['real description metadata', 'accessible description and execution outcomes', 'no invented ready status', 'linked execution identity', 'mobile overflow', 'invalid stage rejected', 'legacy and staged imports', 'exact staged download', 'no errors or external requests'], passed: true };
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }
+
+/** Two commands released in the same instant stay identifiable as a pair without implying execution order. */
+export async function checkOverlapReport(page, url, artifact, legacy) {
+  const errors = [], requests = [];
+  const onError = error => errors.push(error.message);
+  const onRequest = request => { if (request.url() !== url) requests.push(request.url()); };
+  page.on('pageerror', onError); page.on('request', onRequest);
+  try {
+    await page.goto(url);
+    await page.getByRole('heading', { name: artifact.scenario, exact: true }).waitFor();
+    const [first, second] = artifact.trace;
+    assert.equal(first.overlap, 0, 'The real run released a pair first'); assert.equal(second.overlap, 0);
+    assert.deepEqual(await page.locator('#actor-filter option').allTextContents(), ['All actors', 'alice', 'bob'], 'A pair plan entry is not an actor');
+    assert.equal(await page.getByRole('button', { name: new RegExp(`^Step 1, ${first.actor}: .*\\. Released with step 2\\. Simple query`) }).count(), 1);
+    assert.equal(await page.getByRole('button', { name: new RegExp(`^Step 2, ${second.actor}: .*\\. Released with step 1\\. Simple query`) }).count(), 1);
+    for (const [index, partner] of [[0, 2], [1, 1]]) {
+      const tag = page.locator(`.command[data-step="${index}"] .overlap-tag`);
+      assert.ok(await tag.isVisible(), 'Every layout shows the pair tag'); assert.equal(await tag.textContent(), `Released with step ${partner}`);
+    }
+    assert.equal(await page.locator('tr.pair-first').count(), 1); assert.equal(await page.locator('tr.pair-second').count(), 1);
+    const bracket = await page.locator('tr.pair-first .step-number').evaluate(element => getComputedStyle(element, '::before').borderLeftWidth);
+    assert.equal(bracket, '1px', 'A ruled bracket joins the paired step numbers');
+    assert.equal(await page.locator('.metadata').getByText('1 overlapped pair', { exact: true }).count(), 1);
+    assert.ok((await page.locator('.scope-note').textContent()).includes('so their row order is not execution order'));
+    assert.ok((await page.locator('.inspector').textContent()).includes(`Released withStep 2 · ${second.actor}`));
+    await page.getByRole('button', { name: 'Select step 2' }).click();
+    assert.equal(await page.locator('.command[aria-pressed="true"]').getAttribute('data-step'), '1');
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-step')), '1', 'Selecting the partner moves focus to it');
+    assert.ok((await page.locator('.inspector').textContent()).includes(`Released withStep 1 · ${first.actor}`));
+    await page.locator('#actor-filter').selectOption(second.actor);
+    await page.waitForFunction(() => document.querySelectorAll('.command').length === 1);
+    assert.equal(await page.locator('tr.pair-first, tr.pair-second').count(), 0, 'A pair whose partner is filtered out is not bracketed');
+    assert.equal(await page.locator('.overlap-tag').textContent(), 'Released with step 1');
+    await page.getByRole('button', { name: 'Select step 1' }).click();
+    assert.equal(await page.locator('.command[aria-pressed="true"]').getAttribute('data-step'), '0', 'A filtered-out partner is revealed');
+    assert.equal(await page.locator('#actor-filter').inputValue(), '');
+    await page.locator('.record-details summary').click();
+    const record = await page.locator('.record-body').textContent();
+    assert.ok(record.includes('OverlapTwo queued commands may be released in the same instant; PostgreSQL chooses how they interleave (pairs)'));
+    assert.ok(record.includes(`Recorded plan${artifact.plan.join(' → ')}`));
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Pair labels and record details fit the viewport');
+    assert.equal(await page.getByText(/undefined|NaN/).count(), 0);
+    await page.locator('#import-file').evaluate((element, data) => {
+      const transfer = new DataTransfer(); transfer.items.add(new File([JSON.stringify(data)], 'legacy.json', { type: 'application/json' }));
+      element.files = transfer.files; element.dispatchEvent(new Event('change', { bubbles: true }));
+    }, legacy);
+    await page.getByRole('heading', { name: legacy.scenario, exact: true }).waitFor();
+    assert.equal(await page.locator('.overlap-tag, tr.pair-first, tr.pair-second').count(), 0, 'Records without pairs show no pair markers');
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    return { checks: ['real overlapped pair', 'pair plan is not an actor', 'pair accessible names', 'pair tag in every layout', 'ruled bracket', 'pair count', 'execution-order caveat', 'partner inspection and focus', 'filtered partner', 'overlap record detail', 'mobile overflow', 'legacy without pairs'] };
+  } finally { page.off('pageerror', onError); page.off('request', onRequest); }
+}

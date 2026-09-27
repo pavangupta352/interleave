@@ -97,6 +97,8 @@ at a dedicated test server instead.
   protocol bytes and never rewrites or re-executes SQL.
 - The scheduler holds each command until it chooses to release it, then waits
   for PostgreSQL to finish it or for a lock wait that PostgreSQL itself reports.
+  With `--overlap pairs`, a search can also release two commands together and
+  let PostgreSQL interleave them, which reaches races inside one statement.
 - A bounded search tries different release orders. When the invariant fails,
   the order, SQL, results and waits are saved as a JSON artifact.
 - The artifact records what makes the run repeatable: your source files,
@@ -144,8 +146,10 @@ isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize
 - A search that passes is evidence about the orders it explored, not proof that
   no race exists.
 - Interleave releases one command at a time unless PostgreSQL reports a lock
-  wait. Races that need two statements executing at the same instant can be
-  missed; the case studies include one such miss.
+  wait, or you enable `--overlap pairs`. Without it, races that need two
+  statements executing at the same instant are missed; the case studies include
+  one such miss. With it, PostgreSQL chooses how a released pair interleaves, so
+  replaying such a failure can succeed only some of the time.
 - By default each actor holds one command-producing connection at a time. COPY,
   pipelining and cancel requests are not supported and fail explicitly.
 - Clocks, randomness and external services are not controlled.

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
 import { runScenarioFile, renderReport } from '../../dist/index.js';
 import { loadNeveroversell } from '../../dist/cli/demo.js';
-import { checkLaneReport, checkReport, checkStagedReport } from './report-checks.mjs';
+import { checkLaneReport, checkOverlapReport, checkReport, checkStagedReport } from './report-checks.mjs';
 import { checkLongEvidence, longEvidenceFixture } from './report-long-evidence.mjs';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -45,9 +45,18 @@ try {
   assert.equal(lanes.schemaVersion, 4);
   assert.ok(lanes.environment.source);
   const lanesHtml = await renderReport(lanes);
+  const pair = await runScenarioFile(fileURLToPath(new URL('../fixtures/cli/claim.mjs', import.meta.url)), {
+    databaseUrl, signal: controller.signal, overlap: 'pairs', plan: ['alice+bob'],
+    source: { projectRoot: fileURLToPath(new URL('../../', import.meta.url)) },
+  });
+  assert.equal(pair.outcome, 'violation', pair.reason);
+  assert.equal(pair.cleanup.complete, true);
+  assert.equal(pair.schemaVersion, 4);
+  assert.equal(pair.limits.overlap, 'pairs');
+  const pairHtml = await renderReport(pair);
   const longEvidence = longEvidenceFixture();
   const longHtml = await renderReport(longEvidence);
-  const pages = { '/staged': stagedHtml, '/long': longHtml, '/lanes': lanesHtml };
+  const pages = { '/staged': stagedHtml, '/long': longHtml, '/lanes': lanesHtml, '/pair': pairHtml };
   server = createServer((request, response) => { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(pages[request.url] ?? html); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const url = `http://127.0.0.1:${server.address().port}/`;
@@ -62,7 +71,8 @@ try {
         const stagedResult = await checkStagedReport(page, `${url}staged`, staged, artifact);
         const longResult = await checkLongEvidence(page, `${url}long`, longEvidence);
         const laneResult = await checkLaneReport(page, `${url}lanes`, lanes, artifact);
-        console.log(`[browser] ${name} ${viewport.width}×${viewport.height}: ${result.checks.length} legacy + ${stagedResult.checks.length} staged + ${longResult.checks.length} synthetic long-evidence + ${laneResult.checks.length} connection-lane checks passed`);
+        const pairResult = await checkOverlapReport(page, `${url}pair`, pair, artifact);
+        console.log(`[browser] ${name} ${viewport.width}×${viewport.height}: ${result.checks.length} legacy + ${stagedResult.checks.length} staged + ${longResult.checks.length} synthetic long-evidence + ${laneResult.checks.length} connection-lane + ${pairResult.checks.length} overlapped-pair checks passed`);
       } finally { await page.close(); }
     }
     await browser.close(); browser = undefined;

@@ -33,6 +33,14 @@ text. Lock waits between two connections of the same actor name the blocking
 connection. Actors that used one connection, and all single-producer records,
 keep plain actor names.
 
+When a record released two commands together (overlap pairs), each of them
+says **Released with step N**, a thin bracket joins their step numbers while both
+rows are shown next to each other, and the summary counts the pairs. PostgreSQL
+chose how a pair interleaved, so its row order is not execution order. The
+inspector names the partner step, explains that a replay cannot force the same
+interleaving, and **Select step N** moves to the partner, clearing filters that
+hide it.
+
 Use the arrow keys to move through the filtered order; Home and End select its
 first and last command, including across page boundaries. The ledger renders at
 most 100 commands per page. Search and actor filters preserve the original step

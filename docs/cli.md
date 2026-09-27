@@ -81,6 +81,14 @@ initial actor-choice prefix. Sampled success does not prove race freedom.
 Quote a plan that names connection lanes, such as `'alice#0,bob'`, so no shell
 treats `#` specially.
 
+`--overlap pairs` also explores releasing two actors' next commands together, so
+two statements can race inside PostgreSQL; see
+[statement overlap](api.md#statement-overlap). The plan may then name a pair:
+`--plan alice+bob,carol`. `replay` and `minimize` take the mode from the recording
+and do not accept the option. A replayed pair is released together again, but
+PostgreSQL may interleave it differently, so an overlap failure can reproduce
+only some of the time.
+
 A detected invariant violation exits 1, including a successful replay or completed
 minimization of that failure. A shell with `set -e` would stop there. The
 [application walkthrough](application-guide.md#record-inspect-and-replay) checks

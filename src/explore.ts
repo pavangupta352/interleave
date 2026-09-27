@@ -35,7 +35,7 @@ export async function explore(input: Scenario | string, options: ExploreOptions)
       recordedReleasedSteps: 0, recordedActorSwitches: 0, traceCountsComplete: true },
     runs: [], explored: 0, pending: 1, retainedBytes: Buffer.byteLength(initial), omittedRuns: 0, violationCount: 0, hardFailureCount: 0,
     stopReason: 'frontier-exhausted',
-    coverage: 'Bounded exploration of observed actor command-release choices. Database execution, external work and unsampled schedules remain outside this result. Retained bytes measure encoded results and candidate keys, not process heap usage.',
+    coverage: `Bounded exploration of observed actor command-release choices${overlap ? ', including pairs released together; PostgreSQL chose how each pair interleaved' : ''}. Database execution, external work and unsampled schedules remain outside this result. Retained bytes measure encoded results and candidate keys, not process heap usage.`,
   };
   const budget = searchBudget(options.totalTimeoutMs, options.signal);
   try {

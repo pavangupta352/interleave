@@ -13,12 +13,21 @@
   identity, so a different socket accept order still replays. Reports label
   connections only for actors that used several of them.
 
+- Explore races inside a single statement (`overlap: 'pairs'`, `--overlap pairs`).
+  A pair choice such as `alice+bob` releases two next commands together and lets
+  PostgreSQL interleave them; exploration adds every unordered pair of available
+  entries. Replay releases recorded pairs together again, but cannot force the
+  same interleaving, so an overlap failure may reproduce only some of the time.
+  Reports mark paired commands and state that their row order is not execution
+  order.
+
 ### Changes
 
-- Multi-producer runs use schema version 4, which requires
-  `limits.connectionProfile` and `limits.maxConnectionsPerActor`, permits
-  `actor#n` plan entries and records available lanes. Single-producer runs keep
-  schema version 3, and versions 1-3 read unchanged.
+- Multi-producer runs and runs with overlap pairs use schema version 4, which
+  requires `limits.connectionProfile` and `limits.maxConnectionsPerActor`,
+  permits `actor#n` and `alice+bob` plan entries, records available lanes for
+  multi-producer runs, and records paired steps with `overlap`. Other
+  single-producer runs keep schema version 3, and versions 1-3 read unchanged.
 - The unsupported second command connection error now names the multi-producer
   profile as the alternative.
 
