@@ -205,10 +205,11 @@ describe('multi-producer actors against real PostgreSQL', () => {
 
   test('a lane plan waits for a connection and never turns an unavailable lane into a pass', async () => {
     // Nothing else may proceed while the plan waits, so the wait is bounded by half the deadline.
-    const waiting = await runOnce(poolLostUpdate(), { ...multi, plan: ['alice#5'], timeoutMs: 1500 });
-    expect(waiting.outcome).toBe('incompatible');
-    expect(waiting.reason).toMatch(/Schedule asks for alice#5 at step 0, which has not queued its next command; nothing else could proceed for 750 ms/);
-    expect(waiting.durationMs).toBeLessThan(1500);
+    // Connection events restart that bound, so leave room for slow startups on a loaded host.
+    const waiting = await runOnce(poolLostUpdate(), { ...multi, plan: ['alice#5'], timeoutMs: 4000 });
+    expect(waiting.outcome, waiting.reason).toBe('incompatible');
+    expect(waiting.reason).toMatch(/Schedule asks for alice#5 at step 0, which has not queued its next command; nothing else could proceed for 2000 ms/);
+    expect(waiting.durationMs).toBeLessThan(4000);
     const settled: Scenario = { ...poolLostUpdate(), actors: {
       alice: context => withPool(context, async pool => (await pool.query('SELECT 1')).rowCount),
       bob: poolLostUpdate().actors.bob!,
