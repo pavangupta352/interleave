@@ -102,7 +102,12 @@ pre { overflow: auto; tab-size: 2; }
 .command-summary { display: flex; gap: 5px 12px; flex-wrap: wrap; font-size: 10px; color: var(--muted); }
 .command-wait { color: var(--amber); }
 .command-error { color: var(--red); font-family: var(--mono); }
-.lane-tag { color: var(--ink); font-weight: 600; }
+.lane-tag, .overlap-tag { color: var(--ink); font-weight: 600; }
+/* A ruled bracket joins the step numbers of two commands released together. */
+.pair-first .step-number, .pair-second .step-number { position: relative; }
+.pair-first .step-number::before, .pair-second .step-number::before { content: ''; position: absolute; left: 14px; width: 6px; border-left: 1px solid var(--ink); }
+.pair-first .step-number::before { top: 24px; bottom: -1px; border-top: 1px solid var(--ink); }
+.pair-second .step-number::before { top: 0; height: 24px; border-bottom: 1px solid var(--ink); }
 .mobile-actor { display: none; overflow-wrap: anywhere; }
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 26px 0 32px; }
 .record-count { color: var(--muted); font-size: 11px; }
@@ -189,6 +194,7 @@ pre { overflow: auto; tab-size: 2; }
   .command { min-height: 104px; padding: 12px; gap: 6px; }
   .mobile-actor { display: block; font-size: 11px; font-weight: 600; color: var(--blue); }
   .lane-tag { display: none; }
+  .pair-first .step-number::before, .pair-second .step-number::before { left: 5px; }
   .sql-preview { font-size: 11px; }
   .command-summary { font-size: 9px; gap: 5px; }
   .pagination { padding: 16px 20px 0; }
