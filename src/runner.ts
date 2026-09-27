@@ -20,6 +20,9 @@ import {
 } from './lanes.js';
 import type { ActorProxy, ActorResult, DatabaseContext, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
 
+/** How long a multi-producer decision waits for a just-completed connection's next command. */
+const LANE_SETTLE_MS = 25;
+
 class Interrupted extends Error {
   constructor(readonly outcome: Outcome, message: string) { super(message); }
 }
@@ -102,7 +105,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const settled = new Map<string, ActorResult>();
   // One lane per admitted connection generation. The single-producer proxy lets
   // only one lane of an actor hold commands at a time; multi-producer does not.
-  interface LaneState extends Lane { queue: PendingUnit[]; running?: { step: TraceStep; blocked: boolean }; fingerprint?: string; closed: boolean }
+  interface LaneState extends Lane { queue: PendingUnit[]; running?: { step: TraceStep; blocked: boolean }; fingerprint?: string; closed: boolean; activityAt?: number }
   const lanes = new Map<string, LaneState>();
   const laneState = (actor: string, connection: number): LaneState => {
     const key = laneLabel(actor, connection);
@@ -120,6 +123,11 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   let lastActor: string | undefined;
   const lastConnection = new Map<string, number>();
   let laneWait: string | undefined;
+  let laneWaitSince = 0;
+  let laneWaitEpoch = -1;
+  // A plan entry that names an idle connection may wait for it, but not for ever
+  // while every other actor is held: that is usually a deadlock of the plan.
+  const laneWaitLimit = Math.min(5_000, Math.floor(timeoutMs / 2));
   let runtimeEpoch = 0;
   // Plan entries are decisions; an overlapped pair is one decision and two steps.
   let decisions = 0;
@@ -233,7 +241,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           if (event.type === 'startup') {
             const identity = { actor: event.actor, connection: event.connection, fingerprint: event.fingerprint };
             if (retain(identity)) result.connections!.push(identity);
-            laneState(actor, event.connection).fingerprint = event.fingerprint;
+            Object.assign(laneState(actor, event.connection), { fingerprint: event.fingerprint, activityAt: performance.now() });
             if (binder) {
               const admitted = [...lanes.values()].flatMap(lane => lane.actor === actor && lane.fingerprint !== undefined ? [lane.fingerprint] : []);
               const changed = binder.startup(actor, event.connection, admitted, event.fingerprint);
@@ -310,14 +318,22 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           if ((!previous || JSON.stringify(previous) !== JSON.stringify(observation)) && retain(observation)) state.step.waits.push(observation);
         }
       }
+      const current = liveLanes();
+      // A queued command that no recorded connection can match is incompatible now,
+      // rather than after waiting for a connection or actor that will never proceed.
+      const mismatch = binder?.mismatch(current);
+      if (mismatch) throw new Interrupted('incompatible', mismatch);
       if ([...lanes.values()].some(lane => lane.running && !lane.running.blocked)) { laneWait = undefined; await pause(); continue; }
       const allReady = names.every(actor => settled.has(actor) || active(actor));
       if (!allReady) { laneWait = undefined; await pause(); continue; }
-      const current = liveLanes();
-      // A queued command that no recorded connection can match is incompatible now,
-      // rather than after waiting for a connection that will never proceed.
-      const mismatch = binder?.mismatch(current);
-      if (mismatch) throw new Interrupted('incompatible', mismatch);
+      if (multi) {
+        // A connection that has just started or completed usually queues its next
+        // command within milliseconds. Let it, so choices do not depend on how quickly.
+        const now = performance.now();
+        const settling = [...lanes.values()].filter(lane => lane.activityAt !== undefined && now - lane.activityAt < LANE_SETTLE_MS
+          && !lane.queue.length && !lane.running && !lane.closed && !settled.has(lane.actor));
+        if (settling.length) { await pause(Math.max(1, Math.ceil(LANE_SETTLE_MS - (now - Math.min(...settling.map(lane => lane.activityAt!)))))); continue; }
+      }
       const availableLanes = current.filter(lane => lane.head !== undefined && !lane.running);
       if (!availableLanes.length) { await pause(); continue; }
       if (result.trace.length >= maxSteps) throw new Interrupted('inconclusive', `Execution reached its ${maxSteps}-step limit`);
@@ -344,13 +360,23 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
         if (!members) chosen.push(fairLane(names, availableLanes, lastActor, lastConnection));
         // Resolve members in order; a later member cannot take a lane chosen earlier.
         const view = current.map(lane => ({ ...lane }));
+        // Replay stops preferring the recorded generation once waiting has made no progress.
+        const patient = !(laneWait !== undefined && laneWaitEpoch === runtimeEpoch && performance.now() - laneWaitSince >= laneWaitLimit);
         for (const [index, member] of (members ?? []).entries()) {
           const resolution = expectedGroup
-            ? binder!.resolve(expectedGroup[index]!, view, settled.has(member.actor), result.trace.length + index)
+            ? binder!.resolve(expectedGroup[index]!, view, settled.has(member.actor), result.trace.length + index, patient)
             : resolvePlanEntry(member, view, settled.has(member.actor), lastConnection, result.trace.length + index);
           if (resolution.kind === 'incompatible') throw new Interrupted('incompatible', resolution.reason);
-          // Waiting is bounded by the run deadline and never becomes a pass.
-          if (resolution.kind === 'wait') { laneWait = resolution.reason; await pause(); continue executionLoop; }
+          // Waiting never becomes a pass. Replay waits until the run deadline; a plan
+          // entry becomes infeasible once nothing else could proceed for laneWaitLimit.
+          if (resolution.kind === 'wait') {
+            if (laneWait !== resolution.reason || laneWaitEpoch !== runtimeEpoch) {
+              laneWait = resolution.reason; laneWaitSince = performance.now(); laneWaitEpoch = runtimeEpoch;
+            } else if (!expectedGroup && performance.now() - laneWaitSince >= laneWaitLimit) {
+              throw new Interrupted('incompatible', `${resolution.reason}; nothing else could proceed for ${laneWaitLimit} ms`);
+            }
+            await pause(); continue executionLoop;
+          }
           chosen.push(resolution.lane);
           view.find(lane => lane.actor === resolution.lane.actor && lane.connection === resolution.lane.connection)!.running = true;
         }
@@ -401,6 +427,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       // Release in one synchronous pass: a pair's commands are written upstream together.
       for (const { lane, unit, step } of group) {
         unit.release().then(completion => {
+          lane.activityAt = performance.now();
           if (retain(completion)) {
             step.completedAt = performance.now() - started;
             step.completion = protocolProfile === 'describe-flush-v1' && completion.kind !== 'metadata'

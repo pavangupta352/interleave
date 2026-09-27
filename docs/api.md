@@ -174,14 +174,19 @@ has completed or is confirmed blocked by a PostgreSQL lock observation. Lanes of
 one actor can therefore wait for each other; the observed wait identifies the
 blocking connection's backend. An actor is ready for the next decision once it has settled or
 any of its lanes has a queued or running unit; idle connections are not waited
-for.
+for. A connection that has just started or completed a command gets up to 25 ms
+to queue its next one before the scheduler decides without it. A command that
+arrives later is not an available choice at that decision, so fair fallback and
+recorded choices can still differ between runs when application timing varies.
 
 A plan entry `alice` releases whichever of alice's connections can proceed,
 rotating among them. `alice#1` names one connection. If it has not queued its
-next command yet, the runner waits for it within `timeoutMs`; if alice settles
-first, or that connection is closed or lock-blocked, the choice is infeasible and
-the run is `incompatible`. A wait that reaches the deadline is `inconclusive`
-and names the connection it was waiting for. Neither is a pass. Exploration,
+next command yet, the runner waits for it. The choice is infeasible and the run
+is `incompatible`, naming the connection, if alice settles first, if that
+connection is closed or lock-blocked, or if nothing else can proceed for half of
+`timeoutMs` (at most 5 seconds), for example because the connection is waiting
+for a result the plan holds back. Exploration and reduction move on from such a
+choice. It is never a pass. Exploration,
 guided replay and reduction qualify only the actors that used several command
 connections, so single-connection actors keep plain names. A lane number in a
 plan refers to the accept order of the run executing it; connections opened
@@ -196,8 +201,10 @@ order. A binding never changes during the run, and startup counts, waits and
 transaction states are compared through it. A queued command that no recorded
 connection can match is `incompatible` immediately. When several connections of
 one actor begin with the same command and later diverge, their queued commands
-cannot distinguish them; if their accept order also changed, replay can report
-`incompatible`, never a false match.
+cannot distinguish them. Replay prefers the recorded connection while it may
+still queue that command, and binds another matching connection once nothing
+has proceeded for the same bounded wait. If that guess or a changed accept order
+does not match the recording, replay reports `incompatible`, never a false match.
 
 Records of this profile use schema version 4. The default `single-producer-v1`
 profile, its records and its rejection of a second command connection are

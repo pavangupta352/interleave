@@ -47,7 +47,9 @@ export async function minimize(scenario: Scenario | string, original: RunResult,
       throw new MinimizationVerificationError(verificationFailure?.outcome ?? verified.outcome, budget.reason(), verificationFailure);
     }
     // Lane-qualified only for actors that released commands on several connections.
-    let plan = planFromTrace(original);
+    // Lane numbers follow this environment's verified replay, whose accept order
+    // can differ from the recording's.
+    let plan = planFromTrace(verified);
     const originalChoices = plan.length;
     let run = verified;
     const expectedEnvironment = structuredClone(verified.environment);
@@ -84,7 +86,7 @@ export async function minimize(scenario: Scenario | string, original: RunResult,
           plan = candidate; run = trial; chunks = Math.max(2, chunks - 1); reduced = true;
           break;
         }
-        if (trial.outcome === 'inconclusive') { stopReason = 'inconclusive'; break reduction; }
+        if (trial.outcome === 'inconclusive') { stopReason = 'inconclusive'; reason = trial.reason ?? 'A reduction candidate could not be evaluated'; break reduction; }
       }
       if (reduced) {
         locallyMinimal = plan.length === 0;

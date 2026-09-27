@@ -204,9 +204,11 @@ describe('multi-producer actors against real PostgreSQL', () => {
   });
 
   test('a lane plan waits for a connection and never turns an unavailable lane into a pass', async () => {
+    // Nothing else may proceed while the plan waits, so the wait is bounded by half the deadline.
     const waiting = await runOnce(poolLostUpdate(), { ...multi, plan: ['alice#5'], timeoutMs: 1500 });
-    expect(waiting.outcome).toBe('inconclusive');
-    expect(waiting.reason).toMatch(/deadline; Schedule asks for alice#5 at step 0/);
+    expect(waiting.outcome).toBe('incompatible');
+    expect(waiting.reason).toMatch(/Schedule asks for alice#5 at step 0, which has not queued its next command; nothing else could proceed for 750 ms/);
+    expect(waiting.durationMs).toBeLessThan(1500);
     const settled: Scenario = { ...poolLostUpdate(), actors: {
       alice: context => withPool(context, async pool => (await pool.query('SELECT 1')).rowCount),
       bob: poolLostUpdate().actors.bob!,
@@ -214,5 +216,30 @@ describe('multi-producer actors against real PostgreSQL', () => {
     const infeasible = await runOnce(settled, { ...multi, plan: ['alice', 'bob', 'alice#1'] });
     expect(infeasible.outcome).toBe('incompatible');
     expect(infeasible.reason).toMatch(/Schedule asks for alice#1, which cannot issue its next query at step 2/);
+  });
+
+  test('a plan that waits on a connection blocked by held work is infeasible, and reduction continues past it', async () => {
+    const scenario = kyselySideQuery();
+    // alice#0's next command needs the result of its side query on alice#1, which the plan holds.
+    const stuck = await runOnce(scenario, { ...multi, plan: ['alice#0', 'alice#0'], timeoutMs: 4000 });
+    expect(stuck.outcome, stuck.reason).toBe('incompatible');
+    expect(stuck.reason).toMatch(/Schedule asks for alice#0 at step 1, which has not queued its next command; nothing else could proceed for 2000 ms/);
+    expect(stuck.durationMs).toBeLessThan(4000);
+    const first = await runOnce(scenario, { ...multi, plan: ['alice#0', 'bob#0', 'alice#1', 'bob#1'] });
+    expect(first.outcome, first.reason).toBe('violation');
+    const reduced = await minimize(scenario, first, { databaseUrl, maxAttempts: 30, timeoutMs: 4000 });
+    expect(reduced.stopReason, reduced.reason).not.toBe('inconclusive');
+    expect(reduced.run.outcome).toBe('violation');
+    expect(reduced.reducedChoices).toBeLessThan(reduced.originalChoices);
+  }, 240_000);
+
+  test('a connection that just completed can queue its next command before the next decision', async () => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const run = await runOnce(checkoutTasks({ delayFirstConnect: false }), { ...multi, plan: ['alice#0', 'bob'] });
+      expect(run.outcome, run.reason).toBe('passed');
+      expect(run.trace[0]!.sql).toMatch(/^SELECT value/);
+      // alice#0's UPDATE follows its SELECT within milliseconds; the decision includes it.
+      expect(run.trace[1]!.available).toContain('alice#0');
+    }
   });
 });

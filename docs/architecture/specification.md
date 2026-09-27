@@ -24,7 +24,7 @@ The explicit `multi-producer-v1` connection profile lets every admitted connecti
 
 During confirmed connection shutdown, one prospective TCP frontend may wait for the prior session to retire. Its uninterpreted bytes are bounded; it has no generation, startup identity or upstream connection until both sockets of the prior session have closed. Abandoned waiting clients are discarded, and proxy shutdown owns their cleanup. This waiting frontend does not increase the admitted PostgreSQL connection cap or transfer command ownership before retirement.
 
-`explore(scenario, options)` takes an explicit admin database URL, maximum runs, steps, overall/individual-run deadlines and optional seed/strategy. `runOnce` executes a supplied partial actor plan with deterministic fallback. `replay` validates and consumes an entire recorded schedule. `minimize` repeatedly executes reduced ordering instructions and retains only the same invariant failure. API outcomes must remain serializable.
+`explore(scenario, options)` takes an explicit admin database URL, maximum runs, steps, overall/individual-run deadlines and optional seed/strategy. `runOnce` executes a supplied partial actor plan with a fair fallback; it is deterministic in the single-producer profile, while multi-producer choices also depend on which connections have queued commands at each decision. `replay` validates and consumes an entire recorded schedule. `minimize` repeatedly executes reduced ordering instructions and retains only the same invariant failure. API outcomes must remain serializable.
 
 ## Disposable database lifecycle
 

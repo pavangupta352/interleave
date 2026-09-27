@@ -295,7 +295,7 @@ export class LaneBinder {
   }
 
   /** Choose the live lane for the next recorded step, or wait while it may still appear. */
-  resolve(expected: StepIdentity, lanes: readonly LiveLane[], settled: boolean, step: number): PlanResolution {
+  resolve(expected: StepIdentity, lanes: readonly LiveLane[], settled: boolean, step: number, patient = true): PlanResolution {
     const recorded = this.recorded.get(laneLabel(expected.actor, expected.connection));
     const label = laneLabel(expected.actor, expected.connection);
     const blocked: PlanResolution = { kind: 'incompatible', reason: `Replay expects ${label}, which cannot issue its next query at step ${step}` };
@@ -318,7 +318,9 @@ export class LaneBinder {
     const waiting: PlanResolution = { kind: 'wait', reason: `Replay step ${step} waits for the first command of ${label}` };
     // Unbound recorded connections that begin with this exact command. When they
     // later diverge, queued heads cannot tell them apart: keep the recorded
-    // generation while it may still queue, as accept order normally matches.
+    // generation while it may still queue, as accept order normally matches. When
+    // patience runs out, bind another matching connection instead of waiting for
+    // one that may never query; a wrong guess surfaces as incompatible later.
     const peers = [...this.recorded.values()].filter(lane => lane.actor === expected.actor && lane.live === undefined
       && lane.fingerprint === recorded.fingerprint && lane.steps[0] !== undefined && sameUnit(expected, lane.steps[0]));
     const ambiguous = peers.some(peer => peer.steps.length !== recorded.steps.length
@@ -326,7 +328,7 @@ export class LaneBinder {
     if (ambiguous && !settled) {
       const identities = [...this.recorded.values()].filter(lane => lane.actor === expected.actor && lane.fingerprint === recorded.fingerprint).length;
       const admitted = own.filter(lane => lane.fingerprint === recorded.fingerprint).length;
-      if (same === undefined ? admitted < identities : unbound(same) && same.head === undefined && !same.running) return waiting;
+      if (same === undefined ? admitted < identities : patient && unbound(same) && same.head === undefined && !same.running) return waiting;
     }
     const candidate = own.filter(matches).sort((a, b) => a.connection - b.connection)[0];
     if (candidate) return { kind: 'release', lane: candidate };

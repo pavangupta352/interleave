@@ -1,5 +1,5 @@
 import { ARTIFACT_LIMITS, parseRunArtifact } from '../artifact-schema.js';
-import { multiLaneActors, parseLaneLabel, parsePlanChoice, parsePlanEntry } from '../lanes.js';
+import { parseLaneLabel, parsePlanChoice, parsePlanEntry } from '../lanes.js';
 import type { RunResult, TraceStep } from '../types.js';
 
 const PAGE_SIZE = 100;
@@ -7,7 +7,7 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 let run: RunResult;
 let replayCommand: string | null = null;
 let actors: string[] = [];
-/** Actors whose commands used several connections; only these need lane labels. */
+/** Actors whose commands or available choices used several connections; only these need lane labels. */
 let laneActors = new Set<string>();
 let selected = 0;
 let page = 0;
@@ -43,6 +43,16 @@ function actorOf(entry: string): string { return parsePlanEntry(entry)?.actor ??
 function planActors(entry: string): string[] { return parsePlanChoice(entry)?.map(item => item.actor) ?? [entry]; }
 function actorNames(value: RunResult): string[] { return [...new Set([...value.actors.map(actor => actor.actor), ...value.trace.flatMap(step => [step.actor, ...step.available.map(actorOf)]), ...value.plan.flatMap(planActors)])]; }
 function multiProducer(): boolean { return run.limits.connectionProfile === 'multi-producer-v1'; }
+/** Actors seen on more than one connection in released commands or available lanes. */
+function laneLabelledActors(value: RunResult): Set<string> {
+  const connections = new Map<string, Set<number>>();
+  const add = (actor: string, connection: number): void => { connections.set(actor, (connections.get(actor) ?? new Set()).add(connection)); };
+  for (const step of value.trace) {
+    add(step.actor, step.connection);
+    for (const entry of step.available) { const lane = parseLaneLabel(entry); if (lane) add(lane.actor, lane.connection); }
+  }
+  return new Set([...connections].filter(([, seen]) => seen.size > 1).map(([actor]) => actor));
+}
 /** `alice #1` for an actor that used several connections, otherwise the actor alone. */
 function owner(actor: string, connection: number): string { return laneActors.has(actor) ? `${actor} #${connection}` : actor; }
 function stepOwner(step: TraceStep): string { return owner(step.actor, step.connection); }
@@ -70,7 +80,7 @@ function commandLabels(step: TraceStep): { protocol: string; stage?: string; com
 }
 function setRun(value: RunResult, command: string | null): void {
   run = value; replayCommand = command; actors = actorNames(run); query = ''; actorFilter = ''; page = 0;
-  laneActors = multiProducer() ? multiLaneActors(run.trace) : new Set();
+  laneActors = multiProducer() ? laneLabelledActors(run) : new Set();
   selected = run.trace.find(step => step.completion?.error || step.waits.length)?.index ?? 0;
   page = Math.floor(selected / PAGE_SIZE);
   document.title = `${run.scenario} · Interleave`;
@@ -183,7 +193,8 @@ function renderShell(): void {
   app.replaceChildren(header, main, footer, status);
 }
 function updateLedger(): void {
-  filtered = run.trace.filter(step => (!actorFilter || step.actor === actorFilter) && (!query || `${stepOwner(step)}\n${step.sql}\n${step.completion?.error?.message ?? ''}\n${step.completion?.error?.code ?? ''}`.toLowerCase().includes(query)));
+  // Lane-labelled commands also match the plan notation, `alice#1`.
+  filtered = run.trace.filter(step => (!actorFilter || step.actor === actorFilter) && (!query || `${stepOwner(step)}\n${laneActors.has(step.actor) ? `${step.actor}#${step.connection}` : ''}\n${step.sql}\n${step.completion?.error?.message ?? ''}\n${step.completion?.error?.code ?? ''}`.toLowerCase().includes(query)));
   page = Math.min(page, Math.max(0, Math.ceil(filtered.length / PAGE_SIZE) - 1));
   const subset = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const ledger = document.querySelector<HTMLDivElement>('#ledger')!;
@@ -212,7 +223,7 @@ function updateLedger(): void {
         if (actor === step.actor) {
           const evidenceLabels = commandLabels(step);
           const command = button('', () => selectStep(step.index), 'command'); command.dataset.step = String(step.index); command.tabIndex = step.index === focusIndex ? 0 : -1;
-          command.setAttribute('aria-pressed', String(step.index === selected)); command.setAttribute('aria-label', `Step ${step.index + 1}, ${stepOwner(step)}: ${shortSql(step.sql).slice(0, 160)}. ${[evidenceLabels.overlap, evidenceLabels.stage, evidenceLabels.protocol, evidenceLabels.completion, evidenceLabels.waits].filter(Boolean).join('. ')}`);
+          command.setAttribute('aria-pressed', String(step.index === selected)); command.setAttribute('aria-label', `Step ${step.index + 1}, ${stepOwner(step)}: ${shortSql(step.sql).slice(0, 160)}. ${[laneActors.has(step.actor) ? `Connection #${step.connection}` : undefined, evidenceLabels.overlap, evidenceLabels.stage, evidenceLabels.protocol, evidenceLabels.completion, evidenceLabels.waits].filter(Boolean).join('. ')}`);
           command.setAttribute('aria-controls', 'inspector');
           command.append(node('span', 'mobile-actor', stepOwner(step)), node('code', 'sql-preview', shortSql(step.sql)));
           const summary = node('span', 'command-summary');

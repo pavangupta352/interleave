@@ -191,7 +191,7 @@ export async function checkLaneReport(page, url, artifact, legacy) {
     const blocker = artifact.trace.find(step => step.backendPid === waiting.waits[0].blockerPids[0]);
     assert.equal(blocker.actor, 'alice');
     assert.equal(await page.locator('.command[aria-pressed="true"]').getAttribute('data-step'), String(waiting.index), 'The recorded wait opens selected');
-    assert.equal(await page.getByRole('button', { name: new RegExp(`^Step ${waiting.index + 1}, alice #1: UPDATE .*1 wait observation`) }).count(), 1);
+    assert.equal(await page.getByRole('button', { name: new RegExp(`^Step ${waiting.index + 1}, alice #1: UPDATE .*\\. Connection #1\\. .*1 wait observation`) }).count(), 1, 'The accessible name carries the visible connection tag');
     assert.equal(await page.getByRole('button', { name: /^Step \d+, bob: / }).count(), artifact.trace.filter(step => step.actor === 'bob').length, 'A single-connection actor keeps its plain name');
     assert.equal(await page.locator('#selection-label').textContent(), `Selected: step ${waiting.index + 1} · alice #1`);
     assert.equal(await page.locator('.actor-label').textContent(), 'alice #1');
@@ -204,9 +204,11 @@ export async function checkLaneReport(page, url, artifact, legacy) {
     assert.equal(await page.locator('.metadata').getByText('3 command connections', { exact: true }).count(), 1);
     await page.locator('.identity summary').click();
     assert.equal(await page.locator('.identity dd').filter({ hasText: /^alice #0, alice #1, bob$/ }).count(), 1, 'Available choices use lane labels only where needed');
-    await page.getByRole('searchbox').fill('alice #1');
-    await page.waitForFunction(() => document.querySelectorAll('.command').length === 1);
-    assert.equal(await page.locator('.command').getAttribute('data-step'), String(waiting.index));
+    for (const text of ['alice #1', 'alice#1']) {
+      await page.getByRole('searchbox').fill(text);
+      await page.waitForFunction(() => document.querySelectorAll('.command').length === 1);
+      assert.equal(await page.locator('.command').getAttribute('data-step'), String(waiting.index), `Search finds ${text}`);
+    }
     await page.getByRole('searchbox').fill('');
     await page.waitForFunction(count => document.querySelectorAll('.command').length === count, artifact.trace.length);
     await page.locator('.record-details summary').click();
