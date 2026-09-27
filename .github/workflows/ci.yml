@@ -132,6 +132,75 @@ jobs:
       - name: Record, replay and repair the Python psycopg example from an installed package
         run: INTERLEAVE_TEST_PYTHON="$RUNNER_TEMP/python-actors/bin/python" npm run test:integration -- python
 
+  typeorm:
+    name: TypeORM ${{ matrix.example == 'typeorm' && '1.1.1' || '0.3.31' }} / PostgreSQL ${{ matrix.postgres }} / Node 22.18.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ['typeorm', 'typeorm-0.3']
+        postgres: ['16', '17', '18']
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: interleave-test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      INTERLEAVE_TYPEORM_EXAMPLE: ${{ matrix.example }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - name: Install locked dependencies and build
+        run: |
+          npm ci
+          npm run build
+      - name: Pack the runtime under test before installing any example
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime"
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/runtime" > "$RUNNER_TEMP/pack.json"
+          echo "INTERLEAVE_TYPEORM_RUNTIME_ARCHIVE=$RUNNER_TEMP/runtime/$(node -p 'require(process.argv[1])[0].filename' "$RUNNER_TEMP/pack.json")" >> "$GITHUB_ENV"
+      - name: TypeORM functional gate (installed archive, retry, exact and portable replay)
+        env:
+          TEST_DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/postgres', 'postgres', 'interleave-test', job.services.postgres.ports[5432]) }}
+          INTERLEAVE_TYPEORM_EVIDENCE: ${{ runner.temp }}/typeorm-functional
+          INTERLEAVE_TYPEORM_PORTABLE: '1'
+        run: npm run test:typeorm-functional
+      - name: Install the pinned example for the lifecycle job
+        run: npm ci --prefix "examples/$INTERLEAVE_TYPEORM_EXAMPLE" --ignore-scripts
+      - name: TypeORM lifecycle job
+        env:
+          TEST_DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/postgres', 'postgres', 'interleave-test', job.services.postgres.ports[5432]) }}
+          INTERLEAVE_TYPEORM_RUN_DIRECTORY: ${{ runner.temp }}/typeorm-lifecycle
+          INTERLEAVE_TYPEORM_JOURNAL: ${{ runner.temp }}/typeorm-lifecycle.jsonl
+        run: npm run test:typeorm
+      - name: Retain TypeORM evidence
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: typeorm-${{ matrix.example }}-pg${{ matrix.postgres }}
+          path: |
+            ${{ runner.temp }}/typeorm-functional
+            ${{ runner.temp }}/typeorm-lifecycle
+            ${{ runner.temp }}/typeorm-lifecycle.jsonl
+            !${{ runner.temp }}/**/node_modules
+          if-no-files-found: ignore
+          retention-days: 14
+          include-hidden-files: false
+
   browser:
     name: Offline report / Chromium, Firefox and WebKit
     runs-on: ubuntu-24.04
@@ -154,7 +223,7 @@ jobs:
   release-candidate:
     name: Prepare release assets (no publication)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [postgres, pgvector, managed, tls, python, browser]
+    needs: [postgres, pgvector, managed, tls, python, typeorm, browser]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

@@ -109,3 +109,9 @@ stay within the qualified protocol subset. Examples include libpq-based drivers,
 pgx, Npgsql and JDBC. That subset covers simple queries and ordinary extended
 cycles; it does not include COPY, pipeline mode or cancel requests. Those clients
 have not been qualified. Treat them as unverified until their own workflow runs.
+
+## TypeORM
+
+The [TypeORM example](../examples/typeorm/README.md) gives each actor its own DataSource and a node-postgres pool of size one through TypeORM's public driver option. The helper and scenario are qualified unchanged with TypeORM 1.1.1 and 0.3.31 (each with its own lockfile), node-postgres 8.23.0, Node.js 22.18.0 and PostgreSQL 16, 17 and 18. Eleven functional cases per row cover entity CRUD, committed and rolled-back transactions with a real 23505, a real 40001 serialization failure handled by whole-transaction retry (and reported as an actor error without retry), the unsafe lost update with exact replay and minimization, source drift rejection, and original-archive export with offline installation and exported exact replay. Fourteen lifecycle checks cover acquisition, errors, backend termination and cancellation.
+
+TypeORM 1.1.1 requires Node.js 20.19+, 22.13+ or 24.11+, so Node.js 24.7 is not a supported row. Closing a TypeORM client is not a PostgreSQL CancelRequest: a blocked backend can keep waiting until its blocker finishes or the generated database is cleaned up. Relations, `manager.transaction()`, pessimistic locks and deadlock retry have not been qualified.

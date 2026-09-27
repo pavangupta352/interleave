@@ -65,6 +65,7 @@ Minimization removes ordering instructions, while application SQL still executes
 | node-postgres 8.23.0 | Native PostgreSQL 16/17/18; [application counter](examples/application/README.md) and [neveroversell](examples/neveroversell/README.md) |
 | Postgres.js 3.4.9 | Parameterized queries with the explicit [`describe-flush-v1` profile](examples/postgresjs/README.md) |
 | Verified upstream TLS | Chain and hostname checks on every PostgreSQL connection, with Node.js roots or your CA: `--upstream-tls [--upstream-ca ca.pem]`; see [compatibility](docs/compatibility.md#verified-upstream-tls) |
+| TypeORM 1.1.1 and 0.3.31 | Per-actor DataSource helper: CRUD, transactions, 40001 whole-transaction retry, exact replay, minimization and portable export on PostgreSQL 16/17/18 with Node.js 22.18; [example](examples/typeorm/README.md) |
 | pghybrid 0.1.4 | Four pinned public search adapters on PostgreSQL 17 with pgvector 0.8.6; [caller and shutdown boundaries](examples/pghybrid/README.md) |
 | Programs in other languages | `processActor` runs any program as an actor; qualified with Python and psycopg 3.3.6 ([example](examples/python/README.md)) |
 

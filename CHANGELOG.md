@@ -31,6 +31,9 @@ Interleave is in development. No stable version has been released.
 - Run programs written in any language as actors with `processActor`. Each gets
   its actor endpoint through `DATABASE_URL` and the libpq `PG*` variables and may
   return one JSON observation on stdout. Qualified with Python and psycopg 3.3.6.
+- Use TypeORM 1.1.1 or 0.3.31 actors through a per-actor DataSource helper,
+  qualified for transactions, serialization-failure retry, exact replay,
+  minimization and portable export on PostgreSQL 16, 17 and 18.
 
 ### Changed
 
