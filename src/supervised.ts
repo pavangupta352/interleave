@@ -85,6 +85,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   let creationFailure: OwnedDatabaseCreationError | undefined;
   let child: ChildProcess | undefined;
   let interruption: string | undefined;
+  let runningAt: number | undefined;
   let workerFailure: string | undefined;
   let receivedHardFailure = false;
   let stopChild: (() => void) | undefined;
@@ -225,6 +226,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
           } else if (message.type === 'running' && received === undefined) {
             // The worker's own deadline starts now and names what it was waiting
             // for; the parent backstop fires shortly after it.
+            runningAt ??= performance.now();
             if (!interruption) armDeadline(timeoutMs + WORKER_DEADLINE_GRACE_MS);
           } else if (message.type === 'error') {
             result.reason = 'Scenario loading or worker execution failed';
@@ -243,6 +245,8 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
           }
           else {
             workerFailure = `Scenario worker exited before completing${signal ? ` (${signal})` : code === null ? '' : ` (exit ${code})`}`;
+            // A worker that dies after its own deadline was interrupted by it.
+            if (runningAt !== undefined && performance.now() - runningAt >= timeoutMs) interruption ??= `Execution exceeded its ${timeoutMs} ms deadline`;
             result.reason ??= workerFailure;
           }
           resolveExit();
