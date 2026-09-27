@@ -91,3 +91,21 @@ records real `40P01` rollback and `40001` whole-transaction retries on PostgreSQ
 16.13, with both preparation settings and explicit `fetch_types: false`.
 PostgreSQL can choose another deadlock victim on replay; a resulting change in
 the application's COMMIT/ROLLBACK order is correctly reported as incompatible.
+
+## External programs as actors
+
+`processActor` runs a separate program per actor and gives it only that actor's
+loopback endpoint. Python with psycopg 3.3.6 (binary wheel, libpq 18) on Python
+3.14 is qualified against PostgreSQL 16 through an installed-package workflow:
+the unsafe [example](../examples/python/README.md) oversold, exact replay
+reproduced the failure, an edited program was rejected as changed source, and the
+repaired program passed a fully explored frontier. The `python` CI job repeats it.
+Separate Node.js programs using node-postgres are covered by the integration suite
+in-process, including exact replay.
+
+Other clients are expected to work when they read `DATABASE_URL` or the libpq
+`PG*` variables, hold one command-producing connection at a time per actor, and
+stay within the qualified protocol subset. Examples include libpq-based drivers,
+pgx, Npgsql and JDBC. That subset covers simple queries and ordinary extended
+cycles; it does not include COPY, pipeline mode or cancel requests. Those clients
+have not been qualified. Treat them as unverified until their own workflow runs.

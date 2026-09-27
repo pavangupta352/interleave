@@ -44,6 +44,39 @@ A client can finish closing before the proxy receives both socket-close notifica
 
 Return a JSON value only when that observation belongs in the recorded evidence. An assertion failure in the invariant produces a violation; another exception is a harness error. Rejected application operations are actor errors and do not count as invariant violations.
 
+## External programs as actors
+
+`processActor(command, args?, options?)` turns any program into an actor, whatever
+language or PostgreSQL client it uses:
+
+```js
+import { defineScenario, processActor } from '@pavangupta352/interleave';
+
+const checkout = processActor('python3', ['checkout.py'], { cwd: 'services/shop' });
+export default defineScenario({ name: 'last-unit', setup, actors: { alice: checkout, bob: checkout }, invariant });
+```
+
+The program receives only its actor endpoint: `DATABASE_URL`, and `PGHOST`, `PGPORT`,
+`PGDATABASE`, `PGUSER`, `PGPASSWORD` with `PGSSLMODE=disable` for libpq-based
+clients. Other inherited `PG*` settings are removed. `INTERLEAVE_ACTOR` names the
+actor. Pass `env` as an object, or a function of the actor context, to map the
+endpoint to your application's own variable names.
+
+stdout is the result channel: empty, or exactly one JSON document, which becomes
+the actor's recorded value. Write logs to stderr. Use `output: 'ignore'` for
+programs that print other text. A nonzero exit rejects the actor with its status
+and the last 2 KiB of stderr, with the endpoint password redacted. Cancellation
+sends SIGTERM, then SIGKILL after `killGraceMs` (default 1000). stdout is bounded
+by `maxOutputBytes` (default 1 MiB). The program must not daemonize; it runs in
+the actor's process tree and is stopped with the run.
+
+Every connection the program opens goes through its actor's proxy, so the usual
+limits apply: one live command-producing connection per actor, and the qualified
+protocol subset. Bind program files into file recordings with `--include` (or
+`source.include`) so that editing them makes exact replay incompatible. The
+interpreter, runtime and packages the program loads are not part of Interleave's
+identity: pin them and replay in the same environment.
+
 ## Run and search
 
 `runScenarioFile(file, options)` imports an explicitly selected, trusted local scenario in a disposable worker. Its parent owns database cleanup even if the worker exits or crashes. Prefer file targets for the complete workflow:

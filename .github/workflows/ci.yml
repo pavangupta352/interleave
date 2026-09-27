@@ -109,6 +109,29 @@ jobs:
       - name: Qualify verified TLS across every connection role with owned TLS-only servers
         run: npm run test:tls
 
+  python:
+    name: Python actors (psycopg) / PostgreSQL 16 / Node 24.7.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - name: Install locked dependencies and the example's pinned Python requirements
+        run: |
+          npm ci
+          python -m venv "$RUNNER_TEMP/python-actors"
+          "$RUNNER_TEMP/python-actors/bin/pip" install -r examples/python/requirements.txt
+      - name: Record, replay and repair the Python psycopg example from an installed package
+        run: INTERLEAVE_TEST_PYTHON="$RUNNER_TEMP/python-actors/bin/python" npm run test:integration -- python
+
   browser:
     name: Offline report / Chromium, Firefox and WebKit
     runs-on: ubuntu-24.04
@@ -131,7 +154,7 @@ jobs:
   release-candidate:
     name: Prepare release assets (no publication)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [postgres, pgvector, managed, tls, browser]
+    needs: [postgres, pgvector, managed, tls, python, browser]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

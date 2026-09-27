@@ -114,7 +114,7 @@ test.each([undefined, 'failure', 'cancelled', 'skipped'])('rejects a tagged CI r
   const qualificationEnvironment = {
     GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'pavangupta352/interleave', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2',
     GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: f.ref,
-    INTERLEAVE_RELEASE_NEEDS: JSON.stringify({ postgres: { result: 'success' }, pgvector: { result: 'success' }, tls: { result: 'success' }, browser: { result: 'success' },
+    INTERLEAVE_RELEASE_NEEDS: JSON.stringify({ postgres: { result: 'success' }, pgvector: { result: 'success' }, tls: { result: 'success' }, python: { result: 'success' }, browser: { result: 'success' },
       ...(result === undefined ? {} : { managed: { result } }) }),
   };
   await expect(prepareRelease({ repository: f.repository, tag, out, archive, qualificationEnvironment }))
@@ -126,7 +126,7 @@ test('records all required CI job families in the verified tagged release manife
   const f = await fixture(); const tag = `v${f.version}`;
   await execFile('git', ['-C', f.repository, 'tag', tag]);
   const out = join(f.root, 'qualified candidate');
-  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', tls: 'success', browser: 'success' };
+  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', tls: 'success', python: 'success', browser: 'success' };
   const qualificationEnvironment = {
     GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'pavangupta352/interleave', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2',
     GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: f.ref,

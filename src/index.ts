@@ -1,6 +1,8 @@
 export { defineScenario } from './scenario.js';
 export { runOnce } from './runner.js';
 export { runScenarioFile } from './supervised.js';
+export { processActor } from './process-actor.js';
+export type { ProcessActorOptions } from './process-actor.js';
 export type { FixtureIdentityProfile, ResolvedFixtureIdentityProfile } from './fixture-identity.js';
 export type { TransportIdentity, UpstreamTlsInput } from './postgres-transport.js';
 export type {

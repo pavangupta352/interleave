@@ -66,6 +66,7 @@ Minimization removes ordering instructions, while application SQL still executes
 | Postgres.js 3.4.9 | Parameterized queries with the explicit [`describe-flush-v1` profile](examples/postgresjs/README.md) |
 | Verified upstream TLS | Chain and hostname checks on every PostgreSQL connection, with Node.js roots or your CA: `--upstream-tls [--upstream-ca ca.pem]`; see [compatibility](docs/compatibility.md#verified-upstream-tls) |
 | pghybrid 0.1.4 | Four pinned public search adapters on PostgreSQL 17 with pgvector 0.8.6; [caller and shutdown boundaries](examples/pghybrid/README.md) |
+| Programs in other languages | `processActor` runs any program as an actor; qualified with Python and psycopg 3.3.6 ([example](examples/python/README.md)) |
 
 The [compatibility matrix](docs/compatibility.md) records exact server/runtime versions, Node.js 22.18.0/24.7.0 qualification, and the limits of each profile. A qualified adapter workload does not establish support for every feature of its driver or ORM.
 

@@ -28,6 +28,9 @@ Interleave is in development. No stable version has been released.
   (`upstreamTls`, `--upstream-tls`, `--upstream-ca`, `sslmode=verify-full`).
   Setup and invariant contexts gain `connectionOptions` for additional clients.
   Actors that select SCRAM channel binding are refused explicitly.
+- Run programs written in any language as actors with `processActor`. Each gets
+  its actor endpoint through `DATABASE_URL` and the libpq `PG*` variables and may
+  return one JSON observation on stdout. Qualified with Python and psycopg 3.3.6.
 
 ### Changed
 

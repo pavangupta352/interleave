@@ -11,6 +11,8 @@ export default defineConfig({
       ...(process.env.INTERLEAVE_TEST_SUITE === 'unit' ? [integrationPattern] : []),
       ...(!pgvectorProfile ? [pgvectorPattern] : []),
       ...(process.env.INTERLEAVE_TEST_MANAGED_POSTGRES !== '1' ? ['test/**/*.managed.integration.test.ts'] : []),
+      // Python process actors need an interpreter with the example's pinned requirements.
+      ...(!process.env.INTERLEAVE_TEST_PYTHON ? ['test/**/*.python.integration.test.ts'] : []),
     ],
     testTimeout: 20_000,
     hookTimeout: 20_000,
