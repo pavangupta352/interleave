@@ -41,9 +41,9 @@ export class FrontendAssembler {
   private readonly portals = new Map<string, Portal>();
   private frames: Buffer[] = [];
   private backendOperations: BackendOperation[] = [];
-  private executions: { sql: string; identity: string }[] = [];
+  private executions: { sql: string; identity: string; statement: string }[] = [];
   private executionDependencies = new Set<string>();
-  private operations: { sql: string; identity: string }[] = [];
+  private operations: { sql: string; identity: string; statement: string }[] = [];
   private bytes = 0;
   private metadataBytes = 0;
   private readonly maxBuffered: number;
@@ -169,7 +169,7 @@ export class FrontendAssembler {
       const statement = { sql: sql.toString('utf8'), identity: hash(Buffer.concat([sql, Buffer.from([0]), types])) };
       this.remember(this.statements, name, statement);
       this.backendOperations.push({ type: 'P', name, statement });
-      this.operations.push({ sql: statement.sql, identity: 'parse:' + statement.identity });
+      this.operations.push({ sql: statement.sql, identity: 'parse:' + statement.identity, statement: statement.identity });
     } else if (type === 'B') {
       const name = reader.cstring().toString('hex'); const statement = this.statement(reader.cstring().toString('hex'));
       const start = reader.offset;
@@ -182,12 +182,12 @@ export class FrontendAssembler {
       const portal = { statement, identity: hash(statement.identity + ':' + hash(frame.subarray(start))) };
       this.remember(this.portals, name, portal);
       this.backendOperations.push({ type: 'B', name, portal });
-      this.operations.push({ sql: statement.sql, identity: 'bind:' + portal.identity });
+      this.operations.push({ sql: statement.sql, identity: 'bind:' + portal.identity, statement: statement.identity });
     } else if (type === 'E') {
       const portal = this.portal(reader.cstring().toString('hex')); const count = reader.i32(); reader.done();
       if (count < 0) throw new Error('Malformed Execute row limit');
       this.backendOperations.push({ type: 'E' });
-      this.executions.push({ sql: portal.statement.sql, identity: portal.identity + ':' + count });
+      this.executions.push({ sql: portal.statement.sql, identity: portal.identity + ':' + count, statement: portal.statement.identity });
       this.executionDependencies.add('parse:' + portal.statement.identity);
       this.executionDependencies.add('bind:' + portal.identity);
       this.executionDependencies.add('D:S:' + portal.statement.identity);
@@ -196,16 +196,22 @@ export class FrontendAssembler {
       const target = reader.take(1).toString(); const name = reader.cstring().toString('hex'); reader.done();
       if (target !== 'S' && target !== 'P') throw new Error('Malformed Describe/Close target');
       const item = target === 'S' ? this.statement(name) : this.portal(name);
-      const sql = 'sql' in item ? item.sql : item.statement.sql;
-      this.operations.push({ sql, identity: type + ':' + target + ':' + item.identity });
+      const statement = 'sql' in item ? item : item.statement;
+      this.operations.push({ sql: statement.sql, identity: type + ':' + target + ':' + item.identity, statement: statement.identity });
       if (type === 'C') {
         this.backendOperations.push({ type: 'C', name, target });
         this.forget(target, name);
       } else this.backendOperations.push({ type: 'D' });
     } else {
       reader.done();
-      const identity = this.executions.length ? [...this.executions, ...this.operations.filter(op => !this.executionDependencies.has(op.identity))] : this.operations;
-      const unit: FrontendUnit = { protocol: 'extended', sql: identity.map(x => x.sql).join('; '), fingerprint: hash(JSON.stringify(['extended', identity.map(x => x.identity)])), bytes: Buffer.concat(this.frames, this.bytes), reconciliation: { operations: this.backendOperations, index: 0, failed: false } };
+      const others = this.executions.length ? this.operations.filter(op => !this.executionDependencies.has(op.identity)) : this.operations;
+      const identity = [...this.executions, ...others];
+      // Every Execute names its statement. Other operations name each remaining statement
+      // once: a Parse and Describe of one statement prepare one command, not two.
+      const named = new Set(this.executions.map(execution => execution.statement));
+      const additional = others.filter(op => { const first = !named.has(op.statement); named.add(op.statement); return first; });
+      const text = [...this.executions, ...additional].map(x => x.sql).join('; ');
+      const unit: FrontendUnit = { protocol: 'extended', sql: text, fingerprint: hash(JSON.stringify(['extended', identity.map(x => x.identity)])), bytes: Buffer.concat(this.frames, this.bytes), reconciliation: { operations: this.backendOperations, index: 0, failed: false } };
       this.reset();
       return unit;
     }
