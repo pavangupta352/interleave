@@ -38,7 +38,7 @@ async function increment({ connectionString }) {
 }
 ```
 
-Each actor defaults to one admitted PostgreSQL connection. Set `maxConnectionsPerActor` from 2 through 8 to permit queryless auxiliary connections, such as an adapter monitor. Only one live connection may issue commands; it keeps that role until it closes, including while idle. Another live connection sending commands is an unsupported profile. Sequential reconnects receive a new connection generation.
+Each actor defaults to one admitted PostgreSQL connection. Set `maxConnectionsPerActor` from 2 through 8 to permit queryless auxiliary connections, such as an adapter monitor. Only one live connection may issue commands; it keeps that role until it closes, including while idle. Another live connection sending commands is an unsupported profile. Sequential reconnects receive a new connection generation. An operation that runs queries concurrently through a pool needs the explicit [multi-connection profile](#multi-connection-actors).
 
 A client can finish closing before the proxy receives both socket-close notifications. During confirmed shutdown, one prospective TCP client may wait with bounded, uninterpreted data. It receives no connection generation or startup identity, and opens no upstream connection, until the old frontend and backend sockets have both closed. A disconnected waiting client is discarded. Further waiting clients and connections beyond the cap while existing sessions are live remain unsupported.
 
@@ -154,6 +154,59 @@ The staged profile gives Parse/statement Describe/Flush its own release gate. Re
 
 Use Postgres.js 3.4.9 with `max: 1`, `ssl: false`, and prompt client closure on the actor's AbortSignal as well as in `finally`. Interrupted `sql.begin` calls need this lifecycle because the driver waits for ReadyForQuery before settling a protocol error. See the [measured profile and complete lifecycle example](qualification/postgresjs-describe-flush-2026-09-09.md). Selecting the profile does not enable arbitrary early-Flush pipelines, cursors, COPY, or cancellation routing.
 
+## Multi-connection actors
+
+```js
+const options = { databaseUrl: process.env.TEST_DATABASE_URL, connectionProfile: 'multi-producer-v1' };
+const run = await runScenarioFile('./scenario.mjs', { ...options, plan: ['alice#0', 'alice#1', 'bob'] });
+```
+
+`connectionProfile: 'multi-producer-v1'` lets every admitted connection of an
+actor send commands, for example a `pg.Pool` serving `Promise.all` queries, or an
+ORM transaction plus a query issued through the outer pool. Each connection is a
+**lane**, written `alice#1`: the actor and its zero-based connection generation,
+assigned in accept order. `maxConnectionsPerActor` defaults to 8 in this profile
+and remains the cap; size the application's pool within it.
+
+Every lane releases its own units in order, one at a time. The global rule is
+unchanged: another unit is released only when every running unit, on any lane,
+has completed or is confirmed blocked by a PostgreSQL lock observation. Lanes of
+one actor can therefore wait for each other; the observed wait identifies the
+blocking connection's backend. An actor is ready for the next decision once it has settled or
+any of its lanes has a queued or running unit; idle connections are not waited
+for.
+
+A plan entry `alice` releases whichever of alice's connections can proceed,
+rotating among them. `alice#1` names one connection. If it has not queued its
+next command yet, the runner waits for it within `timeoutMs`; if alice settles
+first, or that connection is closed or lock-blocked, the choice is infeasible and
+the run is `incompatible`. A wait that reaches the deadline is `inconclusive`
+and names the connection it was waiting for. Neither is a pass. Exploration,
+guided replay and reduction qualify only the actors that used several command
+connections, so single-connection actors keep plain names. A lane number in a
+plan refers to the accept order of the run executing it; connections opened
+concurrently can be numbered differently in another run.
+
+Exact replay does not rely on accept order. It binds each recorded connection to
+a live connection when the recorded connection's first command is due: the live
+connection must have the same startup identity and a queued command identical to
+the recorded one (protocol, SQL, fingerprint and stage). The recorded generation
+is preferred; another connection is used when the sockets arrived in a different
+order. A binding never changes during the run, and startup counts, waits and
+transaction states are compared through it. A queued command that no recorded
+connection can match is `incompatible` immediately. When several connections of
+one actor begin with the same command and later diverge, their queued commands
+cannot distinguish them; if their accept order also changed, replay can report
+`incompatible`, never a false match.
+
+Records of this profile use schema version 4. The default `single-producer-v1`
+profile, its records and its rejection of a second command connection are
+unchanged; that error now names this profile as the alternative.
+Exact replay, guided replay and reduction inherit the recorded profile; selecting
+a different one for exact replay is `incompatible` before any database work. The
+profile combines with `describe-flush-v1`: each Postgres.js connection keeps its
+own metadata and execution stages.
+
 ## File identity
 
 Before importing a scenario, the supervisor captures its literal local module graph, controlling package metadata and lockfile, actual installed dependency files and declared dependency relationships, and the Interleave runtime. It checks the same inputs after execution. Changed files prevent a completed result from being presented as bound evidence. Source and compiled runtimes have different identities.
@@ -179,11 +232,12 @@ Run options require `databaseUrl`, an explicit administrator URL for a dedicated
 
 | Option | Default | Meaning |
 | --- | ---: | --- |
-| `plan` | `[]` | Explicit actor choices, then fair rotation among available actors |
+| `plan` | `[]` | Explicit actor choices (or `actor#n` lanes in the multi-producer profile), then fair rotation among available actors |
 | `maxSteps` | 100 | Maximum released stages per run; whole cycles count once, staged metadata and continuation count separately |
 | `timeoutMs` | 10,000 | Per-run execution deadline in milliseconds. File runs capture source identity before and after execution under a separate 60-second bound each |
 | `maxEvidenceBytes` | 8 MiB | Recorded evidence budget per run |
-| `maxConnectionsPerActor` | 1 | Admitted PostgreSQL connection cap per actor; additional live connections must remain queryless |
+| `maxConnectionsPerActor` | 1 (8 with `multi-producer-v1`) | Admitted PostgreSQL connection cap per actor; in the default profile additional live connections must remain queryless |
+| `connectionProfile` | `single-producer-v1` | One live command connection per actor, or explicit `multi-producer-v1` connection lanes |
 | `protocolProfile` | `sync-cycle-v1` | Whole cycles, or explicit `describe-flush-v1` metadata and continuation stages |
 | `fixtureProfile` | `native` | Native PostgreSQL 16/17/18 capture, or explicit `postgresql17-pgvector0.8.6-v1` on its qualified server and extension |
 | `source` | Automatic local module graph | File targets: `{ projectRoot?, include? }` selects the portable root and additional data paths |
@@ -278,7 +332,7 @@ Completed legacy records without fixture or connection identities return
 `incompatible` before creating a database or importing a scenario. A guided run
 can create new bound evidence from them.
 
-New runs are schema version 3: `limits.protocolProfile` is always explicit and `environment.transport` is always present. The staged profile's steps carry explicit stage, cycle, and continuation links. Version 1 and 2 records remain readable and renderable with their original meanings (version 2 implies the staged profile). Because they predate transport identity, exact replay of a version 1 or 2 record on this runtime returns `incompatible` before database work; a guided run creates new version 3 evidence, and an exported bundle keeps its own original runtime for original replay. Exact staged replay checks SQL and Parse inputs before releasing metadata, then checks actual Bind inputs before releasing execution. Metadata records parameter and column counts or the real error; it does not claim row values, affected rows, transaction state, or equality of backend object identifiers. A completed run must close every staged cycle.
+New runs are schema version 3: `limits.protocolProfile` is always explicit and `environment.transport` is always present. Multi-producer runs are schema version 4, which adds a required `limits.connectionProfile: 'multi-producer-v1'` and `limits.maxConnectionsPerActor`, allows `actor#n` plan entries, and lists available lanes rather than actors in each step. The staged profile's steps carry explicit stage, cycle, and continuation links. Version 1 and 2 records remain readable and renderable with their original meanings (version 2 implies the staged profile). Because they predate transport identity, exact replay of a version 1 or 2 record on this runtime returns `incompatible` before database work; a guided run creates new version 3 evidence, and an exported bundle keeps its own original runtime for original replay. Exact staged replay checks SQL and Parse inputs before releasing metadata, then checks actual Bind inputs before releasing execution. Metadata records parameter and column counts or the real error; it does not claim row values, affected rows, transaction state, or equality of backend object identifiers. A completed run must close every staged cycle.
 
 Replay returns the actual new command summaries, selected actor observations and
 invariant outcome. It does not require row counts, SQLSTATEs, return values or

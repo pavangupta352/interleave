@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Schedule operations that use several PostgreSQL connections at once, such as a
+  `pg.Pool` serving concurrent queries or an ORM side query beside a transaction
+  (`connectionProfile: 'multi-producer-v1'`, `--connection-profile
+  multi-producer-v1`). Each connection is a lane (`alice#1`) with its own ordered
+  releases; lanes of one actor can wait for each other through real locks, and
+  plans may name lanes. Exact replay matches connections by startup and command
+  identity, so a different socket accept order still replays. Reports label
+  connections only for actors that used several of them.
+
+### Changes
+
+- Multi-producer runs use schema version 4, which requires
+  `limits.connectionProfile` and `limits.maxConnectionsPerActor`, permits
+  `actor#n` plan entries and records available lanes. Single-producer runs keep
+  schema version 3, and versions 1-3 read unchanged.
+- The unsupported second command connection error now names the multi-producer
+  profile as the alternative.
+
+### Qualified profiles
+
+- Multi-connection actors (`multi-producer-v1`) with node-postgres 8.23.0 pools,
+  Kysely 0.29.5 and Postgres.js 3.4.9 (`max: 2`) on PostgreSQL 16.15, 17.11 and
+  18.6. See [compatibility](docs/compatibility.md#multi-connection-actors) for the
+  checked cases and what remains unrun.
+
 ## 0.1.0 — 27 September 2026
 
 The first public release. It finds, explains, replays and minimizes races in real

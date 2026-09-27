@@ -78,6 +78,8 @@ npx --no-install interleave minimize scenario.mjs failure.interleave.json --out 
 worker. It stops at the first invariant violation by default; `--keep-going`
 continues within the selected limits. `--plan alice,bob,alice,bob` supplies the
 initial actor-choice prefix. Sampled success does not prove race freedom.
+Quote a plan that names connection lanes, such as `'alice#0,bob'`, so no shell
+treats `#` specially.
 
 A detected invariant violation exits 1, including a successful replay or completed
 minimization of that failure. A shell with `set -e` would stop there. The
@@ -146,6 +148,20 @@ failure. Replay and reduction inherit the recorded selection. See the
 connections for each actor. The default is one. Additional live connections must
 remain queryless; a second live command producer is explicitly unsupported. Exact
 replay and reduction inherit the recorded cap.
+
+`--connection-profile multi-producer-v1` schedules every connection of an actor,
+such as a pool serving concurrent queries, as its own lane. The cap then defaults
+to eight. `--plan` may name a lane with the actor and its zero-based connection
+number in accept order, as in `--plan 'alice#0,alice#1,bob'`; a plain `alice`
+chooses whichever of alice's connections can proceed. Lane entries require this
+profile. Replay, guided replay and reduction inherit it, and exact replay matches
+connections by their commands rather than their accept order. See
+[multi-connection actors](api.md#multi-connection-actors).
+
+```sh
+npx --no-install interleave run scenario.mjs --connection-profile multi-producer-v1 --out failure.interleave.json
+npx --no-install interleave replay scenario.mjs failure.interleave.json
+```
 
 `--protocol-profile describe-flush-v1` enables drivers that request metadata with
 Parse/Describe/Flush before sending parameter values. A description and its later

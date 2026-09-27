@@ -30,6 +30,37 @@ Not part of this profile: client certificates (mutual TLS), required channel bin
 
 The owned TLS qualification servers use official PostgreSQL images, `hostssl`-only authentication rules, SCRAM passwords and a generated private CA. They check both IP and DNS subject names, node-postgres ordinary cycles and the Postgres.js `describe-flush-v1` profile, and in-process and supervised file runs. They also cover exact replay, minimization, CLI `doctor` with `--upstream-ca`, and rejection of transport drift before any database work. The negative cases cover an unrelated CA, a certificate for another name, expired and not-yet-valid certificates, a wrong password and plaintext clients refused by the server. The [TLS qualification record](qualification/verified-upstream-tls-2026-09-27.md) lists versions, commands and unrun cases.
 
+## Multi-connection actors
+
+The explicit `multi-producer-v1` connection profile (`connectionProfile` in the
+API, `--connection-profile` on the CLI) schedules each connection of an actor as
+a lane; see [multi-connection actors](api.md#multi-connection-actors). It was
+checked on 27 September 2026 against the official PostgreSQL 16.15, 17.11 and
+18.6 images with Node.js 24.7.0, and against PostgreSQL 16.15 with Node.js
+22.18.0. The checked applications are:
+
+- node-postgres 8.23.0 `pg.Pool` (pg-pool 3.14.0) with `max: 2`: two concurrent
+  read-modify-writes through `pool.query`, explicitly checked-out clients, and a
+  side query through the pool while a checked-out client holds a transaction.
+- Kysely 0.29.5 `PostgresDialect`: a transaction plus an availability check
+  issued through the outer pool, which runs on a second connection.
+- Postgres.js 3.4.9 with `max: 2` under `describe-flush-v1`, with metadata and
+  execution stages open on both connections of one actor.
+
+These runs recorded real lost updates and a double redemption, replayed them
+exactly (including after the first pool socket was deliberately connected
+second, which reverses accept order), reduced and explored lane-qualified
+plans, and observed a real lock wait between two connections of one actor. A
+connection blocked by an unscheduled session is `inconclusive`. The CLI path
+covers supervised file runs, exact and guided replay, reduction, and an exported
+bundle that installs offline and replays the recording exactly. The report shows
+connection labels in Chromium, Firefox and WebKit at desktop and mobile sizes.
+
+Keep each actor's pool within the per-actor cap (eight in this profile). Other
+drivers, ORMs and pool implementations, larger pools and cancellation routing
+have not been checked with this profile, and the complete release matrix (every
+suite on each PostgreSQL major and Node.js version) has not yet run with it.
+
 ## PostgreSQL 17 with pgvector 0.8.6
 
 The separate `postgresql17-pgvector0.8.6-v1` fixture profile is qualified on

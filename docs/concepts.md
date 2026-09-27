@@ -19,6 +19,12 @@ eight actors gets its own proxy connection URL. The actor must use that URL for
 the application queries under test. A pool created elsewhere with the original
 URL bypasses scheduling.
 
+By default an actor sends commands on one connection at a time. An operation
+that queries concurrently through a pool, or runs a side query beside its
+transaction, needs the explicit `multi-producer-v1` connection profile. Each of
+its connections is then a **lane**, written `alice#1`, that releases its own
+commands in order.
+
 Each execution repeats setup in a separate generated database. A search can
 therefore run the same scenario many times without reusing its previous rows.
 With `--docker`, one owned server lasts for that command; Interleave still creates
@@ -40,7 +46,9 @@ The final value is one even though both operations completed. An invariant
 requiring two detects the lost update.
 
 A **plan** is a prefix of actor choices. After its explicit choices end, the
-runner rotates fairly among actors that can proceed. An **exploration** tries
+runner rotates fairly among actors that can proceed. With connection lanes, a
+choice can name one lane (`alice#1`), and rotation also alternates among an
+actor's lanes. An **exploration** tries
 alternative prefixes from observed choices until it finds a failure, exhausts
 its modeled frontier, or reaches a configured limit. FIFO is the default search
 order. A seed makes pending-prefix selection repeatable when the observed choices
@@ -94,6 +102,8 @@ Interleave runtime, and actor connection startup. Every current record also
 names its upstream transport: plaintext, or verified TLS with a fingerprint of
 the trusted CA set and the verified host name. Exact replay checks those
 inputs and the recorded command/wait contract while observing results again.
+For connection lanes it matches each recorded connection to a live one by its
+startup and its commands, so sockets accepted in a different order still replay.
 It does not force row counts, return values, errors, or the invariant outcome
 to equal the original run.
 

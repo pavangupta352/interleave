@@ -25,6 +25,14 @@ back to the description. **Recover** represents Sync after a description error.
 A query may therefore occupy more than one row. Both original version 1 and
 staged version 2 records can be imported into the same viewer.
 
+A `multi-producer-v1` record (schema version 4) keeps one column per actor. When
+an actor's commands used more than one connection, each of its commands is
+labeled with its connection: `Connection #1` in the desktop column, and
+`alice #1` in narrow layouts, the selection, the inspector, waits and searchable
+text. Lock waits between two connections of the same actor name the blocking
+connection. Actors that used one connection, and all single-producer records,
+keep plain actor names.
+
 Use the arrow keys to move through the filtered order; Home and End select its
 first and last command, including across page boundaries. The ledger renders at
 most 100 commands per page. Search and actor filters preserve the original step

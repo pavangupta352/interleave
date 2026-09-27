@@ -118,8 +118,14 @@ Pools, use `max: 1` for this profile.
 An actor defaults to one admitted physical PostgreSQL connection. Increasing
 `maxConnectionsPerActor` permits queryless auxiliary sessions, such as a monitor.
 Only one live connection may produce commands; it keeps that role until it closes,
-including while idle. A single actor cannot use a larger pool to run simultaneous
-queries on different live connections. See the [connection contract](api.md#define-a-scenario).
+including while idle. See the [connection contract](api.md#define-a-scenario).
+
+If the operation itself queries on several connections at once, for example
+`Promise.all` over a `pg.Pool`, or a side query through the pool while a
+transaction holds another connection, select `connectionProfile:
+'multi-producer-v1'` (`--connection-profile multi-producer-v1`) and keep the
+pool's `max` within the per-actor cap of eight. Each connection becomes a
+scheduled lane; see [multi-connection actors](api.md#multi-connection-actors).
 
 The actor context also supplies an `AbortSignal`. Use the driver's public
 shutdown/cancellation lifecycle when an operation can remain pending during
