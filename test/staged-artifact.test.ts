@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact.js';
 
-function stagedRun() {
+function makeStagedRun(version = 2) {
   const common = { actor: 'reader', connection: 0, protocol: 'extended', sql: 'SELECT $1::integer',
     backendPid: 101, available: ['reader'], waits: [] };
   return {
-    schemaVersion: 2, scenario: 'metadata before parameters', outcome: 'passed', mode: 'explore', plan: [],
+    schemaVersion: version, scenario: 'metadata before parameters', outcome: 'passed', mode: 'explore', plan: [],
     connections: [{ actor: 'reader', connection: 0, fingerprint: 'a'.repeat(64) }],
     trace: [
       { ...common, index: 0, ordinal: 0, cycle: 0, stage: 'describe', fingerprint: 'b'.repeat(64),
@@ -16,13 +16,14 @@ function stagedRun() {
         completion: { kind: 'ready', transactionStatus: 'I', commandTags: ['SELECT 1'], rowCount: 1 } },
     ],
     actors: [{ actor: 'reader', status: 'fulfilled', value: 3 }, { actor: 'idle', status: 'fulfilled' }],
-    environment: { serverVersion: '16.13', nodeVersion: 'v24.7.0' },
+    environment: { serverVersion: '16.13', nodeVersion: 'v24.7.0', ...(version === 3 ? { transport: { version: 1, frontend: 'loopback-plaintext-v1', authentication: 'passthrough-no-channel-binding-v1', upstream: { profile: 'plaintext-v1' } } } : {}) },
     startedAt: '2026-09-09T00:00:00.000Z', durationMs: 5,
     limits: { maxSteps: 100, timeoutMs: 10_000, protocolProfile: 'describe-flush-v1' }, cleanup: { complete: true },
   } as Record<string, any>;
 }
 
-describe('staged run artifacts', () => {
+describe.each([2, 3])('staged run artifacts version %s', version => {
+  const stagedRun = () => makeStagedRun(version);
   test('preserves both explicit release stages and original JSON without inventing a transaction boundary', () => {
     const run = stagedRun();
     expect(parseRunArtifact(run)).toBe(run);
@@ -155,7 +156,7 @@ describe('staged run artifacts', () => {
   });
 
   test('continues to reject new stage fields in version one', () => {
-    const run = stagedRun(); run.schemaVersion = 1;
+    const run = stagedRun(); run.schemaVersion = 1; delete run.environment.transport;
     expect(() => parseRunArtifact(run)).toThrow();
   });
 });

@@ -4,5 +4,6 @@ import type { RunResult } from './types.js';
 export function missingReplayIdentity(run: RunResult): string | undefined {
   if (run.connections === undefined) return 'The recorded run has no actor connection identities; use a guided run to create new bound evidence';
   if (run.environment.fixture === undefined) return 'The recorded run has no fixture identity; use a guided run to create new bound evidence';
+  if (run.environment.transport === undefined) return 'The recorded run has no transport identity; use a guided run to create new bound evidence';
   return undefined;
 }

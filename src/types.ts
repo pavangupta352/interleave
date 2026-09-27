@@ -1,6 +1,7 @@
 import type { Client } from 'pg';
 import type { FixtureIdentity, FixtureIdentityProfile } from './fixture-identity.js';
 import type { SourceIdentity } from './source-identity.js';
+import type { TransportIdentity } from './postgres-transport.js';
 
 export type ProtocolKind = 'simple' | 'extended';
 export type ProtocolProfile = 'sync-cycle-v1' | 'describe-flush-v1';
@@ -151,8 +152,16 @@ export interface Failure {
   fingerprint: string;
 }
 
+/** Selected upstream policy, not proof that a failed attempt established TLS. */
+export interface RunTransportIdentity {
+  version: 1;
+  frontend: 'loopback-plaintext-v1';
+  authentication: 'passthrough-no-channel-binding-v1';
+  upstream: TransportIdentity;
+}
+
 export interface RunResult {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   scenario: string;
   outcome: Outcome;
   mode: 'explore' | 'replay' | 'guided';
@@ -163,7 +172,7 @@ export interface RunResult {
   actors: ActorResult[];
   failure?: Failure;
   reason?: string;
-  environment: { serverVersion: string; nodeVersion: string; fixture?: FixtureIdentity; source?: SourceIdentity };
+  environment: { serverVersion: string; nodeVersion: string; fixture?: FixtureIdentity; source?: SourceIdentity; transport?: RunTransportIdentity };
   startedAt: string;
   durationMs: number;
   limits: { maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number; maxConnectionsPerActor?: number; protocolProfile?: ProtocolProfile };

@@ -88,9 +88,16 @@ export function parseRunArtifact(input: unknown): RunResult {
 
   const root = shape(value, '$', ROOT_KEYS, REQUIRED_ROOT_KEYS);
   const version = field(root, 'schemaVersion', '$');
-  if (version !== 1 && version !== 2) {
-    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1 or 2');
+  if (version !== 1 && version !== 2 && version !== 3) {
+    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1, 2 or 3');
   }
+  // Schema 3 separates scheduling from transport. Legacy trace validators retain
+  // their exact grammar; the explicit profile selects one for new evidence.
+  const protocolProfile = version === 3
+    ? enumValue(field(plainRecord(field(root, 'limits', '$'), '$.limits'), 'protocolProfile', '$.limits'),
+      '$.limits.protocolProfile', ['sync-cycle-v1', 'describe-flush-v1'])
+    : version === 2 ? 'describe-flush-v1' : 'sync-cycle-v1';
+  const traceVersion = protocolProfile === 'describe-flush-v1' ? 2 : 1;
   const scenario = field(root, 'scenario', '$');
   assertScenarioName(scenario, '$.scenario');
   const outcome = enumValue(field(root, 'outcome', '$'), '$.outcome', [
@@ -109,7 +116,7 @@ export function parseRunArtifact(input: unknown): RunResult {
   }
 
   let connections: ConnectionIdentity[] | undefined;
-  if (version === 2) field(root, 'connections', '$');
+  if (version !== 1) field(root, 'connections', '$');
   const connectionKeys = new Set<string>();
   if (hasOwn(root, 'connections')) {
     const connectionValues = arrayValue(root.connections, '$.connections', MAX_ARRAY_ITEMS);
@@ -145,7 +152,7 @@ export function parseRunArtifact(input: unknown): RunResult {
   const ordinalByConnection = new Map<string, number>();
   const trace: TraceStep[] = [];
   for (let index = 0; index < traceValues.length; index += 1) {
-    const step = validateTraceStep(traceValues[index], index, version);
+    const step = validateTraceStep(traceValues[index], index, traceVersion);
     if (connections !== undefined && !connectionKeys.has(`${step.actor}\0${step.connection}`)) {
       throw new TypeError(`$.trace[${index}]: command references an unrecorded actor startup`);
     }
@@ -218,7 +225,7 @@ export function parseRunArtifact(input: unknown): RunResult {
     throw new TypeError('Run artifact cannot name more than 8 actors across plan, connections, trace, and results');
   }
   const requiresCompleteActors = outcome === 'passed' || outcome === 'violation' || outcome === 'actor-error';
-  if (version === 2) validateStageSequence(trace, requiresCompleteActors);
+  if (traceVersion === 2) validateStageSequence(trace, requiresCompleteActors);
   if (requiresCompleteActors && actorNames.size < 2) {
     throw new TypeError('$.actors: completed executions require at least two actor results');
   }
@@ -271,8 +278,8 @@ export function parseRunArtifact(input: unknown): RunResult {
   const environment = shape(
     field(root, 'environment', '$'),
     '$.environment',
-    ['serverVersion', 'nodeVersion', 'fixture', 'source'],
-    ['serverVersion', 'nodeVersion'],
+    ['serverVersion', 'nodeVersion', 'fixture', 'source', ...(version === 3 ? ['transport'] : [])],
+    ['serverVersion', 'nodeVersion', ...(version === 3 ? ['transport'] : [])],
   );
   const serverVersion = boundedString(environment.serverVersion, '$.environment.serverVersion', 1, 256);
   boundedString(environment.nodeVersion, '$.environment.nodeVersion', 1, 256);
@@ -285,14 +292,15 @@ export function parseRunArtifact(input: unknown): RunResult {
     }
   }
   if (hasOwn(environment, 'source')) validateSourceIdentity(environment.source, '$.environment.source');
+  if (version === 3) validateTransportIdentity(environment.transport, '$.environment.transport');
 
   validateTimestamp(field(root, 'startedAt', '$'), '$.startedAt');
 
   const limits = shape(
     field(root, 'limits', '$'),
     '$.limits',
-    ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor', ...(version === 2 ? ['protocolProfile'] : [])],
-    ['maxSteps', 'timeoutMs', ...(version === 2 ? ['protocolProfile'] : [])],
+    ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor', ...(version !== 1 ? ['protocolProfile'] : [])],
+    ['maxSteps', 'timeoutMs', ...(version !== 1 ? ['protocolProfile'] : [])],
   );
   if (version === 2 && limits.protocolProfile !== 'describe-flush-v1') {
     throw new TypeError('$.limits.protocolProfile: version 2 requires describe-flush-v1');
@@ -330,6 +338,27 @@ export function parseRunArtifact(input: unknown): RunResult {
 
   assertSerializedSize(root);
   return root as unknown as RunResult;
+}
+
+function validateTransportIdentity(value: unknown, path: string): void {
+  const keys = ['version', 'frontend', 'authentication', 'upstream'];
+  const transport = shape(value, path, keys, keys);
+  if (transport.version !== 1) throw new TypeError(`${path}.version: expected transport identity version 1`);
+  enumValue(transport.frontend, `${path}.frontend`, ['loopback-plaintext-v1']);
+  enumValue(transport.authentication, `${path}.authentication`, ['passthrough-no-channel-binding-v1']);
+  const upstreamPath = `${path}.upstream`;
+  const record = plainRecord(transport.upstream, upstreamPath);
+  const profile = enumValue(field(record, 'profile', upstreamPath), `${upstreamPath}.profile`, ['plaintext-v1', 'tls-verify-full-v1']);
+  const upstreamKeys = profile === 'plaintext-v1' ? ['profile']
+    : ['profile', 'negotiation', 'minVersion', 'maxVersion', 'trustSource', 'trustFingerprint', 'referenceFingerprint'];
+  const upstream = shape(record, upstreamPath, upstreamKeys, upstreamKeys);
+  if (profile === 'plaintext-v1') return;
+  enumValue(upstream.negotiation, `${upstreamPath}.negotiation`, ['postgres-sslrequest-v1']);
+  enumValue(upstream.minVersion, `${upstreamPath}.minVersion`, ['TLSv1.2']);
+  enumValue(upstream.maxVersion, `${upstreamPath}.maxVersion`, ['TLSv1.3']);
+  enumValue(upstream.trustSource, `${upstreamPath}.trustSource`, ['node-bundled', 'custom-ca']);
+  fingerprintValue(upstream.trustFingerprint, `${upstreamPath}.trustFingerprint`);
+  fingerprintValue(upstream.referenceFingerprint, `${upstreamPath}.referenceFingerprint`);
 }
 
 function validateTraceStep(value: unknown, index: number, version: 1 | 2): TraceStep {
