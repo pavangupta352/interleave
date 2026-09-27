@@ -55,6 +55,10 @@
 - Statement overlap on PostgreSQL 16.15 with node-postgres 8.23.0 and Postgres.js
   3.4.9 prepared statements, including pairs of two connections of one actor. See
   [compatibility](docs/compatibility.md#statement-overlap).
+- Prisma ORM 7.10.0 with `@prisma/adapter-pg` 7.10.0 and node-postgres 8.23.0
+  on PostgreSQL 16, 17 and 18 with Node.js 22.18.0 and 24.7.0, through an
+  installed [checkout example](examples/prisma/README.md) whose generated client
+  is recorded as source. Portable export is not supported for this client.
 
 ## 0.1.0 — 27 September 2026
 

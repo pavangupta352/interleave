@@ -68,6 +68,14 @@ bytes cannot be replaced by the original registry package, and a fresh runtime
 repack cannot replace a different original tarball merely because its selected
 implementation files match. No lock or recorded identity is rewritten.
 
+Each original archive may be at most 16 MiB, whether downloaded or supplied
+explicitly, and all archives together at most 128 MiB of compressed plus
+expanded bytes; verification and installation apply the same per-file bound.
+A graph containing a larger package cannot be exported. For example, the
+original `@prisma/client` 7.10.0 archive is 26,828,688 bytes, so recordings of
+the [Prisma example](../examples/prisma/README.md) replay only from their
+original application.
+
 The scenario and project root are explicit trusted local inputs. The destination
 must not exist. Interleave claims that directory exclusively and verifies its
 contents before reporting success; it never replaces an existing folder, even

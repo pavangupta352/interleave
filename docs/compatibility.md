@@ -173,3 +173,44 @@ have not been qualified. Treat them as unverified until their own workflow runs.
 The [TypeORM example](../examples/typeorm/README.md) gives each actor its own DataSource and a node-postgres pool of size one through TypeORM's public driver option. The helper and scenario are qualified unchanged with TypeORM 1.1.1 and 0.3.31 (each with its own lockfile), node-postgres 8.23.0, Node.js 22.18.0 and PostgreSQL 16, 17 and 18. Eleven functional cases per row cover entity CRUD, committed and rolled-back transactions with a real 23505, a real 40001 serialization failure handled by whole-transaction retry (and reported as an actor error without retry), the unsafe lost update with exact replay and minimization, source drift rejection, and original-archive export with offline installation and exported exact replay. Fourteen lifecycle checks cover acquisition, errors, backend termination and cancellation.
 
 TypeORM 1.1.1 requires Node.js 20.19+, 22.13+ or 24.11+, so Node.js 24.7 is not a supported row. Closing a TypeORM client is not a PostgreSQL CancelRequest: a blocked backend can keep waiting until its blocker finishes or the generated database is cleaned up. Relations, `manager.transaction()`, pessimistic locks and deadlock retry have not been qualified.
+
+## Prisma ORM 7.10.0
+
+Prisma ORM 7.10.0 is qualified through its node-postgres driver adapter:
+`@prisma/client` 7.10.0 and `@prisma/adapter-pg` 7.10.0 over `pg` 8.23.0, using
+the default `sync-cycle-v1` profile. The `prisma-client` generator writes the
+client into the application as TypeScript that Node.js 22.18.0 and 24.7.0 load
+directly, so the generated files are recorded as scenario source. Each actor owns
+one `PrismaClient` whose adapter pool has `max: 1`. Prisma sends BEGIN, COMMIT
+and ROLLBACK as simple queries and model operations as parameterized extended
+cycles; with the adapter's `statementNameGenerator`, every command is a named
+prepared statement that node-postgres reuses on the same connection.
+
+The [installed-consumer gate](../examples/prisma/README.md#qualification-gate)
+passed all 13 checks with Node.js 22.18.0 and 24.7.0 against PostgreSQL 16.15,
+17.11 and 18.6: CLI and library recording, exact replay and minimization,
+rejection of an edited generated client and of a regenerated schema before any
+import, byte-identical regeneration, serializable `40001`/`P2034` retry and the
+unhandled actor error, `23505` rollback with CRUD on the same connection, named
+statement reuse, and a guided rerun plus exhaustive fresh exploration after a
+repair. See the [qualification record](qualification/prisma-orm-7.10.0-2026-09-27.md).
+
+Boundaries of this profile:
+
+- `@prisma/client` 7.10.0 alone installs 74,458,946 bytes; the example's recorded
+  source identity is 82,478,406 bytes in 602 files, within the 128 MiB default
+  budget. Builds with the earlier 64 MiB default, including the `3785d49`
+  candidate archive, stop every Prisma 7.10.0 recording as `inconclusive` with
+  `Source identity byte limit exceeded` before any SQL runs.
+- The recorded application must not install the Prisma CLI where its modules
+  resolve packages. `@prisma/client` declares the CLI as an optional peer, and
+  installed peers are recorded; with the CLI beside the client the closure is
+  310,499,758 bytes in 10,437 files and exceeds every capture bound. Generate the
+  client with a separately installed CLI, as the example does.
+- Portable shared export is unsupported: the original
+  `@prisma/client-7.10.0.tgz` is 26,828,688 bytes, above the 16 MiB per-archive
+  bound. Export exits 2 without creating a bundle.
+- Not qualified: Prisma 8, other driver adapters, Accelerate and Prisma Postgres,
+  relation queries and nested writes, deadlock (`40P01`) handling, `prisma
+  migrate` against the test server, and replay across Node.js or PostgreSQL
+  versions.

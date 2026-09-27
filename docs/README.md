@@ -30,12 +30,13 @@ each change.
 | [TypeORM](../examples/typeorm/README.md) | A per-actor DataSource helper, transactions and whole-transaction 40001 retry (TypeORM 1.1.1 and [0.3.31](../examples/typeorm-0.3/README.md)) | Native PostgreSQL, node-postgres 8.23.0, Node.js 22.18 |
 | [Python actors](../examples/python/README.md) | Run programs in another language as actors with `processActor` | Native PostgreSQL, Python 3 with psycopg 3.3.6 |
 | [Historical cases](../examples/historical/README.md) | Knex, node-pg-migrate and Sequelize defects before and after their upstream fixes, with baselines | Native PostgreSQL, node-postgres 8.23.0 through each library |
+| [Prisma ORM](../examples/prisma/README.md) | A generated Prisma 7 client that oversells, its repairs, serializable retries and prepared statements | Native PostgreSQL, Prisma 7.10.0 with `@prisma/adapter-pg` |
 
-The counter and neveroversell are constructed race examples. pghybrid is a
-compatibility workload, with no claimed library defect. The historical cases
-are defects that were reported and fixed in the libraries' own repositories.
-Each example's guide states its tested boundaries; using one adapter does not
-qualify every feature of its underlying driver or ORM.
+The counter, neveroversell and Prisma checkout are constructed race examples.
+pghybrid is a compatibility workload, with no claimed library defect. The
+historical cases are defects that were reported and fixed in the libraries' own
+repositories. Each example's guide states its tested boundaries; using one
+adapter does not qualify every feature of its underlying driver or ORM.
 
 ## Maintainer references
 

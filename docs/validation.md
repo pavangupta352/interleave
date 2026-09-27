@@ -104,6 +104,9 @@ records installed CLI, offline export replay and browser acceptance for the
 earlier exact `4b589db` archive. The [hardening record](qualification/replay-release-hardening-2026-09-09.md)
 and earlier
 [seeded-search record](qualification/seeded-search-2026-09-09.md) remain available.
+The [Prisma ORM 7.10.0 record](qualification/prisma-orm-7.10.0-2026-09-27.md)
+covers the installed Prisma example with the archive built from commits `418a970`
+and `000224d`, on Node.js 22.18.0 and 24.7.0 against PostgreSQL 16, 17 and 18.
 The [compatibility page](compatibility.md) links completed CI matrices and exact
 driver, server and extension profiles. The earlier snapshots below retain their
 original dates and results; their then-open limits are historical.
