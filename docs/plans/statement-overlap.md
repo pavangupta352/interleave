@@ -1,8 +1,23 @@
-# Statement overlap exploration design
+# Statement overlap exploration
 
-Status: design, 27 September 2026. No support is claimed until the qualification below has run. Motivated by the Knex 0.95.12 case study,
-where a fix that is only wrong when two statements execute at the same instant
-passed every Interleave schedule, while ordinary concurrency failed 84/100.
+Status: implemented on the 0.2.0 branch, 27 September 2026 (`overlap: 'pairs'`,
+`--overlap pairs`); see [statement overlap](../api.md#statement-overlap). Motivated
+by the Knex 0.95.12 case study, where a fix that is only wrong when two statements
+execute at the same instant passed every Interleave schedule, while ordinary
+concurrency failed 84/100.
+
+What changed from the draft below:
+
+- Paired steps carry `overlap`, the index of the pair's first step, instead of a
+  group number and a separate determinism field.
+- Replay releases a recorded pair together and checks each command's identity; it
+  skips wait and transaction-state comparison inside the pair and reports a later
+  divergence as `incompatible` with a note about interleaving. There is no special
+  replay outcome.
+- Reduction treats a pair as one choice; it does not split a pair into a
+  sequential order.
+- Fair fallback never pairs. Multi-producer runs can pair two lanes, including two
+  lanes of one actor (`alice#0+alice#1`).
 
 ## Problem
 
