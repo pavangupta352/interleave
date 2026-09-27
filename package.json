@@ -1,6 +1,6 @@
 {
   "name": "@pavangupta352/interleave",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Find, explain and replay database races in real Postgres application code.",
   "type": "module",
   "author": "Pavan Gupta <pavan.gupta.352@gmail.com>",

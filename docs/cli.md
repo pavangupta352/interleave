@@ -1,6 +1,6 @@
 # Command-line interface
 
-This page describes the 0.1 command-line interface. Before 1.0, a minor release
+This page describes the 0.2 command-line interface. Before 1.0, a minor release
 may change commands or options; the [changelog](../CHANGELOG.md) records every
 change and the [compatibility guide](compatibility.md) lists what each release was
 qualified against.

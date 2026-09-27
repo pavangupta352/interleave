@@ -1,6 +1,6 @@
 # Library API
 
-This page describes the 0.1 API. Before 1.0, a minor release may change it; the [changelog](../CHANGELOG.md) records every change and the [compatibility guide](compatibility.md) lists what each release was qualified against.
+This page describes the 0.2 API. Before 1.0, a minor release may change it; the [changelog](../CHANGELOG.md) records every change and the [compatibility guide](compatibility.md) lists what each release was qualified against.
 
 For a complete application example, start with the [application guide](application-guide.md).
 The [CI guide](ci.md) shows result checks and evidence retention. The API requires

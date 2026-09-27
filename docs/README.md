@@ -1,7 +1,7 @@
 # Interleave documentation
 
 Start with the task you want to complete. The setup guide covers installing a
-release and building from source. Interleave is at 0.1: before 1.0, a minor
+release and building from source. Interleave is at 0.2: before 1.0, a minor
 release may change the API, CLI or artifact format, and the changelog records
 each change.
 

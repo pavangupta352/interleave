@@ -30,7 +30,7 @@ download both, check the hash, then scaffold and install from the file:
 
 ```sh
 shasum -a 256 -c SHA256SUMS --ignore-missing
-interleave_archive="$PWD/pavangupta352-interleave-0.1.0.tgz"
+interleave_archive="$PWD/pavangupta352-interleave-0.2.0.tgz"
 npx --yes --package "$interleave_archive" interleave init interleave-race
 cd interleave-race
 npm install --save-dev --save-exact "$interleave_archive" pg@8.23.0
