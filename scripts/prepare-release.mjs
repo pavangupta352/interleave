@@ -139,6 +139,8 @@ async function buildPackage(context, label) {
   // survive npm selection. Generated dist is compared by the second clean build.
   for (const entry of entries) {
     if (entry.path !== 'package.json' && !metadata.files.includes(entry.path.split('/')[0])) continue;
+    // npm never packs .npmignore files: they select package content rather than being content.
+    if (entry.path.split('/').at(-1) === '.npmignore') continue;
     const source = await readOrdinaryFile(join(cwd, entry.path));
     assert(inspected.files.get(entry.path)?.equals(source), `Package omitted or changed selected source file: ${entry.path}`);
   }
