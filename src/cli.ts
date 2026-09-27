@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { explore } from './explore.js';
 import { replay } from './replay.js';
@@ -82,7 +82,7 @@ async function main(args: string[]): Promise<number> {
       ...(values['runtime-archive'] === undefined ? {} : { runtimeArchive: values['runtime-archive'] }),
       ...(values['dependency-archive'] === undefined ? {} : { dependencyArchives: values['dependency-archive'] }),
     });
-    output(exported, describeExport(exported));
+    output(exported, describeExport(exported, run));
     return 0;
   }
   const expected = command === 'replay' || command === 'minimize' ? 2 : command === 'run' ? 1 : 0;
@@ -92,6 +92,11 @@ async function main(args: string[]): Promise<number> {
   const databaseUrl = values['database-url'] ?? process.env.TEST_DATABASE_URL;
   if (values.docker && process.env.TEST_DATABASE_URL?.trim()) throw new TypeError('--docker cannot be combined with TEST_DATABASE_URL; unset it or omit --docker');
   if (!values.docker && !databaseUrl?.trim()) throw new TypeError('Use --docker, or set --database-url or TEST_DATABASE_URL to a dedicated PostgreSQL administrator database');
+  // Snapshot CA material once: explore/replay/minimize attempts and cleanup share it.
+  const upstreamTls = values['upstream-tls'] ? {
+    mode: 'verify-full' as const,
+    ...(values['upstream-ca'] === undefined ? {} : { ca: await readCertificateBundle(values['upstream-ca']) }),
+  } : undefined;
   const completed = values.docker
     ? await withManagedPostgres({
       image: values['postgres-image'] ?? (values['fixture-profile'] === 'postgresql17-pgvector0.8.6-v1' ? POSTGRES_IMAGES[3] : POSTGRES_IMAGES[0]),
@@ -100,13 +105,13 @@ async function main(args: string[]): Promise<number> {
     : await executeDatabase(databaseUrl!);
   if (stderrFailed || stdoutFailed) throw new Error('Could not write command output or PostgreSQL progress; owned resource cleanup has finished');
   const details = command === 'doctor' && !('explored' in completed.result) && !('reducedChoices' in completed.result)
-    ? `\nNode.js: ${completed.result.environment.nodeVersion}\nPostgreSQL: ${completed.result.environment.serverVersion}\nFixture: ${completed.result.environment.fixture?.profile ?? 'unavailable'}` : '';
+    ? `\nNode.js: ${completed.result.environment.nodeVersion}\nPostgreSQL: ${completed.result.environment.serverVersion}\nFixture: ${completed.result.environment.fixture?.profile ?? 'unavailable'}\nTransport: ${describeTransport(completed.result)}` : '';
   output(completed.result, describe(completed.result) + details);
   return signal ? signal === 'SIGINT' ? 130 : 143 : completed.code;
 
   async function executeDatabase(databaseUrl: string) {
     const options: RunOptions = {
-      databaseUrl, signal: controller.signal,
+      databaseUrl, signal: controller.signal, ...(upstreamTls ? { upstreamTls } : {}),
       ...((values['project-root'] === undefined && values.include === undefined) ? {} : { source: {
         ...(values['project-root'] === undefined ? {} : { projectRoot: values['project-root'] }),
         ...(values.include === undefined ? {} : { include: values.include }),
@@ -168,12 +173,15 @@ async function main(args: string[]): Promise<number> {
 function output(value: unknown, human: string): void {
   process.stdout.write(json ? `${JSON.stringify(value)}\n` : `${human}\n`);
 }
-function describeExport(result: ExportRegressionResult): string {
+function describeExport(result: ExportRegressionResult, run: RunResult): string {
   const commands = [
     ...result.replay.install,
     result.replay.command,
   ].map((args) => args.map((argument) => `'${argument.replaceAll("'", "'\\''")}'`).join(' '));
-  return `Exported verified regression to ${result.destination}\nManifest: ${result.manifestPath}\nFingerprint: ${result.fingerprint}\nReplay from that directory:\n${commands.join('\n')}`;
+  const tls = run.environment.transport?.upstream.profile === 'tls-verify-full-v1'
+    ? `\nThis run used verified upstream TLS. Add --database-url <url> --upstream-tls${run.environment.transport.upstream.trustSource === 'custom-ca' ? ' --upstream-ca <same-ca.pem>' : ''} when replaying; the export contains no CA files or credentials.`
+    : '';
+  return `Exported verified regression to ${result.destination}\nManifest: ${result.manifestPath}\nFingerprint: ${result.fingerprint}\nReplay from that directory:\n${commands.join('\n')}${tls}`;
 }
 function describe(result: RunResult | ExplorationResult | MinimizationResult): string {
   if ('explored' in result) {
@@ -189,5 +197,28 @@ function describe(result: RunResult | ExplorationResult | MinimizationResult): s
     const attempt = failed ? `\nReduction trial failed (${failed.outcome}).${failed.reason ? `\n${failed.reason}` : ''}${!failed.cleanup.complete ? `\nCleanup incomplete: ${failed.cleanup.error ?? 'Owned resource cleanup could not be confirmed'}` : ''}` : '';
     return `Reduced ${result.originalChoices} choices to ${result.reducedChoices} in ${result.attempts} attempts; ${result.stopReason}.${result.reason ? `\n${result.reason}` : ''}\n${describe(result.run)}${attempt}`;
   }
-  return `${result.scenario}: ${result.outcome} (${result.mode}); ${result.trace.length} ${result.schemaVersion === 2 ? 'releases' : 'commands'}; cleanup ${result.cleanup.complete ? 'complete' : 'incomplete'}.${result.reason ? `\n${result.reason}` : ''}${result.failure ? `\n${result.failure.message}` : ''}`;
+  return `${result.scenario}: ${result.outcome} (${result.mode}); ${result.trace.length} ${(result.limits.protocolProfile ?? (result.schemaVersion === 2 ? 'describe-flush-v1' : 'sync-cycle-v1')) === 'describe-flush-v1' ? 'releases' : 'commands'}; cleanup ${result.cleanup.complete ? 'complete' : 'incomplete'}.${result.reason ? `\n${result.reason}` : ''}${result.failure ? `\n${result.failure.message}` : ''}`;
+}
+
+async function readCertificateBundle(path: string): Promise<string> {
+  const MAX_BYTES = 1_048_576;
+  let bytes: Buffer;
+  try {
+    const file = await stat(path);
+    if (!file.isFile()) throw new TypeError('--upstream-ca must name a regular PEM file');
+    if (file.size > MAX_BYTES) throw new TypeError('--upstream-ca exceeds the 1 MiB CA bundle limit');
+    bytes = await readFile(path);
+  } catch (error) {
+    if (error instanceof TypeError) throw error;
+    throw new TypeError('--upstream-ca could not be read');
+  }
+  if (bytes.length > MAX_BYTES) throw new TypeError('--upstream-ca exceeds the 1 MiB CA bundle limit');
+  return bytes.toString('utf8');
+}
+
+function describeTransport(run: RunResult): string {
+  const upstream = run.environment.transport?.upstream;
+  if (!upstream) return 'unrecorded (legacy artifact)';
+  if (upstream.profile === 'plaintext-v1') return 'plaintext upstream; loopback plaintext actors';
+  return `verified TLS (${upstream.minVersion}-${upstream.maxVersion}, ${upstream.trustSource === 'custom-ca' ? 'supplied CA bundle' : "Node's bundled roots"}, hostname checked); loopback plaintext actors`;
 }

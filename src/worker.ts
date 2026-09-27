@@ -3,6 +3,7 @@ import { attachOwnedDatabase } from './attached-database.js';
 import { parseRunArtifact } from './artifact.js';
 import { runInOwnedDatabase } from './runner.js';
 import { defineScenario } from './scenario.js';
+import { restorePostgresTransport } from './postgres-transport.js';
 import type { RunOptions, Scenario } from './types.js';
 import type { SourceIdentity } from './source-identity.js';
 
@@ -11,6 +12,8 @@ interface StartMessage {
   token: string;
   scenarioFile: string;
   connectionString: string;
+  /** Parent snapshot; validated here, never trusted for its claimed identity. */
+  transport: unknown;
   sourceIdentity: SourceIdentity;
   options: Omit<RunOptions, 'databaseUrl' | 'signal'>;
 }
@@ -36,7 +39,7 @@ async function execute(message: StartMessage): Promise<void> {
   try {
     const loaded = await import(pathToFileURL(message.scenarioFile).href) as { default?: Scenario };
     const scenario = defineScenario(loaded.default as Scenario);
-    const database = await attachOwnedDatabase(message.connectionString);
+    const database = await attachOwnedDatabase(message.connectionString, restorePostgresTransport(message.transport));
     try {
       const result = await runInOwnedDatabase(scenario, {
         ...message.options, databaseUrl: message.connectionString, signal: controller.signal,

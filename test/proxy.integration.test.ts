@@ -295,6 +295,27 @@ integration('proxy integration with real PostgreSQL', () => {
     expect(events.some(event => event.type === 'connected')).toBe(false);
     expect(JSON.stringify(errors.map(e => e.message))).not.toContain('intentionally_wrong_private_password');
   });
+  test('refuses an actor SCRAM channel-binding selection that the plaintext loopback leg cannot carry', async () => {
+    const errors: Error[] = [];
+    const proxy = await createProxy({ upstreamUrl: databaseUrl, actor: 'plus', onUnit() {}, onError(e) { errors.push(e); } });
+    resources.push({ proxy, clients: [] });
+    const url = new URL(proxy.connectionString);
+    const socket = await rawSocket(proxy.connectionString);
+    let received = Buffer.alloc(0);
+    socket.on('data', chunk => { received = Buffer.concat([received, chunk]); });
+    const fields = Buffer.from(`user\0${decodeURIComponent(url.username)}\0database\0${decodeURIComponent(url.pathname.slice(1))}\0\0`);
+    const startup = Buffer.alloc(8); startup.writeInt32BE(8 + fields.length); startup.writeInt32BE(196608, 4);
+    socket.write(Buffer.concat([startup, fields]));
+    // The real server's AuthenticationSASL request (code 10) reaches the actor unchanged.
+    await until(() => received.length >= 9 && received[0] === 82 ? received : undefined);
+    expect(received.readInt32BE(5)).toBe(10);
+    const mechanism = Buffer.from('SCRAM-SHA-256-PLUS\0'); const initial = Buffer.from('p=tls-server-end-point,,n=,r=interleaveplusrefusal');
+    const length = Buffer.alloc(4); length.writeInt32BE(initial.length);
+    const body = Buffer.concat([mechanism, length, initial]); const head = Buffer.alloc(5); head[0] = 112; head.writeInt32BE(4 + body.length, 1);
+    socket.write(Buffer.concat([head, body]));
+    await until(() => errors.find(e => /channel binding cannot pass through/i.test(e.message)));
+    socket.destroy();
+  });
   test('catches scheduling callback errors inside the transport', async () => {
     const errors: Error[] = []; const proxy = await createProxy({ upstreamUrl: databaseUrl, actor: 'callback', onUnit() { throw new Error('private callback detail'); }, onError(e) { errors.push(e); throw new Error('consumer failure'); } });
     const client = new Client({ connectionString: proxy.connectionString }); client.on('error', () => {}); resources.push({ proxy, clients: [client] }); await client.connect();

@@ -80,6 +80,35 @@ severity is not recognizable as a definite statement rejection, Interleave
 conservatively retains unknown cleanup, even when the server may have rejected
 the creation.
 
+## Verified upstream TLS
+
+```ts
+const options = {
+  databaseUrl: process.env.TEST_DATABASE_URL!, // host must match the server certificate
+  upstreamTls: { mode: 'verify-full', ca: await readFile('test-ca.pem', 'utf8') },
+};
+```
+
+`upstreamTls` verifies the server certificate chain and the URL hostname or IP
+address for every connection Interleave opens, including actor proxy upstream
+sessions and cleanup. `ca` is optional PEM text that replaces Node.js's bundled
+roots. `sslmode=verify-full` in the URL is equivalent without `ca`; combining it
+with `upstreamTls`, or using another TLS URL option, is rejected before any
+connection. Actors keep receiving a loopback plaintext `connectionString`.
+
+Setup and invariant contexts include `connectionOptions`, a fresh node-postgres
+configuration for the generated database. Use it for additional clients:
+`new Client(context.connectionOptions)`. It carries the in-memory CA, which a URL
+cannot. For TLS runs, `context.connectionString` includes `sslmode=verify-full`,
+so URL-configured drivers verify against their own default trust store; with a
+private CA, use `connectionOptions` or give that driver its own CA setting.
+
+Every new run records `environment.transport`: the actor endpoint profile, the
+authentication boundary and the upstream policy. For TLS that includes the
+trust source, a fingerprint of the trusted CA set and a fingerprint of the
+verified host name. It never contains CA contents, file paths or credentials.
+Exact replay and reduction compare it before creating a database.
+
 ## Protocol profiles
 
 The default `protocolProfile: 'sync-cycle-v1'` schedules one Simple Query packet or one complete extended cycle ending in Sync. Select `protocolProfile: 'describe-flush-v1'` for the qualified Postgres.js flow that needs server metadata before sending parameter values.
@@ -212,7 +241,7 @@ Completed legacy records without fixture or connection identities return
 `incompatible` before creating a database or importing a scenario. A guided run
 can create new bound evidence from them.
 
-The staged profile produces version 2 artifacts with explicit stage, cycle, and continuation links. Version 1 records retain their original whole-cycle meaning. Exact staged replay checks SQL and Parse inputs before releasing metadata, then checks actual Bind inputs before releasing execution. Metadata records parameter and column counts or the real error; it does not claim row values, affected rows, transaction state, or equality of backend object identifiers. A completed run must close every staged cycle.
+New runs are schema version 3: `limits.protocolProfile` is always explicit and `environment.transport` is always present. The staged profile's steps carry explicit stage, cycle, and continuation links. Version 1 and 2 records remain readable and renderable with their original meanings (version 2 implies the staged profile). Because they predate transport identity, exact replay of a version 1 or 2 record on this runtime returns `incompatible` before database work; a guided run creates new version 3 evidence, and an exported bundle keeps its own original runtime for original replay. Exact staged replay checks SQL and Parse inputs before releasing metadata, then checks actual Bind inputs before releasing execution. Metadata records parameter and column counts or the real error; it does not claim row values, affected rows, transaction state, or equality of backend object identifiers. A completed run must close every staged cycle.
 
 Replay returns the actual new command summaries, selected actor observations and
 invariant outcome. It does not require row counts, SQLSTATEs, return values or

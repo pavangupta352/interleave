@@ -217,11 +217,13 @@ test('resetting a pending frontend frees its reservation without admitting its b
 test('deferred upstream creation failure is reported and closes the pending frontend', async () => {
   const h = await harness(); await h.retire();
   const replacement = h.client();
-  const rejected = expect(replacement.connect()).rejects.toThrow(/terminated|ECONNRESET/i);
+  // The driver now receives the proxy's bounded FATAL diagnostic before the frontend closes.
+  const rejected = expect(replacement.connect()).rejects.toThrow(/terminated|ECONNRESET|Could not connect to the upstream PostgreSQL server/i);
   await bounded(h.arrival(1));
   vi.mocked(net.connect).mockImplementationOnce(() => { throw new Error('injected upstream creation failure'); });
   h.releaseFront(); h.releaseBack(); await bounded(rejected);
-  expect(h.errors.map(error => error.message)).toEqual(['injected upstream creation failure']);
+  // Connection failures are reported through the connector's bounded, secret-free diagnostic.
+  expect(h.errors.map(error => error.message)).toEqual(['Could not connect to the upstream PostgreSQL server.']);
   expect(h.upstreams).toHaveLength(1);
   expect(h.events.filter(event => event.type === 'startup').map(event => event.connection)).toEqual([0]);
 });

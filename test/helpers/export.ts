@@ -18,5 +18,12 @@ export async function bindExportFixture(run: RunResult, options: { scenarioFile:
     components: { schema: 'b'.repeat(64), data: 'c'.repeat(64), sequences: 'd'.repeat(64), settings: 'e'.repeat(64) },
     counts: { objects: 0, rows: 0, bytes: 0 },
   };
-  return { ...run, connections, environment: { ...run.environment, fixture, source } };
+  // Current exports bind schema 3: an explicit protocol profile and the selected transport.
+  const transport = run.environment.transport ?? {
+    version: 1 as const, frontend: 'loopback-plaintext-v1' as const,
+    authentication: 'passthrough-no-channel-binding-v1' as const, upstream: { profile: 'plaintext-v1' as const },
+  };
+  const protocolProfile = run.limits.protocolProfile ?? (run.schemaVersion === 2 ? 'describe-flush-v1' : 'sync-cycle-v1');
+  return { ...run, schemaVersion: 3, connections, environment: { ...run.environment, fixture, source, transport },
+    limits: { ...run.limits, protocolProfile } };
 }

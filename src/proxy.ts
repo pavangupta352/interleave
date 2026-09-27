@@ -1,5 +1,7 @@
 import net, { type Socket } from 'node:net';
 import { createHash } from 'node:crypto';
+import { resolvePostgresTransport, restorePostgresTransport } from './postgres-transport.js';
+import { DeferredUpstream, UpstreamConnectionError } from './protocol/upstream-transport.js';
 import { BackendSummary, MetadataSummary } from './protocol/backend.js';
 import { FrameDecoder, DEFAULT_BUFFER_LIMIT, positiveLimit } from './protocol/framing.js';
 import { FrontendAssembler, FrontendCycleBuffer, type FrontendUnit } from './protocol/frontend.js';
@@ -36,8 +38,12 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   try { upstreamUrl = new URL(options.upstreamUrl); } catch { throw new Error('Invalid PostgreSQL upstream URL'); }
   if (!['postgres:', 'postgresql:'].includes(upstreamUrl.protocol)) throw new Error('Invalid PostgreSQL upstream URL scheme');
   if (!upstreamUrl.hostname || !upstreamUrl.pathname.slice(1)) throw new Error('PostgreSQL upstream URL needs a host and explicit database');
-  const sslMode = upstreamUrl.searchParams.get('sslmode');
-  if ((sslMode && sslMode !== 'disable') || ['ssl', 'sslcert', 'sslkey', 'sslrootcert'].some(p => upstreamUrl.searchParams.has(p))) throw new Error('Unsupported profile: upstream TLS; use an explicitly plaintext disposable PostgreSQL server');
+  // One resolved policy per proxy; every upstream session verifies it independently.
+  const transport = options.upstreamTransport === undefined
+    ? resolvePostgresTransport(options.upstreamUrl) : restorePostgresTransport(options.upstreamTransport);
+  if (options.upstreamTransport !== undefined && upstreamUrl.toString() !== transport.connectionString) {
+    throw new Error('PostgreSQL upstream URL differs from its resolved transport');
+  }
   const maxConnections = options.maxConnectionsPerActor === undefined ? 1 : options.maxConnectionsPerActor;
   if (!Number.isSafeInteger(maxConnections) || maxConnections < 1 || maxConnections > 8) throw new Error('maxConnectionsPerActor must be an integer between 1 and 8');
   const profile = options.protocolProfile === undefined ? 'sync-cycle-v1' : options.protocolProfile;
@@ -48,13 +54,14 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   new FrameDecoder('typed', options);
   interface Session { shutdown(): void; closed: Promise<void>; isTerminating(): boolean }
   interface Replacement { client: Socket; retiring: Session; chunks: Buffer[]; bytes: number; detach(): void }
-  const sockets = new Set<Socket>(); const sessions = new Set<Session>();
+  type Tracked = Socket | DeferredUpstream;
+  const sockets = new Set<Tracked>(); const sessions = new Set<Session>();
   let commandOwner: Session | undefined;
   let pendingReplacement: Replacement | undefined;
   let generation = 0; let closing = false; let closePromise: Promise<void> | undefined;
   const notifyError = (error: Error): void => { try { options.onError(error); } catch { /* Consumer errors must never escape a socket event. */ } };
   const notifyEvent = (event: ProxyEvent): void => { try { options.onEvent?.(event); } catch { notifyError(new Error('Proxy event callback failed')); } };
-  function track(socket: Socket): void { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); socket.on('error', () => {}); }
+  function track(socket: Tracked): void { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); socket.on('error', () => {}); }
   function rejectSocket(socket: Socket, error: Error): void {
     notifyError(error); socket.end(errorResponse(error.message));
     const timer = setTimeout(() => socket.destroy(), 100); timer.unref(); socket.once('close', () => clearTimeout(timer));
@@ -114,9 +121,9 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     const connection = generation++; let ordinal = 0; let nextCycle = 0; let backendPid = 0; let startupFingerprint = '';
     let started = false; let ready = false; let negotiated = false; let terminated = false; let failed = false;
     let closed = false; let clientClosed = false; let upstreamClosed = false; let frontendEnded = false; let retainedBytes = 0;
-    let pendingTerminate: Buffer | undefined;
+    let pendingTerminate: Buffer | undefined; let saslOffered = false; let saslSelected = false;
     const frontend = new FrameDecoder('startup', options); const backend = new FrameDecoder('typed', options); const assembler = new FrontendAssembler(options); const cycles = new FrontendCycleBuffer(options);
-    const upstream = net.connect({ host: upstreamUrl.hostname, port: Number(upstreamUrl.port || 5432) }); track(upstream); upstream.setNoDelay(true);
+    const upstream = new DeferredUpstream(transport); track(upstream);
     interface Queued { frames: Buffer[]; byteLength: number; ordinal: number; unit?: PendingUnit }
     const queue: Queued[] = [];
     let prefix: { original: FrontendUnit; cycle: number; ordinal: number; complete: boolean; error?: { code: string; message: string } } | undefined;
@@ -153,7 +160,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     function guard(work: () => void): void {
       try { work(); } catch (error) { fail(error instanceof Error ? error : new Error('Proxy protocol processing failed')); }
     }
-    function write(destination: Socket, bytes: Buffer, source: Socket): void {
+    function write(destination: Tracked, bytes: Buffer, source: Tracked): void {
       if (!destination.write(bytes)) source.pause();
       if (destination.writableLength > maxBuffered) throw new Error('Protocol outbound buffered-byte limit exceeded');
     }
@@ -228,7 +235,16 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
         }
         const type = String.fromCharCode(frame[0]!);
         if (terminated) throw new Error('Actor sent protocol data after Terminate');
-        if (type === 'p' && !ready) { write(upstream, frame, client); continue; }
+        if (type === 'p' && !ready) {
+          if (saslOffered && !saslSelected) {
+            // SASLInitialResponse names its mechanism first. The loopback actor socket
+            // has no upstream TLS channel, so a -PLUS binding cannot be passed through.
+            saslSelected = true;
+            const end = frame.indexOf(0, 5);
+            if (end > 5 && frame.toString('latin1', 5, end).endsWith('-PLUS')) throw new Error('Unsupported profile: SCRAM channel binding cannot pass through the plaintext actor connection; disable channel binding for actor clients');
+          }
+          write(upstream, frame, client); continue;
+        }
         if (type === 'X') {
           if (frame.length !== 5) throw new Error('Malformed Terminate message');
           if (queue.length || cycles.bufferedBytes || (prefix && (!inFlight || inFlight.original.stage === 'describe')) || (inFlight && !inFlight.errorSeen)) throw new Error('Actor disconnected with unfinished scheduled work');
@@ -259,6 +275,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           backendPid = frame.readInt32BE(5); // Deliberately never retain or emit the secret key.
         }
         if (type === 'E' && inFlight) inFlight.errorSeen = true;
+        if (type === 'R' && !ready && frame.length >= 9 && frame.readInt32BE(5) === 10) { saslOffered = true; saslSelected = false; }
         if (type === 'Z' && !ready) {
           if (!backendPid) throw new Error('Backend did not provide its process identity');
           ready = true; notifyEvent({ type: 'connected', actor: options.actor, connection, backendPid });
@@ -285,7 +302,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       }
     }));
     client.on('error', () => { if (!closing && !terminated && !failed) fail(new Error('Actor client connection failed')); });
-    upstream.on('error', () => { if (!closing && !failed && (!terminated || inFlight)) fail(new Error('PostgreSQL upstream connection failed')); });
+    upstream.on('error', (error: Error) => { if (!closing && !failed && (!terminated || inFlight)) fail(new Error(error instanceof UpstreamConnectionError ? error.message : 'PostgreSQL upstream connection failed')); });
     client.on('end', () => {
       if (closing || failed || closed) return;
       if (negotiated && !started) fail(new Error('Unsupported profile: TLS/GSS encryption required; configure this local actor connection with ssl:false'));
@@ -327,9 +344,9 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   server.on('error', () => notifyError(new Error('Actor proxy listener failed')));
   const address = server.address();
   if (!address || typeof address === 'string') { server.close(); throw new Error('Actor proxy did not bind a TCP endpoint'); }
-  const endpoint = new URL(upstreamUrl); endpoint.hostname = '127.0.0.1'; endpoint.port = String(address.port);
-  // URL query transport overrides must not bypass the actor endpoint.
-  for (const field of ['host', 'hostaddr', 'port']) endpoint.searchParams.delete(field);
+  const endpoint = new URL(transport.connectionString); endpoint.hostname = '127.0.0.1'; endpoint.port = String(address.port);
+  // The actor leg is loopback plaintext: no route or upstream TLS setting may escape to it.
+  for (const field of ['host', 'hostaddr', 'port', 'sslmode', 'ssl', 'sslcert', 'sslkey', 'sslrootcert', 'sslnegotiation']) endpoint.searchParams.delete(field);
   return { connectionString: endpoint.toString(), close(): Promise<void> {
     if (closePromise) return closePromise; closing = true;
     if (pendingReplacement) {

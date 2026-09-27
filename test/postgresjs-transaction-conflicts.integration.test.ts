@@ -70,7 +70,7 @@ function checkConflict(run: RunResult, code: '40P01' | '40001', outcome: 'passed
   expect(run.outcome, run.reason).toBe(outcome);
   expect(run.cleanup.complete).toBe(true);
   expect(run.failure).toBeUndefined();
-  expect(run.schemaVersion).toBe(2);
+  expect(run.schemaVersion).toBe(3);
   expect(parseRunArtifact(run)).toEqual(run);
   expect(run.trace.every(step => step.completion !== undefined)).toBe(true);
   const errors = run.trace.filter(step => step.completion?.error !== undefined);

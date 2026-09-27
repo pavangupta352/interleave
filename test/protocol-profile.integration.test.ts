@@ -37,12 +37,12 @@ describe('protocol profile propagation', () => {
     const options: RunOptions = { databaseUrl: databaseUrl, protocolProfile: 'describe-flush-v1' };
     const recorded = await runOnce(scenario, options);
     expect(recorded.outcome, recorded.reason).toBe('passed');
-    expect(recorded.schemaVersion).toBe(2);
+    expect(recorded.schemaVersion).toBe(3);
     expect(recorded.trace[0]).toMatchObject({ stage: 'complete', cycle: 0, completion: { kind: 'ready' } });
     for (const mode of ['replay', 'guided'] as const) {
       const repeated = await replay(scenario, recorded, { databaseUrl: databaseUrl, mode });
       expect(repeated.outcome, repeated.reason).toBe('passed');
-      expect(repeated.schemaVersion).toBe(2);
+      expect(repeated.schemaVersion).toBe(3);
       expect(repeated.limits.protocolProfile).toBe('describe-flush-v1');
       expect(repeated.cleanup.complete).toBe(true);
     }
@@ -56,26 +56,26 @@ describe('protocol profile propagation', () => {
     const file = fileURLToPath(new URL('./fixtures/supervised/counter.ts', import.meta.url));
     const recorded = await runScenarioFile(file, { databaseUrl: databaseUrl, protocolProfile: 'describe-flush-v1' });
     expect(recorded.outcome, recorded.reason).toBe('violation');
-    expect(recorded.schemaVersion).toBe(2);
+    expect(recorded.schemaVersion).toBe(3);
     expect(recorded.trace.every(step => step.stage === 'complete' && step.completion?.kind === 'ready')).toBe(true);
     const repeated = await replay(file, recorded, { databaseUrl: databaseUrl });
     expect(repeated.outcome, repeated.reason).toBe('violation');
     const incompatible = await replay('/missing-profile-fixture.mjs', recorded, {
-      databaseUrl: 'invalid-url', protocolProfile: 'sync-cycle-v1',
+      databaseUrl: 'postgresql://interleave.invalid:9/unused', protocolProfile: 'sync-cycle-v1',
     });
     expect(incompatible.outcome).toBe('incompatible');
     expect(incompatible.reason).toMatch(/protocol profile/);
     expect(incompatible.environment.serverVersion).toBe('unknown');
     expect(incompatible.cleanup.complete).toBe(true);
     const changedFixture = await replay('/missing-profile-fixture.mjs', recorded, {
-      databaseUrl: 'invalid-url', fixtureProfile: 'postgresql17-pgvector0.8.6-v1',
+      databaseUrl: 'postgresql://interleave.invalid:9/unused', fixtureProfile: 'postgresql17-pgvector0.8.6-v1',
     });
     expect(changedFixture.outcome).toBe('incompatible');
     expect(changedFixture.reason).toMatch(/fixture profile/);
     expect(changedFixture.environment.serverVersion).toBe('unknown');
     expect(changedFixture.cleanup.complete).toBe(true);
     const reduced = await minimize(file, recorded, { databaseUrl, maxAttempts: 3 });
-    expect(reduced.run.schemaVersion).toBe(2);
+    expect(reduced.run.schemaVersion).toBe(3);
     expect(reduced.run.limits.protocolProfile).toBe('describe-flush-v1');
     expect(reduced.run.failure?.fingerprint).toBe(recorded.failure?.fingerprint);
     expect(reduced.run.cleanup.complete).toBe(true);
@@ -85,7 +85,7 @@ describe('protocol profile propagation', () => {
   test('propagates the selected profile through every exploration execution', async () => {
     const result = await explore(scenario, { databaseUrl, protocolProfile: 'describe-flush-v1', maxRuns: 2 });
     expect(result.explored).toBeGreaterThan(0);
-    expect(result.runs.every(run => run.schemaVersion === 2 && run.limits.protocolProfile === 'describe-flush-v1' && run.cleanup.complete)).toBe(true);
+    expect(result.runs.every(run => run.schemaVersion === 3 && run.limits.protocolProfile === 'describe-flush-v1' && run.cleanup.complete)).toBe(true);
   });
 
   test('accepts only explicit CLI profiles and only on commands that execute a scenario', () => {

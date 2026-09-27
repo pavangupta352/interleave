@@ -1,7 +1,7 @@
-import type { Client } from 'pg';
+import type { Client, ClientConfig } from 'pg';
 import type { FixtureIdentity, FixtureIdentityProfile } from './fixture-identity.js';
 import type { SourceIdentity } from './source-identity.js';
-import type { TransportIdentity } from './postgres-transport.js';
+import type { ResolvedPostgresTransport, TransportIdentity, UpstreamTlsInput } from './postgres-transport.js';
 
 export type ProtocolKind = 'simple' | 'extended';
 export type ProtocolProfile = 'sync-cycle-v1' | 'describe-flush-v1';
@@ -10,8 +10,12 @@ export type TransactionStatus = 'I' | 'T' | 'E';
 export type Outcome = 'passed' | 'violation' | 'actor-error' | 'incompatible' | 'inconclusive' | 'harness-error';
 
 export interface DatabaseContext {
+  /** Connected node-postgres client for the generated database. */
   db: Client;
+  /** URL of the generated database. It cannot carry an in-memory private CA. */
   connectionString: string;
+  /** Fresh node-postgres configuration for additional clients, including verified TLS. */
+  readonly connectionOptions: ClientConfig;
 }
 
 export interface ActorContext {
@@ -91,6 +95,8 @@ export type ProxyEvent =
 
 export interface ProxyOptions {
   upstreamUrl: string;
+  /** Resolved upstream policy; its connection string must equal upstreamUrl. Plaintext when omitted. */
+  upstreamTransport?: ResolvedPostgresTransport;
   actor: string;
   onUnit(unit: PendingUnit): void;
   onEvent?(event: ProxyEvent): void;
@@ -117,6 +123,10 @@ export interface WaitObservation {
 export interface OwnedDatabase {
   name: string;
   connectionString: string;
+  /** Private resolved transport for this generated database; never serialized into evidence. */
+  transport: ResolvedPostgresTransport;
+  /** Fresh node-postgres configuration on each access. */
+  readonly connectionOptions: ClientConfig;
   db: Client;
   serverVersion: string;
   observeWait(backendPid: number): Promise<WaitObservation | null>;
@@ -181,6 +191,8 @@ export interface RunResult {
 
 export interface RunOptions {
   databaseUrl: string;
+  /** Verify the upstream certificate chain and URL hostname/IP for every PostgreSQL connection. */
+  upstreamTls?: UpstreamTlsInput;
   /** Select the catalog capture contract; native is the default. */
   fixtureProfile?: FixtureIdentityProfile;
   /** Selected local files for supervised file runs; imported modules are also captured. */

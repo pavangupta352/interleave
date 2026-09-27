@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Client, escapeIdentifier, type QueryResultRow } from 'pg';
+import { postgresClientConfig, resolvePostgresTransport, restorePostgresTransport, type ResolvedPostgresTransport } from './postgres-transport.js';
 import {
   PGVECTOR_EXTENSION_VERSION,
   PGVECTOR_FIXTURE_PROFILE,
@@ -26,6 +27,8 @@ export interface FixtureIdentityOptions {
   maxBytes?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Resolved snapshot for the capture connection; plaintext resolution of the URL when omitted. */
+  transport?: ResolvedPostgresTransport;
 }
 export type FixtureIdentityProfile = 'native' | typeof PGVECTOR_FIXTURE_PROFILE;
 export type ResolvedFixtureIdentityProfile =
@@ -282,7 +285,8 @@ export async function captureFixtureIdentity(connectionString: string, options: 
   const timeoutMs = limit(options.timeoutMs, 10_000, 120_000, 'timeoutMs');
   const started = performance.now();
   const counts = { objects: 0, rows: 0, bytes: 0 };
-  const client = new Client({ connectionString, connectionTimeoutMillis: timeoutMs });
+  const transport = options.transport === undefined ? resolvePostgresTransport(connectionString) : restorePostgresTransport(options.transport);
+  const client = new Client({ connectionTimeoutMillis: timeoutMs, ...postgresClientConfig(transport) });
   client.on('error', () => {});
   let interrupted: FixtureIdentityError | undefined;
   let timer: NodeJS.Timeout | undefined;

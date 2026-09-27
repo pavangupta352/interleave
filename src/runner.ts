@@ -8,11 +8,12 @@ import { ARTIFACT_LIMITS, parseRunArtifact, validateJsonValue } from './artifact
 import { assertEvidenceEnvelope, finalizeRunEvidence } from './evidence.js';
 import { captureFixtureIdentity, FixtureIdentityError } from './fixture-identity.js';
 import type { SourceIdentity } from './source-identity.js';
-import { environmentMatches } from './environment.js';
+import { environmentMatches, transportMatches } from './environment.js';
+import { postgresContextUrl, resolvePostgresTransport, runTransportIdentity } from './postgres-transport.js';
 import { resolveProtocolProfile } from './protocol-profile.js';
 import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile.js';
 import { missingReplayIdentity } from './replay-readiness.js';
-import type { ActorProxy, ActorResult, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
+import type { ActorProxy, ActorResult, DatabaseContext, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
 
 class Interrupted extends Error {
   constructor(readonly outcome: Outcome, message: string) { super(message); }
@@ -66,15 +67,16 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const replayConnections = new Map((options.replay?.connections ?? []).map(item => [`${item.actor}\0${item.connection}`, item]));
   const expectedEnvironment = mode === 'replay' ? options.replay!.environment : mode === 'guided' ? undefined : options.expectedEnvironment;
   const fixtureProfile = resolveFixtureProfile(options.fixtureProfile, expectedEnvironment?.fixture);
+  // One snapshot per execution: creation, setup, observation, capture, actors and cleanup.
+  const transport = providedDatabase?.transport ?? resolvePostgresTransport(options.databaseUrl, options.upstreamTls);
   const started = performance.now();
   const controller = new AbortController();
   const result: RunResult = {
-    schemaVersion: protocolProfile === 'describe-flush-v1' ? 2 : 1, scenario: scenario.name, outcome: 'harness-error', mode,
+    schemaVersion: 3, scenario: scenario.name, outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
-    environment: { serverVersion: 'unknown', nodeVersion: process.version, ...(source ? { source } : {}) },
+    environment: { serverVersion: 'unknown', nodeVersion: process.version, ...(source ? { source } : {}), transport: runTransportIdentity(transport) },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor,
-      ...(protocolProfile === 'describe-flush-v1' ? { protocolProfile } : {}) }, cleanup: { complete: false },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile }, cleanup: { complete: false },
   };
   let database: OwnedDatabase | undefined = providedDatabase;
   let failure: Interrupted | undefined;
@@ -142,8 +144,11 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     if (expectedEnvironment?.fixture && fixtureProfile !== recordedFixtureProfile(expectedEnvironment.fixture)) {
       throw new Interrupted('incompatible', 'Replay fixture profile differs from the recorded run');
     }
+    if (expectedEnvironment?.transport && !transportMatches(expectedEnvironment.transport, result.environment.transport)) {
+      throw new Interrupted('incompatible', 'Replay PostgreSQL transport differs from the recorded run; supply the same TLS policy, CA and hostname');
+    }
     // Creation has its own bounded cleanup. Retain the result before applying the run deadline.
-    database ??= await createOwnedDatabase(options.databaseUrl);
+    database ??= await createOwnedDatabase(options.databaseUrl, transport);
     result.environment.serverVersion = database.serverVersion;
     check();
     if (mode === 'replay') {
@@ -155,12 +160,18 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       if (expectedEnvironment.nodeVersion !== process.version) throw new Interrupted('incompatible', 'Replay Node.js version differs from the recorded environment');
       if (!expectedEnvironment.fixture) throw new Interrupted('incompatible', 'The recorded run has no fixture identity; use a guided run to create new bound evidence');
     }
-    await bounded(scenario.setup({ db: database.db, connectionString: database.connectionString }));
+    const owned = database;
+    const context = (): DatabaseContext => ({
+      db: owned.db, connectionString: postgresContextUrl(owned.transport),
+      get connectionOptions() { return owned.connectionOptions; },
+    });
+    await bounded(scenario.setup(context()));
     try {
       const fixture = await captureFixtureIdentity(database.connectionString, {
         profile: fixtureProfile,
         timeoutMs: Math.max(1, Math.min(120_000, Math.floor(timeoutMs - (performance.now() - started)))),
         ...(options.signal ? { signal: options.signal } : {}),
+        transport: database.transport,
       });
       check();
       if (!retain(fixture)) check();
@@ -178,7 +189,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     }
     for (const actor of names) {
       const proxy = await createProxy({
-        actor, upstreamUrl: database.connectionString, maxConnectionsPerActor, protocolProfile,
+        actor, upstreamUrl: database.transport.connectionString, upstreamTransport: database.transport, maxConnectionsPerActor, protocolProfile,
         onUnit(unit) {
           if (finished) return;
           queues.get(actor)!.push(unit);
@@ -332,7 +343,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       result.reason = 'One or more application operations rejected; the invariant was not evaluated';
     } else {
       try {
-        await bounded(scenario.invariant({ db: database.db, connectionString: database.connectionString, results: result.actors }));
+        await bounded(scenario.invariant(Object.assign(context(), { results: result.actors })));
         result.outcome = 'passed';
       } catch (error) {
         if (error instanceof Interrupted) throw error;

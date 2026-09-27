@@ -12,6 +12,8 @@ import { sourceSelection } from './source-selection.js';
 import { resolveProtocolProfile } from './protocol-profile.js';
 import { recordedFixtureProfile, resolveFixtureProfile } from './fixture-profile.js';
 import { missingReplayIdentity } from './replay-readiness.js';
+import { transportMatches } from './environment.js';
+import { resolvePostgresTransport, runTransportIdentity } from './postgres-transport.js';
 import type { OwnedDatabase, RunOptions, RunResult } from './types.js';
 
 const GRACE_MS = 250;
@@ -53,14 +55,15 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     && options.maxConnectionsPerActor !== undefined
     && options.maxConnectionsPerActor !== replayConnections;
   if (options.plan && (!Array.isArray(options.plan) || options.plan.length > 100_000 || options.plan.some(actor => typeof actor !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_-]{0,47}$/.test(actor) || ['constructor', 'prototype', '__proto__'].includes(actor)))) throw new TypeError('plan contains an invalid actor');
+  // Resolve trust once; the parent and worker use this snapshot for every connection.
+  const transport = resolvePostgresTransport(options.databaseUrl, options.upstreamTls);
   const started = performance.now();
   const result: RunResult = {
-    schemaVersion: protocolProfile === 'describe-flush-v1' ? 2 : 1, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
-    plan: [...(options.plan ?? [])], trace: [], actors: [], ...(protocolProfile === 'describe-flush-v1' ? { connections: [] } : {}),
-    environment: { serverVersion: 'unknown', nodeVersion: process.version },
+    schemaVersion: 3, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
+    plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
+    environment: { serverVersion: 'unknown', nodeVersion: process.version, transport: runTransportIdentity(transport) },
     startedAt: new Date().toISOString(), durationMs: 0,
-    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor,
-      ...(protocolProfile === 'describe-flush-v1' ? { protocolProfile } : {}) }, cleanup: { complete: false },
+    limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile }, cleanup: { complete: false },
   };
   assertEvidenceEnvelope(result, maxEvidenceBytes);
   let database: OwnedDatabase | undefined;
@@ -97,6 +100,9 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     } else if (!interruption && protocolProfileMismatch) {
       result.outcome = 'incompatible';
       result.reason = 'Replay protocol profile differs from the recorded run';
+    } else if (!interruption && expectedEnvironment?.transport && !transportMatches(expectedEnvironment.transport, result.environment.transport)) {
+      result.outcome = 'incompatible';
+      result.reason = 'Replay PostgreSQL transport differs from the recorded run; supply the same TLS policy, CA and hostname';
     } else if (!interruption && connectionProfileMismatch) {
       result.outcome = 'incompatible';
       result.reason = 'Replay actor connection profile differs from the recorded run';
@@ -123,7 +129,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
     if (!interruption && sourceIdentity && result.outcome === 'harness-error') {
       // Never race creation against cancellation: the eventual handle owns the
       // exact generated database and must be retained for authoritative cleanup.
-      database = await createOwnedDatabase(options.databaseUrl);
+      database = await createOwnedDatabase(options.databaseUrl, transport);
       result.environment.serverVersion = database.serverVersion;
       if (expectedEnvironment && expectedEnvironment.serverVersion !== database.serverVersion) {
         result.outcome = 'incompatible';
@@ -135,9 +141,10 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
       const worker = fileURLToPath(new URL(sourceMode ? './worker.ts' : './worker.js', import.meta.url));
       const protocolToken = randomUUID();
       const environment = { ...process.env };
-      // Do not give scenario code an inherited administrator URL or libpq route.
+      // Do not give scenario code an inherited administrator URL, libpq route or TLS
+      // policy: actor connections are loopback plaintext and harness trust comes from IPC.
       for (const key of Object.keys(environment)) {
-        if (/DATABASE.*URL|^PG(?:HOST|PORT|USER|PASSWORD|DATABASE|SERVICE|PASSFILE|SSLCERT|SSLKEY)$|^NODE_OPTIONS$/i.test(key)) delete environment[key];
+        if (/DATABASE.*URL|^PG(?:HOST|HOSTADDR|PORT|USER|PASSWORD|DATABASE|SERVICE|SERVICEFILE|PASSFILE|SSLMODE|SSLNEGOTIATION|SSLCERT|SSLKEY|SSLROOTCERT|SSLCRL|SSLCRLDIR|SSLCOMPRESSION|REQUIRESSL|CHANNELBINDING|GSSENCMODE|TARGETSESSIONATTRS)$|^NODE_OPTIONS$/i.test(key)) delete environment[key];
       }
       child = fork(worker, [], {
         detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -170,6 +177,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
                 candidate.environment.serverVersion !== database!.serverVersion
                 || candidate.environment.nodeVersion !== process.version
                 || !isDeepStrictEqual(candidate.environment.source, sourceIdentity)
+                || !isDeepStrictEqual(candidate.environment.transport, result.environment.transport)
                 || (candidate.limits.protocolProfile ?? 'sync-cycle-v1') !== protocolProfile
                 || (candidate.environment.fixture !== undefined && recordedFixtureProfile(candidate.environment.fixture) !== fixtureProfile)
               ) throw new TypeError('Worker result changed parent-owned environment identity');
@@ -180,6 +188,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
                   serverVersion: database!.serverVersion,
                   nodeVersion: process.version,
                   source: sourceIdentity!,
+                  transport: result.environment.transport!,
                 },
               };
             }
@@ -209,7 +218,7 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
         workerChild.once('error', () => { result.reason = 'Scenario worker could not be started'; terminateGroup(workerChild); done(null, null); });
         workerChild.send({
           type: 'start', token: protocolToken, scenarioFile: resolve(scenarioFile), connectionString: database!.connectionString,
-          sourceIdentity,
+          transport: database!.transport, sourceIdentity,
           options: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile, fixtureProfile, mode, ...(options.plan ? { plan: options.plan } : {}), ...(options.replay ? { replay: options.replay } : {}), ...(options.expectedEnvironment ? { expectedEnvironment: options.expectedEnvironment } : {}) },
         }, error => { if (error) { result.reason = 'Could not initialize scenario worker'; terminateGroup(workerChild); } });
         if (interruption) stopChild();

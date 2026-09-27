@@ -15,7 +15,7 @@ export function environmentMatches(expected: RunResult['environment'], actual: R
     && fixture.fingerprint === captured.fingerprint;
 }
 
-function transportMatches(expected: RunTransportIdentity, actual: RunTransportIdentity | undefined): boolean {
+export function transportMatches(expected: RunTransportIdentity, actual: RunTransportIdentity | undefined): boolean {
   if (!actual || expected.version !== actual.version || expected.frontend !== actual.frontend
     || expected.authentication !== actual.authentication) return false;
   const upstream = expected.upstream;

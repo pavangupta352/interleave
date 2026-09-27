@@ -22,7 +22,7 @@ afterEach(async () => {
   } finally { ownedNames.clear(); await admin.end(); }
 });
 function checked(run: RunResult, outcome: RunResult['outcome'] = 'passed') {
-  expect(run.outcome, run.reason).toBe(outcome); expect(run.cleanup.complete).toBe(true); expect(run.schemaVersion).toBe(2);
+  expect(run.outcome, run.reason).toBe(outcome); expect(run.cleanup.complete).toBe(true); expect(run.schemaVersion).toBe(3);
   expect(parseRunArtifact(run)).toEqual(run); return run;
 }
 async function withDriver<T>({ connectionString, signal }: ActorContext, body: (sql: postgres.Sql) => Promise<T>, prepare = true, fetchTypes = false): Promise<T> {

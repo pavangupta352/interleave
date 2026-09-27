@@ -47,6 +47,23 @@ server remains running. The execution examples below assume this URL route.
 To use managed Docker, unset `TEST_DATABASE_URL` and add `--docker` to each
 execution command. Report and export need neither route.
 
+For a server that requires encryption, add `--upstream-tls`. Every PostgreSQL
+connection Interleave opens then verifies the certificate chain and the URL
+hostname or IP address (TLS 1.2-1.3) against Node.js's bundled roots. For a
+private CA, add `--upstream-ca <pem-file>`; the bundle replaces the bundled roots
+and is read once per command. `sslmode=verify-full` in the URL selects the same
+policy; other `sslmode` values are rejected. Actor endpoints remain loopback
+plaintext. `--docker` starts a plaintext server and cannot be combined with
+`--upstream-tls`. With `TEST_DATABASE_URL` naming the server by a host name or IP
+address in its certificate, `doctor` prints the transport it enforced:
+
+```bash
+npx --no-install interleave doctor --upstream-tls --upstream-ca ./test-ca.pem
+```
+
+Replaying or minimizing a TLS recording requires the same policy, CA set and URL
+host name; anything else is reported as `incompatible` before database work.
+
 ## Discover, replay, and reduce
 
 ```sh

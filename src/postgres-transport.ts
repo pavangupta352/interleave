@@ -3,8 +3,9 @@ import { isIP } from 'node:net';
 import { checkServerIdentity, rootCertificates, type ConnectionOptions } from 'node:tls';
 import { domainToASCII } from 'node:url';
 import type { ClientConfig } from 'pg';
+import type { RunTransportIdentity } from './types.js';
 
-// Internal foundation only. No runtime caller or public export activates this policy.
+/** Verified upstream TLS: certificate chain and URL hostname/IP; `ca` replaces Node's bundled roots. */
 export interface UpstreamTlsInput { readonly mode: 'verify-full'; readonly ca?: string }
 type TlsIdentity = Readonly<{
   profile: 'tls-verify-full-v1';
@@ -178,6 +179,34 @@ export function restorePostgresTransport(value: unknown): ResolvedPostgresTransp
       || Object.entries(expected.identity).some(([key, field]) => identity[key] !== field)) fail('invalid-snapshot');
     return expected;
   } catch { return fail('invalid-snapshot'); }
+}
+
+/** Point a snapshot at another database on the same server without re-resolving its trust. */
+export function withPostgresDatabase(resolved: ResolvedPostgresTransport, database: string): ResolvedPostgresTransport {
+  const validated = restorePostgresTransport(resolved);
+  if (typeof database !== 'string' || !database || Buffer.byteLength(database) > 63 || /[\u0000-\u001f\u007f/]/u.test(database)) fail('invalid-url');
+  const url = new URL(validated.connectionString);
+  url.pathname = `/${encodeURIComponent(database)}`;
+  const identity = validated.identity;
+  return snapshot(parseUrl(url.toString()), validated.caCertificates,
+    identity.profile === 'plaintext-v1' ? undefined : identity.trustSource);
+}
+
+/** Setup/invariant URL. TLS runs ask URL-configured drivers to verify too; a URL cannot carry an in-memory CA. */
+export function postgresContextUrl(resolved: ResolvedPostgresTransport): string {
+  const validated = restorePostgresTransport(resolved);
+  if (validated.identity.profile === 'plaintext-v1') return validated.connectionString;
+  const url = new URL(validated.connectionString);
+  url.searchParams.set('sslmode', 'verify-full');
+  return url.toString();
+}
+
+/** The recorded run contract: policy selected and enforced, never raw trust material. */
+export function runTransportIdentity(resolved: ResolvedPostgresTransport): RunTransportIdentity {
+  return {
+    version: 1, frontend: 'loopback-plaintext-v1', authentication: 'passthrough-no-channel-binding-v1',
+    upstream: { ...restorePostgresTransport(resolved).identity },
+  };
 }
 
 function tlsOptions(resolved: ResolvedPostgresTransport): ConnectionOptions | undefined {

@@ -2,6 +2,7 @@ export { defineScenario } from './scenario.js';
 export { runOnce } from './runner.js';
 export { runScenarioFile } from './supervised.js';
 export type { FixtureIdentityProfile, ResolvedFixtureIdentityProfile } from './fixture-identity.js';
+export type { TransportIdentity, UpstreamTlsInput } from './postgres-transport.js';
 export type {
   SourceIdentity, SourceIdentityFile, SourceIdentityFiles, SourceIdentityDependency,
   SourceIdentityPackage, SourceIdentityDependencies, SourceIdentityRuntime,
@@ -23,5 +24,5 @@ export type {
   ExplorationStrategy, ExplorationSearch, ExplorationMetrics,
   Failure, MinimizeOptions, MinimizationResult, Outcome, ProtocolKind, ProtocolProfile, RunOptions,
   RunResult, Scenario, StepIdentity, TraceStep, TransactionStatus, UnitCompletion,
-  WaitObservation, StepStage, ReadyCompletion, MetadataCompletion,
+  WaitObservation, StepStage, ReadyCompletion, MetadataCompletion, RunTransportIdentity,
 } from './types.js';

@@ -90,7 +90,9 @@ use `--out` to retain a replay artifact.
 
 A **fixture identity** fingerprints the captured starting database. A file
 record also identifies selected source files, installed dependencies, the
-Interleave runtime, and actor connection startup. Exact replay checks those
+Interleave runtime, and actor connection startup. Every current record also
+names its upstream transport: plaintext, or verified TLS with a fingerprint of
+the trusted CA set and the verified host name. Exact replay checks those
 inputs and the recorded command/wait contract while observing results again.
 It does not force row counts, return values, errors, or the invariant outcome
 to equal the original run.

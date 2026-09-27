@@ -1,10 +1,13 @@
 import { Client } from 'pg';
+import { postgresClientConfig, resolvePostgresTransport, restorePostgresTransport, type ResolvedPostgresTransport } from './postgres-transport.js';
 import type { OwnedDatabase, WaitObservation } from './types.js';
 
 /** Attach inside a worker. Only the supervising parent may drop this database. */
-export async function attachOwnedDatabase(connectionString: string): Promise<OwnedDatabase> {
+export async function attachOwnedDatabase(connectionString: string, transport?: ResolvedPostgresTransport): Promise<OwnedDatabase> {
+  // The parent's snapshot, not ambient worker settings, decides verification.
+  const owned = transport === undefined ? resolvePostgresTransport(connectionString) : restorePostgresTransport(transport);
   const clients = [0, 1].map(() => {
-    const client = new Client({ connectionString, connectionTimeoutMillis: 5_000, query_timeout: 30_000 });
+    const client = new Client({ connectionTimeoutMillis: 5_000, query_timeout: 30_000, ...postgresClientConfig(owned) });
     client.on('error', () => undefined);
     return client;
   });
@@ -25,7 +28,9 @@ export async function attachOwnedDatabase(connectionString: string): Promise<Own
     const row = identity.rows[0];
     if (!row) throw new Error('PostgreSQL did not return its identity');
     return {
-      name: row.name, connectionString, db, serverVersion: row.version, close,
+      name: row.name, connectionString: owned.connectionString, transport: owned,
+      get connectionOptions() { return postgresClientConfig(owned); },
+      db, serverVersion: row.version, close,
       async observeWait(backendPid: number): Promise<WaitObservation | null> {
         if (!Number.isSafeInteger(backendPid) || backendPid <= 0) return null;
         const activity = await observer.query<{

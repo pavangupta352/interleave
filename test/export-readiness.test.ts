@@ -37,7 +37,11 @@ async function fixture() {
 
 function omit(run: RunResult, identity: 'fixture' | 'connections') {
   if (identity === 'fixture') delete run.environment.fixture;
-  else delete run.connections;
+  else {
+    // Only legacy schema 1 evidence could omit connections; it also predates transport identity.
+    run.schemaVersion = 1; delete run.connections;
+    delete run.environment.transport; delete run.limits.protocolProfile;
+  }
   expect(parseRunArtifact(run)).toEqual(run);
 }
 

@@ -23,6 +23,10 @@ export async function checkReport(page, url, artifact) {
       assert.equal(await page.locator('.record-body').getByText(artifact.environment.source.entry, { exact: true }).count(), 1);
       assert.ok((await page.locator('.record-body').textContent()).includes(artifact.environment.source.components.runtime.fingerprint));
     }
+    const upstream = artifact.environment.transport?.upstream;
+    const transport = upstream === undefined ? 'Not recorded in this artifact'
+      : upstream.profile === 'plaintext-v1' ? 'Plaintext' : 'Verified TLS';
+    assert.ok((await page.locator('.record-body').textContent()).includes(`Upstream transport${transport}`), 'Record details state the upstream transport');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Expanded record identities fit the viewport');
     await page.locator('.record-details summary').click();
     const input = page.locator('#import-file');

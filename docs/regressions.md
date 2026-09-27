@@ -261,6 +261,13 @@ dependency, and runtime identity.
 Verify the original exported folder, then change into it and run the argument
 arrays shown by export or stored under `manifest.replay`.
 
+The replay command still needs a database route: set `TEST_DATABASE_URL` or add
+`--database-url` (or `--docker`). A recording made over verified upstream TLS
+must be replayed with the same policy, so also add `--upstream-tls`, plus
+`--upstream-ca <pem-file>` when it used a supplied CA. Exports never contain CA
+files, credentials or their original paths; any path to identical CA material
+works, while a different CA set or host name is reported as `incompatible`.
+
 For a shared installation, `node install.mjs` verifies every durable input,
 seeds a new private cache using public `npm cache add`, and runs one offline
 `npm ci` for the original app. It isolates npm's user/global configuration,

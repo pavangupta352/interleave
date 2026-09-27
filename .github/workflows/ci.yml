@@ -85,6 +85,30 @@ jobs:
       - name: Qualify managed setup, replay, reduction and interruption against real Docker
         run: npm run test:managed
 
+  tls:
+    name: Verified upstream TLS / PostgreSQL ${{ matrix.postgres }} / Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24.7.0']
+        postgres: ['16', '17', '18']
+    env:
+      INTERLEAVE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Qualify verified TLS across every connection role with owned TLS-only servers
+        run: npm run test:tls
+
   browser:
     name: Offline report / Chromium, Firefox and WebKit
     runs-on: ubuntu-24.04
@@ -107,7 +131,7 @@ jobs:
   release-candidate:
     name: Prepare release assets (no publication)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [postgres, pgvector, managed, browser]
+    needs: [postgres, pgvector, managed, tls, browser]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

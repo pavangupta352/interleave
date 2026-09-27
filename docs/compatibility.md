@@ -20,6 +20,16 @@ PostgreSQL 17 renamed the catalog locale fields used by fixture capture from `da
 
 PostgreSQL 18 virtual generated columns are covered by schema and logical row identity. The qualification verifies that otherwise equivalent stored and virtual generated columns have different schema identities while their application-visible values are captured. See the official [PostgreSQL 18 generated-column documentation](https://www.postgresql.org/docs/18/ddl-generated-columns.html).
 
+## Verified upstream TLS
+
+Pass `upstreamTls: { mode: 'verify-full' }` in the API, `--upstream-tls` on the CLI, or `sslmode=verify-full` in the administrator URL. Every connection Interleave opens to PostgreSQL then verifies the server certificate chain and the URL hostname or IP address, using TLS 1.2 or 1.3 after PostgreSQL's SSLRequest negotiation. That covers database creation, setup and observer clients, fixture capture, the supervised worker's clients, each actor proxy's upstream session and cleanup. Trust is Node.js's bundled root set, or a PEM bundle you supply with `ca` / `--upstream-ca`, which replaces those roots rather than extending them (at most 1 MiB and 64 certificates). The policy and CA are resolved once per command or API call, so a CA file replaced mid-run cannot change cleanup trust.
+
+Actors still connect to their own loopback endpoint in plaintext (`127.0.0.1`), and their driver's authentication bytes pass through unchanged. The first qualified authentication path is ordinary SCRAM-SHA-256 over the verified upstream connection. An actor that selects SCRAM-SHA-256-PLUS (channel binding) is refused with an explicit error, because the loopback leg has no upstream TLS channel to bind.
+
+Not part of this profile: client certificates (mutual TLS), required channel binding, a verification name different from the URL host (tunnels), `sslmode` values other than `verify-full`/`disable`, direct TLS negotiation, and TLS on actor endpoints. `--docker` provisions a plaintext loopback server and cannot be combined with `--upstream-tls`.
+
+The owned TLS qualification servers use official PostgreSQL images, `hostssl`-only authentication rules, SCRAM passwords and a generated private CA. They check both IP and DNS subject names, node-postgres ordinary cycles and the Postgres.js `describe-flush-v1` profile, and in-process and supervised file runs. They also cover exact replay, minimization, CLI `doctor` with `--upstream-ca`, and rejection of transport drift before any database work. The negative cases cover an unrelated CA, a certificate for another name, expired and not-yet-valid certificates, a wrong password and plaintext clients refused by the server. The [TLS qualification record](qualification/verified-upstream-tls-2026-09-27.md) lists versions, commands and unrun cases.
+
 ## PostgreSQL 17 with pgvector 0.8.6
 
 The separate `postgresql17-pgvector0.8.6-v1` fixture profile is qualified on

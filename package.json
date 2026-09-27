@@ -40,6 +40,7 @@
     "test:unit": "node scripts/test.mjs unit",
     "test:integration": "node scripts/test.mjs integration",
     "test:managed": "npm run build && node scripts/test-managed.mjs",
+    "test:tls": "npm run build && node --test --test-concurrency=1 \"test/tls/*.test.mjs\"",
     "check": "npm run typecheck && npm test",
     "test:browser": "npm run build && node scripts/test.mjs browser",
     "pretest": "npm run build",

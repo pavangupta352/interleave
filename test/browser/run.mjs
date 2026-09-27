@@ -31,7 +31,8 @@ try {
   });
   assert.equal(staged.outcome, 'violation', staged.reason);
   assert.equal(staged.cleanup.complete, true);
-  assert.equal(staged.schemaVersion, 2);
+  assert.equal(staged.schemaVersion, 3);
+  assert.equal(staged.limits.protocolProfile, 'describe-flush-v1');
   assert.ok(staged.environment.source);
   assert.ok(staged.trace.some(step => step.completion?.kind === 'metadata'));
   const stagedHtml = await renderReport(staged);

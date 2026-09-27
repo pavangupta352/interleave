@@ -84,7 +84,7 @@ test.each(adapters)('%s public searches reuse, reconnect and exactly replay thro
   ]);
   expect(first.trace.filter(step => step.sql.includes('websearch_to_tsquery') && step.completion?.kind !== 'metadata')).toHaveLength(6);
   if (adapter === 'postgresjs') {
-    expect(first.schemaVersion).toBe(2);
+    expect(first.schemaVersion).toBe(3);
     expect(first.trace.some(step => step.sql.includes('pg_catalog.pg_type'))).toBe(true);
     expect(first.trace.filter(step => step.sql.includes('websearch_to_tsquery') && step.stage === 'describe')).toHaveLength(6);
   }

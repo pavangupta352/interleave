@@ -36,7 +36,11 @@ afterEach(async () => {
 function omitIdentity(original: RunResult, identity: 'fixture' | 'connections'): RunResult {
   const legacy = structuredClone(original);
   if (identity === 'fixture') delete legacy.environment.fixture;
-  else delete legacy.connections;
+  else {
+    // Only legacy schema 1 evidence could omit connections; it also predates transport identity.
+    legacy.schemaVersion = 1; delete legacy.connections;
+    delete legacy.environment.transport; delete legacy.limits.protocolProfile;
+  }
   // Schema 1 legacy readability is deliberately retained.
   return parseRunArtifact(legacy);
 }

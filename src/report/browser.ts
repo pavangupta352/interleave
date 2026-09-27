@@ -76,7 +76,7 @@ function renderShell(): void {
   const subtitle = run.failure?.message ?? run.reason ?? (run.outcome === 'passed' ? 'The invariant held in this recorded execution.' : 'Inspect the recorded execution and its limits below.');
   const text = evidenceText('p', 'summary-message', subtitle, 'Execution outcome message');
   const metadata = node('div', 'metadata');
-  for (const value of [`${run.trace.length.toLocaleString('en-US')} ${run.schemaVersion === 2 ? 'releases' : 'commands'}`, `${actors.length} actors`, `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
+  for (const value of [`${run.trace.length.toLocaleString('en-US')} ${protocolProfile() === 'describe-flush-v1' ? 'releases' : 'commands'}`, `${actors.length} actors`, `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
   const cleanup = node('span', run.cleanup.complete ? 'cleanup-complete' : 'cleanup-incomplete', run.cleanup.complete ? 'Cleanup complete' : 'Cleanup incomplete'); metadata.append(cleanup);
   summary.append(heading, text, metadata);
   if (!run.cleanup.complete) summary.append(node('p', 'cleanup-warning', run.cleanup.error ?? 'Owned resource cleanup did not complete.'));
@@ -106,7 +106,7 @@ function renderShell(): void {
   selectionTools.append(selectionLabel, inspect);
   const ledger = node('div', 'ledger'); ledger.id = 'ledger';
   const pagination = node('div', 'pagination'); pagination.id = 'pagination';
-  const scope = node('p', 'scope-note', `${run.schemaVersion === 2 ? 'Each row is a scheduled release. A query may have separate description and execution stages.' : 'Each row is a client command released to PostgreSQL.'} PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.`);
+  const scope = node('p', 'scope-note', `${protocolProfile() === 'describe-flush-v1' ? 'Each row is a scheduled release. A query may have separate description and execution stages.' : 'Each row is a client command released to PostgreSQL.'} PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.`);
   evidence.append(toolbar, hint, selectionTools, ledger, pagination, scope);
   const inspector = node('aside', 'inspector'); inspector.id = 'inspector'; inspector.setAttribute('aria-label', 'Selected command evidence'); inspector.tabIndex = -1;
   workspace.append(evidence, inspector); main.append(summary, workspace);
@@ -136,7 +136,13 @@ function renderShell(): void {
     addFact(info, 'Harness runtime', `${source.components.runtime.mode} mode · ${source.components.runtime.fingerprint}`);
   }
   addFact(info, 'Connection profile', `${run.limits.maxConnectionsPerActor ?? 1} physical ${(run.limits.maxConnectionsPerActor ?? 1) === 1 ? 'connection' : 'connections'} per actor; one live command producer`);
-  addFact(info, 'Protocol profile', run.limits.protocolProfile ?? 'sync-cycle-v1');
+  addFact(info, 'Protocol profile', protocolProfile());
+  const upstream = run.environment.transport?.upstream;
+  addFact(info, 'Upstream transport', upstream === undefined ? 'Not recorded in this artifact'
+    : upstream.profile === 'plaintext-v1' ? 'Plaintext'
+      : `Verified TLS ${upstream.minVersion.replace('TLSv', '')}–${upstream.maxVersion.replace('TLSv', '')} · ${upstream.trustSource === 'custom-ca' ? 'supplied CA bundle' : 'Node.js bundled roots'} · chain and hostname checked`);
+  if (upstream?.profile === 'tls-verify-full-v1') addFact(info, 'Trusted CA set', upstream.trustFingerprint);
+  if (upstream !== undefined) addFact(info, 'Actor endpoints', 'Loopback plaintext');
   addFact(info, 'Actor startups', run.connections === undefined ? 'Not recorded in this artifact' : `${run.connections.length.toLocaleString('en-US')} recorded`);
   for (const connection of run.connections ?? []) addFact(info, `${connection.actor} · ${connection.connection}`, connection.fingerprint);
   recordBody.append(info);
@@ -323,4 +329,9 @@ try {
   setRun(parseRunArtifact(payload.run), typeof payload.replayCommand === 'string' ? payload.replayCommand : null);
 } catch (error) {
   app.replaceChildren(node('h1', 'boot-message', 'This evidence record could not be opened'), node('p', 'boot-message', error instanceof Error ? error.message : 'Invalid artifact'));
+}
+
+/** Schema 3 records the profile explicitly; version 2 implied staged cycles. */
+function protocolProfile(): string {
+  return run.limits.protocolProfile ?? (run.schemaVersion === 2 ? 'describe-flush-v1' : 'sync-cycle-v1');
 }

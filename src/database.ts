@@ -2,6 +2,10 @@ import { randomBytes } from 'node:crypto';
 
 import { Client, DatabaseError, escapeIdentifier } from 'pg';
 
+import {
+  postgresClientConfig, resolvePostgresTransport, restorePostgresTransport, withPostgresDatabase,
+  type ResolvedPostgresTransport,
+} from './postgres-transport.js';
 import type { OwnedDatabase, WaitObservation } from './types.js';
 
 const CONNECTION_TIMEOUT_MS = 5_000;
@@ -53,18 +57,13 @@ function parseAdministratorUrl(databaseUrl: string): URL {
   return parsed;
 }
 
-function ownedConnectionString(administratorUrl: URL, name: string): string {
-  const ownedUrl = new URL(administratorUrl);
-  ownedUrl.pathname = `/${name}`;
-  return ownedUrl.toString();
-}
-
-function postgresClient(connectionString: string): Client {
+function postgresClient(transport: ResolvedPostgresTransport): Client {
   const connection = new Client({
-    connectionString,
     connectionTimeoutMillis: CONNECTION_TIMEOUT_MS,
     query_timeout: QUERY_TIMEOUT_MS,
     statement_timeout: QUERY_TIMEOUT_MS,
+    // URL startup settings keep their previous precedence over these defaults.
+    ...postgresClientConfig(transport),
   });
 
   // node-postgres emits idle connection failures as EventEmitter errors. The
@@ -97,7 +96,7 @@ async function closeClient(client: Client | undefined, label: string): Promise<v
 }
 
 async function cleanupGeneratedDatabase(
-  administratorUrl: string,
+  administratorTransport: ResolvedPostgresTransport,
   name: string,
   ownedClients: readonly (Client | undefined)[],
 ): Promise<void> {
@@ -111,7 +110,8 @@ async function cleanupGeneratedDatabase(
     if (result.status === 'rejected') errors.push(result.reason);
   }
 
-  const administrator = postgresClient(administratorUrl);
+  // A fresh connection with the retained snapshot: a replaced CA file cannot change cleanup trust.
+  const administrator = postgresClient(administratorTransport);
   try {
     await administrator.connect();
     await administrator.query(
@@ -142,14 +142,17 @@ async function cleanupGeneratedDatabase(
 /**
  * Creates a fresh database owned by this lifecycle. The supplied URL is used
  * only for administration; application setup and observation use independent
- * connections to the generated database.
+ * connections to the generated database. A supplied transport must be the
+ * resolution of that URL; every connection, including cleanup, reuses it.
  */
-export async function createOwnedDatabase(databaseUrl: string): Promise<OwnedDatabase> {
-  const parsedAdministratorUrl = parseAdministratorUrl(databaseUrl);
-  const administratorUrl = parsedAdministratorUrl.toString();
+export async function createOwnedDatabase(databaseUrl: string, transport?: ResolvedPostgresTransport): Promise<OwnedDatabase> {
+  parseAdministratorUrl(databaseUrl);
+  const administratorTransport = transport === undefined
+    ? resolvePostgresTransport(databaseUrl) : restorePostgresTransport(transport);
   const name = generatedDatabaseName();
-  const connectionString = ownedConnectionString(parsedAdministratorUrl, name);
-  const administrator = postgresClient(administratorUrl);
+  const ownedTransport = withPostgresDatabase(administratorTransport, name);
+  const connectionString = ownedTransport.connectionString;
+  const administrator = postgresClient(administratorTransport);
   let creationState: 'not-started' | 'pending' | 'confirmed' | 'rejected' = 'not-started';
   let db: Client | undefined;
   let observer: Client | undefined;
@@ -172,9 +175,9 @@ export async function createOwnedDatabase(databaseUrl: string): Promise<OwnedDat
     }
     await closeClient(administrator, 'creation administrator client');
 
-    db = postgresClient(connectionString);
+    db = postgresClient(ownedTransport);
     await db.connect();
-    observer = postgresClient(connectionString);
+    observer = postgresClient(ownedTransport);
     await observer.connect();
     const connectedObserver = observer;
 
@@ -190,6 +193,8 @@ export async function createOwnedDatabase(databaseUrl: string): Promise<OwnedDat
     return {
       name,
       connectionString,
+      transport: ownedTransport,
+      get connectionOptions() { return postgresClientConfig(ownedTransport); },
       db,
       serverVersion,
       async observeWait(backendPid: number): Promise<WaitObservation | null> {
@@ -229,7 +234,7 @@ export async function createOwnedDatabase(databaseUrl: string): Promise<OwnedDat
         };
       },
       close(): Promise<void> {
-        closePromise ??= cleanupGeneratedDatabase(administratorUrl, name, [db, observer]);
+        closePromise ??= cleanupGeneratedDatabase(administratorTransport, name, [db, observer]);
         return closePromise;
       },
     };
@@ -247,7 +252,7 @@ export async function createOwnedDatabase(databaseUrl: string): Promise<OwnedDat
     }
     if (creationState === 'confirmed') {
       try {
-        await cleanupGeneratedDatabase(administratorUrl, name, [db, observer]);
+        await cleanupGeneratedDatabase(administratorTransport, name, [db, observer]);
       } catch (cleanupError) {
         throw new OwnedDatabaseCreationError(name, [error, cleanupError]);
       }

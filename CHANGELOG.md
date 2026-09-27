@@ -23,6 +23,22 @@ Interleave is in development. No stable version has been released.
   check the environment and run the pinned unsafe/safe neveroversell example.
 - Run the pinned pghybrid public search adapters with node-postgres, Postgres.js,
   Drizzle and Kysely callers, including installed source-bound exact replay.
+- Verify upstream TLS for every PostgreSQL connection: certificate chain and URL
+  hostname/IP, TLS 1.2-1.3, Node.js bundled roots or a supplied CA bundle
+  (`upstreamTls`, `--upstream-tls`, `--upstream-ca`, `sslmode=verify-full`).
+  Setup and invariant contexts gain `connectionOptions` for additional clients.
+  Actors that select SCRAM channel binding are refused explicitly.
+
+### Changed
+
+- New run artifacts use schema version 3, with an explicit protocol profile and
+  the upstream transport policy. Version 1 and 2 records stay readable; exact
+  replay of them now requires a guided run, which records new evidence.
+- Administrator URLs accept only PostgreSQL startup options, database aliases and
+  `sslmode=verify-full`/`disable`; other query options are rejected before
+  connecting. Upstream connection failures are reported with bounded messages.
+- Supervised scenario workers no longer inherit libpq TLS environment settings
+  such as `PGSSLMODE`; the harness supplies its resolved policy explicitly.
 
 ### Qualified profiles
 

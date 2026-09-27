@@ -34,7 +34,7 @@ test('installed Postgres.js records staged evidence, exports original bytes and 
     const runFile = join(root, 'original.json');
     execute([cli, 'run', 'entry.mjs', '--protocol-profile', 'describe-flush-v1', '--max-runs', '1', '--timeout-ms', '20000', '--out', runFile, '--json'], app, 1);
     const recorded = parseRunArtifact(JSON.parse(await readFile(runFile, 'utf8')));
-    expect(recorded.schemaVersion).toBe(2); expect(recorded.outcome).toBe('violation'); expect(recorded.cleanup.complete).toBe(true);
+    expect(recorded.schemaVersion).toBe(3); expect(recorded.outcome).toBe('violation'); expect(recorded.cleanup.complete).toBe(true);
     expect(recorded.environment.source?.components.dependencies.packages.some(pkg => pkg.name === 'postgres' && pkg.version === '3.4.9')).toBe(true);
     expect(recorded.trace.map(step => step.stage)).toEqual(['describe', 'describe', 'execute', 'execute', 'describe', 'describe', 'execute', 'execute']);
     expect(recorded.trace.filter(step => step.stage === 'describe').every(step => step.completion?.kind === 'metadata')).toBe(true);
@@ -49,7 +49,7 @@ test('installed Postgres.js records staged evidence, exports original bytes and 
     expect(execute(['install.mjs'], destination, 0, process.execPath, { npm_config_registry: 'https://unavailable.invalid/' })).toContain('complete installed identity match');
     const [command, ...args] = exported.replay.command;
     const repeated = parseRunArtifact(JSON.parse(execute([...args, '--json'], destination, 1, command)));
-    expect(repeated.schemaVersion).toBe(2); expect(repeated.outcome).toBe('violation'); expect(repeated.cleanup.complete).toBe(true);
+    expect(repeated.schemaVersion).toBe(3); expect(repeated.outcome).toBe('violation'); expect(repeated.cleanup.complete).toBe(true);
     expect(repeated.environment.source).toEqual(recorded.environment.source);
     expect(repeated.environment.fixture).toEqual(recorded.environment.fixture);
     expect(repeated.failure?.fingerprint).toBe(recorded.failure?.fingerprint);

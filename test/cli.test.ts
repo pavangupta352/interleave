@@ -20,6 +20,15 @@ describe('CLI arguments and scaffolding', () => {
       expect(parseCliArgs([command, '--docker', '--postgres-image', image]).values['postgres-image']).toBe(image);
     }
   });
+  test.each(['doctor', 'demo', 'run', 'replay', 'minimize'])('%s accepts verified upstream TLS and a CA bundle', command => {
+    expect(parseCliArgs([command, '--upstream-tls']).values).toMatchObject({ 'upstream-tls': true });
+    expect(parseCliArgs([command, '--upstream-tls', '--upstream-ca', 'ca.pem']).values).toMatchObject({ 'upstream-tls': true, 'upstream-ca': 'ca.pem' });
+  });
+  test('upstream TLS rejects a CA without TLS, the plaintext managed server and non-database commands', () => {
+    expect(() => parseCliArgs(['doctor', '--upstream-ca', 'ca.pem'])).toThrow(/requires --upstream-tls/);
+    expect(() => parseCliArgs(['doctor', '--docker', '--upstream-tls'])).toThrow(/plaintext loopback server/);
+    for (const command of ['report', 'export', 'init']) expect(() => parseCliArgs([command, '--upstream-tls'])).toThrow(/not supported/);
+  });
   test.each(['report', 'export', 'init'])('%s cannot provision PostgreSQL', command => {
     expect(() => parseCliArgs([command, '--docker'])).toThrow(/not supported/);
   });
