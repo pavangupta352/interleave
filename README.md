@@ -156,8 +156,11 @@ Interleave needs Node.js 22.18 or later, and Docker if you use `--docker`.
 
 ```sh
 npm install --save-dev @pavangupta352/interleave pg
-npx interleave doctor --docker
+npx --no-install interleave doctor --docker
 ```
+
+`--no-install` runs the copy you just installed; the unscoped `interleave`
+package on npm is unrelated.
 
 Each [GitHub release](https://github.com/pavangupta352/interleave/releases) also
 carries the package archive and its checksums; `npm install --save-dev <archive
