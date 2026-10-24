@@ -57,9 +57,11 @@ bundle that installs offline and replays the recording exactly. The report shows
 connection labels in Chromium, Firefox and WebKit at desktop and mobile sizes.
 
 Keep each actor's pool within the per-actor cap (eight in this profile). Other
-drivers, ORMs and pool implementations, larger pools and cancellation routing
-have not been checked with this profile, and the complete release matrix (every
-suite on each PostgreSQL major and Node.js version) has not yet run with it.
+drivers, ORMs and pool implementations and larger pools have not been checked
+with this profile, and the complete release matrix (every suite on each
+PostgreSQL major and Node.js version) has not yet run with it. One
+[cancel request](#cancel-requests) case uses two connections of one actor in
+this profile.
 
 ## Statement overlap
 
@@ -89,6 +91,101 @@ chooses how a pair interleaves; replay cannot force it. On the unchanged Knex
 run and 30 of 30 exact replays repeated it, while 17 of the 46 explored runs that
 paired the two inserts raced; see the
 [case studies](case-studies.md#what-the-fix-left-open).
+
+## Cancel requests
+
+A driver cancels a running query by opening a new connection and sending a
+CancelRequest: 16 bytes holding the backend process ID and the secret key that
+PostgreSQL sent at startup. Interleave reads the request on the actor's
+endpoint. When it names the backend of one of that actor's own live connections,
+Interleave forwards the 16 bytes unchanged over a new upstream connection that
+uses the run's transport policy, plaintext or verified TLS, and waits for
+PostgreSQL to close it. A request naming any other backend is not forwarded.
+
+The scheduler makes no decision while a forwarded request is outstanding, so a
+request can only reach the command that was running when it arrived. If the
+scheduler was still holding that actor's next command, the backend was idle:
+PostgreSQL ignores the request, and the held command runs when it is released.
+A slow network can produce the same ordering without Interleave.
+
+Records with cancel requests use schema version 5. They list each request in
+arrival order with its actor, arrival time, the backend it named, whether it was
+forwarded, and the step it reached. The secret key is not recorded. A request
+naming another actor's live connection stops the run as `inconclusive`; a
+request naming an unknown backend is recorded and the run continues. Exact
+replay requires every request to reach the same step, or find its backend idle,
+as recorded. The application's own timers decide when a request arrives, so
+that is timing dependent.
+
+Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
+
+- Postgres.js 3.4.9 `query.cancel()` stopped `SELECT pg_sleep(30)` with SQLSTATE
+  57014 in the `describe-flush-v1` profile, with a connection cap of one (the
+  request arrives over the cap) and of two (it arrives as an admitted
+  connection). Both replayed exactly.
+- node-postgres 8.23.0 `Client#cancel` for a command the scheduler still held:
+  PostgreSQL ignored the request, the command then completed, and the run
+  replayed exactly.
+- Two node-postgres connections of one actor in `multi-producer-v1`: the request
+  named the sleeping connection, and replay bound it to the recorded one.
+- psycopg 3.3.6 (binary, libpq 18.0) `cancel_safe()` from a Python process actor,
+  with exact replay.
+- Forwarding over verified TLS to a TLS-only server, with exact replay.
+- A libpq-style request for backend 1, with and without an SSLRequest first, was
+  recorded and not forwarded. A request for another actor's backend was not
+  forwarded and the run ended `inconclusive`.
+- Replaying a record whose request had found its backend idle, while the new
+  request reached the running command, was `incompatible`.
+- The report tagged the command a request reached and listed every request in
+  Chromium at desktop and mobile sizes.
+
+Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, libpq `PQcancel` called
+directly, pgjdbc `Statement.setQueryTimeout`, and Firefox and WebKit for the
+report.
+
+## Streaming COPY
+
+`COPY ... FROM STDIN` and `COPY ... TO STDOUT` run as one scheduled command.
+Once Interleave releases it and PostgreSQL starts the copy, the client's
+CopyData, CopyDone and CopyFail messages go upstream at once, and PostgreSQL's
+copied rows go to the client, with backpressure in both directions. The command
+completes at ReadyForQuery. For an extended-protocol COPY, which libpq's
+`PQsendQueryParams` sends, the Sync that the client sends after CopyDone stays
+part of the same command. Each CopyData message is limited to 16 MiB, the
+proxy's message limit.
+
+Records that contain COPY use schema version 5. Each COPY in a command's
+completion lists its direction, byte count and the SHA-256 digest of the copied
+data; the rows themselves are not recorded. Data sent with COPY FROM STDIN is
+application input, so exact replay requires the same bytes and reports
+`incompatible` when they change. Copied-out data is a result, like rows, and is
+not compared. Replication's COPY BOTH is refused.
+
+Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
+
+- pg-copy-streams 7.0.0 with node-postgres 8.23.0 copied in and out with exact
+  replay, and replay with changed input rows was `incompatible`.
+- Postgres.js 3.4.9 `writable()` and `readable()` streams, in the
+  `describe-flush-v1` profile, with exact replay.
+- A destroyed pg-copy-streams stream sent CopyFail after one row: PostgreSQL
+  answered SQLSTATE 57014, the record kept the 8 bytes sent, and the next query
+  on that connection ran.
+- 200,000 rows (19,488,890 bytes) copied in, then read back slowly through COPY
+  TO STDOUT, kept their exact byte counts and digests.
+- Two actors copying the same key in open transactions: the second copy waited
+  for the first actor's transaction, the scheduler observed that lock wait and
+  released the first actor's COMMIT, the second copy failed with 23505, and the
+  run replayed exactly.
+- psycopg 3.3.6 `copy()` in both directions, and an extended-protocol COPY
+  through libpq 18.0's `PQsendQueryParams`, from a Python process actor, with
+  exact replay.
+- node-postgres without a copy stream: copied-out data was measured and
+  discarded by the driver, and a copy in failed with the driver's own CopyFail.
+- The report listed each transfer's direction, byte count and digest in
+  Chromium at desktop and mobile sizes.
+
+Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, pgjdbc `CopyManager`,
+binary-format COPY, and Firefox and WebKit for the report.
 
 ## PostgreSQL 17 with pgvector 0.8.6
 
@@ -151,6 +248,37 @@ records real `40P01` rollback and `40001` whole-transaction retries on PostgreSQ
 16.13, with both preparation settings and explicit `fetch_types: false`.
 PostgreSQL can choose another deadlock victim on replay; a resulting change in
 the application's COMMIT/ROLLBACK order is correctly reported as incompatible.
+
+## Cursors and Flush stages
+
+The opt-in `flush-stages-v1` profile releases each group of extended-protocol
+messages that ends in Flush, and keeps the cycle open until its Sync. That is how
+cursor clients read a large result in batches: Execute with a row limit, Flush,
+and PortalSuspended until the last batch. Another actor's commands can run
+between two batches, which is where a cursor's snapshot and locks meet other
+writers. Each Flush release completes once PostgreSQL has answered every message
+in it.
+
+Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
+
+- pg-cursor 2.22.1 with node-postgres 8.23.0 read five rows two at a time while
+  another actor committed an update between two batches. The cursor kept the
+  portal's snapshot and returned the old value; a schedule that ran the update
+  first returned the new one. Exact replay repeated the stage sequence.
+- A cursor closed after its first batch ended its cycle with Close and Sync. An
+  error in a later batch (SQLSTATE 22012) was followed by a Sync-only recovery,
+  and the connection's next query ran. Exact replay.
+- A `SELECT ... FOR UPDATE` cursor's batch waited for a row that another actor
+  had updated in an open transaction. The scheduler observed the lock wait inside
+  the open cycle and released the other actor's COMMIT. Exact replay.
+- pg-query-stream 4.17.1 with a batch size of two, and Postgres.js 3.4.9
+  `cursor()` with a parameterized statement (described first) and with an early
+  `break`, with exact replay.
+- The report labeled Flush stages and the closing Sync, with rows returned and
+  the suspended portal, in Chromium at desktop and mobile sizes.
+
+Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, libpq pipeline mode with
+flush requests, pgjdbc, and Firefox and WebKit for the report.
 
 ## External programs as actors
 
@@ -217,8 +345,10 @@ drivers, programs that open more than one command-producing connection per
 actor, and regression exports of language actors. Other clients, such as Npgsql,
 are expected to work when they read `DATABASE_URL` or the libpq `PG*` variables
 and stay within the qualified protocol subset, which includes pipelined cycles
-that each end with Sync but not COPY, cancel requests, or cursors and pipelines
-that wait on Flush. Treat them as unverified until their own workflow runs.
+that each end with Sync, [cancel requests](#cancel-requests) and
+[streaming COPY](#streaming-copy). Cursors and pipelines that wait on Flush need
+`flush-stages-v1` (see [cursors and Flush stages](#cursors-and-flush-stages)).
+Treat them as unverified until their own workflow runs.
 
 ## TypeORM
 

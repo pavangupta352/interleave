@@ -1,5 +1,5 @@
 import { testDatabaseUrl } from './helpers/postgres.js';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -239,15 +239,26 @@ integration('proxy integration with real PostgreSQL', () => {
     expect(errors[0]!.message).toMatch(/duplicate.*database/i);
     expect(events.filter(event => event.type === 'startup')).toEqual([]);
   });
-  test('rejects TLS-required clients and streaming COPY with actionable profile errors', async () => {
+  test('rejects TLS-required clients with an actionable profile error', async () => {
     const errors: Error[] = []; const proxy = await createProxy({ upstreamUrl: databaseUrl, actor: 'ssl', onUnit() {}, onError(e) { errors.push(e); } });
     // Without the endpoint's explicit sslmode, a client that requires TLS must be refused.
     const tlsUrl = new URL(proxy.connectionString); tlsUrl.searchParams.delete('sslmode');
     const tls = new Client({ connectionString: tlsUrl.toString(), ssl: { rejectUnauthorized: false } }); tls.on('error', () => {}); resources.push({ proxy, clients: [tls] });
     await expect(tls.connect()).rejects.toThrow(/SSL|TLS/i); await tls.end();
     await until(() => errors.find(e => /TLS|SSL/.test(e.message)));
-    const h = await harness(true); await expect(h.client.query('COPY gate TO STDOUT')).rejects.toThrow(/COPY/i);
-    expect(h.errors.some(e => /unsupported.*COPY/i.test(e.message))).toBe(true);
+  });
+  test('measures COPY through a plain client, which discards copied-out data and fails a copy-in without a source', async () => {
+    const h = await harness(true);
+    await h.client.query("CREATE TEMP TABLE copied (value text)");
+    await h.client.query("COPY (SELECT 'a' UNION ALL SELECT 'b') TO STDOUT");
+    await expect(h.client.query('COPY copied FROM STDIN')).rejects.toMatchObject({ code: '57014', message: expect.stringMatching(/No source stream defined/) });
+    expect((await h.client.query('SELECT 1 AS one')).rows).toEqual([{ one: 1 }]);
+    await until(() => h.completions.length === 4);
+    const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+    expect(h.completions[1]).toMatchObject({ commandTags: ['COPY 2'], rowCount: 2, copy: [{ direction: 'out', bytes: 4, sha256: sha256('a\nb\n') }] });
+    expect(h.completions[2]).toMatchObject({ error: { code: '57014' }, copy: [{ direction: 'in', bytes: 0, sha256: sha256('') }] });
+    expect(h.completions[3]!).not.toHaveProperty('copy');
+    expect(h.errors).toEqual([]);
   });
   test('rejects early Flush and oversized packets without process errors or backend leaks', async () => {
     const h = await harness(true); const pid = h.events.find(e => e.type === 'connected');

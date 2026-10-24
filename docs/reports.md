@@ -25,6 +25,12 @@ back to the description. **Recover** represents Sync after a description error.
 A query may therefore occupy more than one row. Both original version 1 and
 staged version 2 records can be imported into the same viewer.
 
+For `flush-stages-v1` records, a **Flush stage** row is a release that ended with
+Flush, such as one batch of a cursor. Its completion shows the command tags, the
+rows returned and whether the portal was suspended at its row limit; the cycle
+stays open, and other actors' rows can appear before the next stage. **Sync**
+closes the cycle, and **Recover** is the lone Sync after an error in it.
+
 A `multi-producer-v1` record (schema version 4) keeps one column per actor. When
 an actor's commands used more than one connection, each of its commands is
 labeled with its connection: `Connection #1` in the desktop column, and
@@ -40,6 +46,18 @@ chose how a pair interleaved, so its row order is not execution order. The
 inspector names the partner step, explains that a replay cannot force the same
 interleaving, and **Select step N** moves to the partner, clearing filters that
 hide it.
+
+A command that ran COPY lists each transfer with its completion: **COPY from
+client** or **COPY to client**, the byte count and the SHA-256 digest of the
+copied data. The copied rows are not shown.
+
+When the application sent a cancel request while a command ran, that command says
+**Cancel request** next to its result, usually SQLSTATE 57014, and searching for
+"cancel request" finds it. The summary counts the requests. The inspector shows
+when the request arrived and notes that the application's own timers decide that
+moment. **Record & replay details** lists every request in arrival order: the
+step it reached, an idle backend that PostgreSQL ignored, or a request that was
+not forwarded because it named a backend outside the actor's own connections.
 
 Use the arrow keys to move through the filtered order; Home and End select its
 first and last command, including across page boundaries. The ledger renders at

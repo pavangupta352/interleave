@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
 import { runScenarioFile, renderReport } from '../../dist/index.js';
 import { loadNeveroversell } from '../../dist/cli/demo.js';
-import { checkLaneReport, checkOverlapReport, checkReport, checkStagedReport } from './report-checks.mjs';
+import { checkCancelReport, checkCopyReport, checkFlushReport, checkLaneReport, checkOverlapReport, checkReport, checkStagedReport } from './report-checks.mjs';
 import { checkLongEvidence, longEvidenceFixture } from './report-long-evidence.mjs';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -54,9 +54,31 @@ try {
   assert.equal(pair.schemaVersion, 4);
   assert.equal(pair.limits.overlap, 'pairs');
   const pairHtml = await renderReport(pair);
+  const cancel = await runScenarioFile(fileURLToPath(new URL('../fixtures/cli/cancel.mjs', import.meta.url)), {
+    databaseUrl, signal: controller.signal, source: { projectRoot: fileURLToPath(new URL('../../', import.meta.url)) },
+  });
+  assert.equal(cancel.outcome, 'passed', cancel.reason);
+  assert.equal(cancel.cleanup.complete, true);
+  assert.equal(cancel.schemaVersion, 5);
+  const cancelHtml = await renderReport(cancel);
+  const copy = await runScenarioFile(fileURLToPath(new URL('../fixtures/cli/copy.mjs', import.meta.url)), {
+    databaseUrl, signal: controller.signal, source: { projectRoot: fileURLToPath(new URL('../../', import.meta.url)) },
+  });
+  assert.equal(copy.outcome, 'passed', copy.reason);
+  assert.equal(copy.cleanup.complete, true);
+  assert.equal(copy.schemaVersion, 5);
+  const copyHtml = await renderReport(copy);
+  const cursor = await runScenarioFile(fileURLToPath(new URL('../fixtures/cli/cursor.mjs', import.meta.url)), {
+    databaseUrl, signal: controller.signal, protocolProfile: 'flush-stages-v1', plan: ['alice', 'alice', 'bob'],
+    source: { projectRoot: fileURLToPath(new URL('../../', import.meta.url)) },
+  });
+  assert.equal(cursor.outcome, 'passed', cursor.reason);
+  assert.equal(cursor.cleanup.complete, true);
+  assert.equal(cursor.limits.protocolProfile, 'flush-stages-v1');
+  const cursorHtml = await renderReport(cursor);
   const longEvidence = longEvidenceFixture();
   const longHtml = await renderReport(longEvidence);
-  const pages = { '/staged': stagedHtml, '/long': longHtml, '/lanes': lanesHtml, '/pair': pairHtml };
+  const pages = { '/staged': stagedHtml, '/long': longHtml, '/lanes': lanesHtml, '/pair': pairHtml, '/cancel': cancelHtml, '/copy': copyHtml, '/cursor': cursorHtml };
   server = createServer((request, response) => { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(pages[request.url] ?? html); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const url = `http://127.0.0.1:${server.address().port}/`;
@@ -72,7 +94,10 @@ try {
         const longResult = await checkLongEvidence(page, `${url}long`, longEvidence);
         const laneResult = await checkLaneReport(page, `${url}lanes`, lanes, artifact);
         const pairResult = await checkOverlapReport(page, `${url}pair`, pair, artifact);
-        console.log(`[browser] ${name} ${viewport.width}×${viewport.height}: ${result.checks.length} legacy + ${stagedResult.checks.length} staged + ${longResult.checks.length} synthetic long-evidence + ${laneResult.checks.length} connection-lane + ${pairResult.checks.length} overlapped-pair checks passed`);
+        const cancelResult = await checkCancelReport(page, `${url}cancel`, cancel, artifact);
+        const copyResult = await checkCopyReport(page, `${url}copy`, copy);
+        const flushResult = await checkFlushReport(page, `${url}cursor`, cursor);
+        console.log(`[browser] ${name} ${viewport.width}×${viewport.height}: ${result.checks.length} legacy + ${stagedResult.checks.length} staged + ${longResult.checks.length} synthetic long-evidence + ${laneResult.checks.length} connection-lane + ${pairResult.checks.length} overlapped-pair + ${cancelResult.checks.length} cancel-request + ${copyResult.checks.length} COPY + ${flushResult.checks.length} Flush-stage checks passed`);
       } finally { await page.close(); }
     }
     await browser.close(); browser = undefined;

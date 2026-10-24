@@ -2,7 +2,10 @@ import { assertScenarioName } from './scenario.js';
 import { validateSourceIdentity } from './source-schema.js';
 import type {
   ActorResult,
+  CancelRecord,
   ConnectionIdentity,
+  CopyTransfer,
+  FlushCompletion,
   Failure,
   MetadataCompletion,
   RunResult,
@@ -43,7 +46,7 @@ const SQLSTATE = /^[0-9A-Z]{5}$/;
 const PROTOTYPE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 const ROOT_KEYS = [
-  'schemaVersion', 'scenario', 'outcome', 'mode', 'plan', 'connections', 'trace', 'actors',
+  'schemaVersion', 'scenario', 'outcome', 'mode', 'plan', 'connections', 'trace', 'cancels', 'actors',
   'failure', 'reason', 'environment', 'startedAt', 'durationMs', 'limits', 'cleanup',
 ] as const;
 const REQUIRED_ROOT_KEYS = [
@@ -91,23 +94,26 @@ export function parseRunArtifact(input: unknown): RunResult {
 
   const root = shape(value, '$', ROOT_KEYS, REQUIRED_ROOT_KEYS);
   const version = field(root, 'schemaVersion', '$');
-  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
-    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1, 2, 3 or 4');
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) {
+    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1, 2, 3, 4 or 5');
   }
   // Schema 3 separates scheduling from transport. Legacy trace validators retain
   // their exact grammar; the explicit profile selects one for new evidence.
+  // flush-stages-v1 exists only in version 5.
   const protocolProfile = version >= 3
     ? enumValue(field(plainRecord(field(root, 'limits', '$'), '$.limits'), 'protocolProfile', '$.limits'),
-      '$.limits.protocolProfile', ['sync-cycle-v1', 'describe-flush-v1'])
+      '$.limits.protocolProfile', version === 5 ? ['sync-cycle-v1', 'describe-flush-v1', 'flush-stages-v1'] : ['sync-cycle-v1', 'describe-flush-v1'])
     : version === 2 ? 'describe-flush-v1' : 'sync-cycle-v1';
-  const traceVersion = protocolProfile === 'describe-flush-v1' ? 2 : 1;
+  const traceVersion = protocolProfile === 'sync-cycle-v1' ? 1 : 2;
+  const flushStages = protocolProfile === 'flush-stages-v1';
   // Schema 4 records the connection profile and overlap mode. Multi-producer plans
   // and available choices name lanes, and lanes of one actor may block each other.
   // Overlap plans may name pairs, and paired steps record their shared release.
+  // Schema 5 keeps those rules and adds the cancel requests that reached actors.
   const limitsRecord = plainRecord(field(root, 'limits', '$'), '$.limits');
-  const lanes = version === 4 && enumValue(field(limitsRecord, 'connectionProfile', '$.limits'), '$.limits.connectionProfile',
+  const lanes = version >= 4 && enumValue(field(limitsRecord, 'connectionProfile', '$.limits'), '$.limits.connectionProfile',
     ['single-producer-v1', 'multi-producer-v1']) === 'multi-producer-v1';
-  const overlap = version === 4 && hasOwn(limitsRecord, 'overlap')
+  const overlap = version >= 4 && hasOwn(limitsRecord, 'overlap')
     && enumValue(limitsRecord.overlap, '$.limits.overlap', ['pairs']) === 'pairs';
   if (version === 4 && !lanes && !overlap) {
     throw new TypeError('$.limits.overlap: a version 4 single-producer record requires overlap pairs; use version 3');
@@ -177,7 +183,7 @@ export function parseRunArtifact(input: unknown): RunResult {
   const ordinalByConnection = new Map<string, number>();
   const trace: TraceStep[] = [];
   for (let index = 0; index < traceValues.length; index += 1) {
-    const step = validateTraceStep(traceValues[index], index, traceVersion, lanes, overlap);
+    const step = validateTraceStep(traceValues[index], index, traceVersion, lanes, overlap, version === 5, flushStages);
     if (connections !== undefined && !connectionKeys.has(`${step.actor}\0${step.connection}`)) {
       throw new TypeError(`$.trace[${index}]: command references an unrecorded actor startup`);
     }
@@ -203,6 +209,12 @@ export function parseRunArtifact(input: unknown): RunResult {
   }
 
   if (overlap) validateOverlapPairs(trace, lanes);
+  if (version !== 5 && hasOwn(root, 'cancels')) throw new TypeError('$.cancels: cancel requests require version 5');
+  const cancels = hasOwn(root, 'cancels') ? validateCancels(root.cancels, trace, connectionKeys, durationMs) : [];
+  if (version === 5 && !flushStages && !cancels.length && !trace.some(step => step.completion?.kind !== 'metadata' && step.completion?.copy)) {
+    throw new TypeError('$: a version 5 record uses flush-stages-v1 or has at least one cancel request or COPY transfer; use version 3 or 4');
+  }
+  for (const cancel of cancels) allActorNames.add(cancel.actor);
   for (let index = 0; index < trace.length; index += 1) {
     const step = trace[index]!;
     if (index > 0 && step.releasedAt < trace[index - 1]!.releasedAt) {
@@ -262,7 +274,8 @@ export function parseRunArtifact(input: unknown): RunResult {
     throw new TypeError('Run artifact cannot name more than 8 actors across plan, connections, trace, and results');
   }
   const requiresCompleteActors = outcome === 'passed' || outcome === 'violation' || outcome === 'actor-error';
-  if (traceVersion === 2) validateStageSequence(trace, requiresCompleteActors, lanes);
+  if (flushStages) validateFlushStageSequence(trace, requiresCompleteActors, lanes);
+  else if (traceVersion === 2) validateStageSequence(trace, requiresCompleteActors, lanes);
   // A completed run consumed every explicit choice, so each named lane was admitted.
   if (requiresCompleteActors) {
     for (const lane of planLanes) {
@@ -297,6 +310,11 @@ export function parseRunArtifact(input: unknown): RunResult {
         if (!actorNames.has(connections[index]!.actor)) {
           throw new TypeError(`$.connections[${index}].actor: actor is absent from recorded actor results`);
         }
+      }
+    }
+    for (let index = 0; index < cancels.length; index += 1) {
+      if (!actorNames.has(cancels[index]!.actor)) {
+        throw new TypeError(`$.cancels[${index}].actor: actor is absent from recorded actor results`);
       }
     }
   }
@@ -344,9 +362,9 @@ export function parseRunArtifact(input: unknown): RunResult {
     limitsRecord,
     '$.limits',
     ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor', ...(version !== 1 ? ['protocolProfile'] : []),
-      ...(version === 4 ? ['connectionProfile', 'overlap'] : [])],
+      ...(version >= 4 ? ['connectionProfile', 'overlap'] : [])],
     ['maxSteps', 'timeoutMs', ...(version !== 1 ? ['protocolProfile'] : []),
-      ...(version === 4 ? ['maxConnectionsPerActor', 'connectionProfile'] : [])],
+      ...(version >= 4 ? ['maxConnectionsPerActor', 'connectionProfile'] : [])],
   );
   if (version === 2 && limits.protocolProfile !== 'describe-flush-v1') {
     throw new TypeError('$.limits.protocolProfile: version 2 requires describe-flush-v1');
@@ -407,6 +425,54 @@ function validateTransportIdentity(value: unknown, path: string): void {
   fingerprintValue(upstream.referenceFingerprint, `${upstreamPath}.referenceFingerprint`);
 }
 
+/**
+ * A forwarded request names a recorded connection of its own actor; a step it hit
+ * ran on that backend and was released before the request arrived.
+ */
+function validateCancels(value: unknown, trace: TraceStep[], connectionKeys: Set<string>, durationMs: number): CancelRecord[] {
+  const values = arrayValue(value, '$.cancels', MAX_ARRAY_ITEMS);
+  if (!values.length) throw new TypeError('$.cancels: omit cancels when no cancel request arrived');
+  const pidByConnection = new Map<string, number>();
+  for (const step of trace) pidByConnection.set(`${step.actor}\0${step.connection}`, step.backendPid);
+  const cancels: CancelRecord[] = [];
+  for (let index = 0; index < values.length; index += 1) {
+    const path = `$.cancels[${index}]`;
+    const record = shape(values[index], path, ['at', 'actor', 'backendPid', 'forwarded', 'connection', 'step'], ['at', 'actor', 'backendPid', 'forwarded']);
+    const at = finiteNumber(record.at, `${path}.at`, 0);
+    if (at > durationMs) throw new TypeError(`${path}.at: cannot exceed run durationMs`);
+    if (index > 0 && at < cancels[index - 1]!.at) throw new TypeError(`${path}.at: arrival times must be nondecreasing`);
+    const actor = actorId(record.actor, `${path}.actor`);
+    const backendPid = safeInteger(record.backendPid, `${path}.backendPid`, -2147483648);
+    if (backendPid > 2147483647) throw new TypeError(`${path}.backendPid: expected a 32-bit process ID`);
+    const forwarded = booleanValue(record.forwarded, `${path}.forwarded`);
+    const cancel: CancelRecord = { at, actor, backendPid, forwarded };
+    if (forwarded !== hasOwn(record, 'connection')) throw new TypeError(`${path}.connection: present exactly when the request was forwarded`);
+    if (forwarded) {
+      const connection = safeInteger(record.connection, `${path}.connection`, 0);
+      const key = `${actor}\0${connection}`;
+      if (!connectionKeys.has(key)) throw new TypeError(`${path}.connection: references an unrecorded actor startup`);
+      const pid = pidByConnection.get(key);
+      if (pid !== undefined && pid !== backendPid) throw new TypeError(`${path}.backendPid: differs from the backend of that connection`);
+      cancel.connection = connection;
+    }
+    if (hasOwn(record, 'step')) {
+      if (!forwarded) throw new TypeError(`${path}.step: a request that was not forwarded cannot hit a step`);
+      const stepIndex = safeInteger(record.step, `${path}.step`, 0);
+      const step = trace[stepIndex];
+      if (!step) throw new TypeError(`${path}.step: references a step absent from the trace`);
+      if (step.actor !== actor || step.connection !== cancel.connection || step.backendPid !== backendPid) {
+        throw new TypeError(`${path}.step: the step ran on a different connection`);
+      }
+      if (step.releasedAt > at || (step.completedAt !== undefined && step.completedAt < at)) {
+        throw new TypeError(`${path}.step: the step was not running when the request arrived`);
+      }
+      cancel.step = stepIndex;
+    }
+    cancels.push(cancel);
+  }
+  return cancels;
+}
+
 /** Paired steps are adjacent, name the first's index, share one decision and use two lanes. */
 function validateOverlapPairs(trace: TraceStep[], lanes: boolean): void {
   for (let index = 0; index < trace.length; index += 1) {
@@ -427,7 +493,7 @@ function validateOverlapPairs(trace: TraceStep[], lanes: boolean): void {
   }
 }
 
-function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes: boolean, overlap: boolean): TraceStep {
+function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes: boolean, overlap: boolean, copies: boolean, flushStages: boolean): TraceStep {
   const path = `$.trace[${index}]`;
   const step = shape(value, path, [
     'index', 'actor', 'connection', 'ordinal', 'protocol', 'sql', 'fingerprint',
@@ -451,13 +517,15 @@ function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes:
   const sql = boundedString(step.sql, `${path}.sql`, 0, MAX_SQL_BYTES, true);
   const fingerprint = fingerprintValue(step.fingerprint, `${path}.fingerprint`);
   const backendPid = safeInteger(step.backendPid, `${path}.backendPid`, 1);
-  const stage = version === 2 ? enumValue(step.stage, `${path}.stage`, ['complete', 'describe', 'execute', 'recover']) : undefined;
+  const stage = version === 2 ? enumValue(step.stage, `${path}.stage`, flushStages
+    ? ['complete', 'describe', 'flush', 'sync', 'recover'] : ['complete', 'describe', 'execute', 'recover']) : undefined;
   const cycle = version === 2 ? safeInteger(step.cycle, `${path}.cycle`, 0) : undefined;
   let prefixOrdinal: number | undefined;
-  if (stage === 'execute' || stage === 'recover') {
+  // A continuation names the stage before it; a Flush stage does when it is not the cycle's first.
+  if (stage === 'execute' || stage === 'recover' || stage === 'sync' || (stage === 'flush' && hasOwn(step, 'prefixOrdinal'))) {
     prefixOrdinal = safeInteger(field(step, 'prefixOrdinal', path), `${path}.prefixOrdinal`, 0);
   } else if (hasOwn(step, 'prefixOrdinal')) {
-    throw new TypeError(`${path}.prefixOrdinal: only execute and recover stages may reference a prefix`);
+    throw new TypeError(`${path}.prefixOrdinal: only continuation stages may reference a prefix`);
   }
   if (stage !== undefined && stage !== 'complete' && protocol !== 'extended') {
     throw new TypeError(`${path}.protocol: staged metadata and continuations require the extended protocol`);
@@ -493,7 +561,8 @@ function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes:
   }
   let completion: UnitCompletion | undefined;
   if (hasCompletion) {
-    completion = validateCompletion(step.completion, `${path}.completion`, version, stage === 'describe');
+    completion = stage === 'flush' ? validateFlushCompletion(step.completion, `${path}.completion`, copies)
+      : validateCompletion(step.completion, `${path}.completion`, version, stage === 'describe', copies);
     if (stage === 'recover' && completion.kind !== 'metadata' && (completion.commandTags.length !== 0 || completion.rowCount !== 0)) {
       throw new TypeError(`${path}.completion: Sync-only recovery cannot complete executed commands or rows`);
     }
@@ -527,10 +596,10 @@ function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes:
   };
 }
 
-function validateCompletion(value: unknown, path: string, version: 1 | 2, metadata: boolean): UnitCompletion {
+function validateCompletion(value: unknown, path: string, version: 1 | 2, metadata: boolean, copies: boolean): UnitCompletion {
   if (metadata) return validateMetadataCompletion(value, path);
   const completion = shape(value, path, [
-    'transactionStatus', 'commandTags', 'rowCount', 'error', ...(version === 2 ? ['kind'] : []),
+    'transactionStatus', 'commandTags', 'rowCount', 'error', ...(version === 2 ? ['kind'] : []), ...(copies ? ['copy'] : []),
   ], ['transactionStatus', 'commandTags', 'rowCount', ...(version === 2 ? ['kind'] : [])]);
   if (version === 2 && completion.kind !== 'ready') throw new TypeError(`${path}.kind: expected ready completion`);
   const transactionStatus = enumValue(
@@ -558,7 +627,102 @@ function validateCompletion(value: unknown, path: string, version: 1 | 2, metada
       message: boundedString(errorValue.message, `${path}.error.message`, 0, MAX_GENERAL_STRING_BYTES),
     };
   }
-  return { ...(version === 2 ? { kind: 'ready' as const } : {}), transactionStatus, commandTags, rowCount, ...(error === undefined ? {} : { error }) };
+  const copy = hasOwn(completion, 'copy') ? validateCopyTransfers(completion.copy, `${path}.copy`) : undefined;
+  return { ...(version === 2 ? { kind: 'ready' as const } : {}), transactionStatus, commandTags, rowCount, ...(error === undefined ? {} : { error }), ...(copy ? { copy } : {}) };
+}
+
+/** flush-stages-v1: the acknowledgements, rows and portal state of one Flush stage. */
+function validateFlushCompletion(value: unknown, path: string, copies: boolean): FlushCompletion {
+  const completion = shape(value, path, ['kind', 'commandTags', 'rows', 'suspended', 'error', ...(copies ? ['copy'] : [])], ['kind', 'commandTags', 'rows']);
+  if (completion.kind !== 'flush') throw new TypeError(`${path}.kind: expected flush completion`);
+  const commandTags = arrayValue(completion.commandTags, `${path}.commandTags`, MAX_COMMAND_TAGS)
+    .map((tag, index) => boundedString(tag, `${path}.commandTags[${index}]`, 0, 1024));
+  const rows = safeInteger(completion.rows, `${path}.rows`, 0);
+  if (hasOwn(completion, 'suspended') && completion.suspended !== true) throw new TypeError(`${path}.suspended: expected true when present`);
+  let error: FlushCompletion['error'];
+  if (hasOwn(completion, 'error')) {
+    if (hasOwn(completion, 'suspended')) throw new TypeError(`${path}: an error cannot leave the portal suspended`);
+    const errorValue = shape(completion.error, `${path}.error`, ['code', 'message'], ['code', 'message']);
+    const code = boundedString(errorValue.code, `${path}.error.code`, 5, 5);
+    if (!SQLSTATE.test(code)) throw new TypeError(`${path}.error.code: expected a five-character SQLSTATE`);
+    error = { code, message: boundedString(errorValue.message, `${path}.error.message`, 0, MAX_GENERAL_STRING_BYTES) };
+  }
+  const copy = hasOwn(completion, 'copy') ? validateCopyTransfers(completion.copy, `${path}.copy`) : undefined;
+  return { kind: 'flush', commandTags, rows, ...(completion.suspended === true ? { suspended: true as const } : {}),
+    ...(error === undefined ? {} : { error }), ...(copy ? { copy } : {}) };
+}
+
+/**
+ * flush-stages-v1: a cycle opens with a describe or Flush stage, continues with Flush
+ * stages that each name the stage before them, and closes with Sync. After an error
+ * only a Sync-only recovery may follow. Lanes are sequential.
+ */
+function validateFlushStageSequence(trace: TraceStep[], complete: boolean, lanes: boolean): void {
+  const lanesState = new Map<string, { next: number; open?: TraceStep; previous?: TraceStep }>();
+  const actorCycles = new Map<string, number>();
+  for (const step of trace) {
+    const path = `$.trace[${step.index}]`;
+    const key = `${step.actor}\0${step.connection}`;
+    const state = lanesState.get(key) ?? { next: 0 };
+    const owner = actorCycles.get(step.actor);
+    if (!lanes && owner !== undefined && owner !== step.connection) {
+      throw new TypeError(`${path}.connection: another command connection cannot enter an actor's open staged cycle`);
+    }
+    if (state.previous && (state.previous.completedAt === undefined || state.previous.completedAt > step.releasedAt)) {
+      throw new TypeError(`${path}: a connection cannot release another stage before its preceding stage completes`);
+    }
+    if (state.previous && state.previous.backendPid !== step.backendPid) {
+      throw new TypeError(`${path}.backendPid: a connection generation must retain its backend identity`);
+    }
+    const open = state.open;
+    if (open) {
+      if (step.cycle !== open.cycle) throw new TypeError(`${path}.cycle: expected open cycle ${open.cycle}`);
+      if (step.prefixOrdinal !== open.ordinal) throw new TypeError(`${path}.prefixOrdinal: a continuation must name the stage before it`);
+      const failed = open.completion?.kind === 'metadata' ? open.completion.result === 'error' : open.completion?.error !== undefined;
+      if (failed ? step.stage !== 'recover' : step.stage !== 'flush' && step.stage !== 'sync') {
+        throw new TypeError(`${path}.stage: ${failed ? 'an error in an open cycle requires Sync-only recovery' : 'an open cycle continues with a Flush or Sync stage'}`);
+      }
+      if (step.stage === 'recover' && step.completion?.kind === 'ready') {
+        if (step.completion.transactionStatus === 'T') throw new TypeError(`${path}.completion.transactionStatus: Sync-only error recovery cannot leave a healthy transaction open`);
+        const expected = open.completion!.error!;
+        const error = step.completion.error;
+        if (error && (error.code !== expected.code || error.message !== expected.message)) {
+          throw new TypeError(`${path}.completion.error: retained recovery error must match the failed stage`);
+        }
+      }
+      if (step.stage === 'flush') state.open = step;
+      else { delete state.open; state.next++; actorCycles.delete(step.actor); }
+    } else {
+      if (step.cycle !== state.next) throw new TypeError(`${path}.cycle: expected logical cycle ${state.next}`);
+      if (step.prefixOrdinal !== undefined) throw new TypeError(`${path}.prefixOrdinal: the first stage of a cycle has no prefix`);
+      if (step.stage !== 'complete' && step.stage !== 'describe' && step.stage !== 'flush') {
+        throw new TypeError(`${path}.stage: a cycle begins with a complete, describe or Flush stage`);
+      }
+      if (step.stage === 'complete') state.next++;
+      else { state.open = step; actorCycles.set(step.actor, step.connection); }
+    }
+    if (complete && !step.completion) throw new TypeError(`${path}: completed execution requires every released stage to complete`);
+    state.previous = step;
+    lanesState.set(key, state);
+  }
+  if (complete && [...lanesState.values()].some(state => state.open)) {
+    throw new TypeError('$.trace: completed execution cannot leave an open cycle');
+  }
+}
+
+const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+/** Version 5: byte counts and SHA-256 digests of the CopyData each COPY moved. */
+function validateCopyTransfers(value: unknown, path: string): CopyTransfer[] {
+  const values = arrayValue(value, path, MAX_COMMAND_TAGS);
+  if (!values.length) throw new TypeError(`${path}: omit copy when the command moved no COPY data`);
+  return values.map((item, index) => {
+    const transfer = shape(item, `${path}[${index}]`, ['direction', 'bytes', 'sha256'], ['direction', 'bytes', 'sha256']);
+    const direction = enumValue(transfer.direction, `${path}[${index}].direction`, ['in', 'out']);
+    const bytes = safeInteger(transfer.bytes, `${path}[${index}].bytes`, 0);
+    const sha256 = fingerprintValue(transfer.sha256, `${path}[${index}].sha256`);
+    if ((bytes === 0) !== (sha256 === EMPTY_SHA256)) throw new TypeError(`${path}[${index}].sha256: contradicts the byte count`);
+    return { direction, bytes, sha256 };
+  });
 }
 
 function validateMetadataCompletion(value: unknown, path: string): MetadataCompletion {

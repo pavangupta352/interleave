@@ -102,7 +102,7 @@ pre { overflow: auto; tab-size: 2; }
 .command-summary { display: flex; gap: 5px 12px; flex-wrap: wrap; font-size: 10px; color: var(--muted); }
 .command-wait { color: var(--amber); }
 .command-error { color: var(--red); font-family: var(--mono); }
-.lane-tag, .overlap-tag { color: var(--ink); font-weight: 600; }
+.lane-tag, .overlap-tag, .cancel-tag { color: var(--ink); font-weight: 600; }
 /* A ruled bracket joins the step numbers of two commands released together. */
 .pair-first .step-number, .pair-second .step-number { position: relative; }
 .pair-first .step-number::before, .pair-second .step-number::before { content: ''; position: absolute; left: 14px; width: 6px; border-left: 1px solid var(--ink); }

@@ -175,6 +175,9 @@ npx --no-install interleave replay scenario.mjs failure.interleave.json
 Parse/Describe/Flush before sending parameter values. A description and its later
 execution are separate releases, each counted by `--max-steps`. The default
 `sync-cycle-v1` retains whole simple-query or extended-through-Sync cycles.
+`--protocol-profile flush-stages-v1` releases every group of extended-protocol
+messages that ends in Flush separately, for cursors that read in batches and
+pipelines that wait on Flush; other actors can run between batches.
 Replay and reduction inherit the recorded protocol. See the [Postgres.js
 example](../examples/postgresjs/README.md) for driver setup and cancellation.
 

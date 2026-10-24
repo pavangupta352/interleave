@@ -8,6 +8,35 @@
   default statement handling: the pg gem 1.6.3, PDO `pdo_pgsql`, pgx 5.11.0 and
   pgjdbc 42.7.13. Gated `ruby`, `php`, `go` and `java` CI jobs run their
   installed-package workflow, and version-tag release preparation requires them.
+- Route PostgreSQL cancel requests. A driver's CancelRequest for one of the
+  actor's own connections is forwarded to PostgreSQL unchanged, over the run's
+  plaintext or verified TLS transport, so `query.cancel()` in Postgres.js,
+  `Client#cancel` in node-postgres and `cancel_safe()` in psycopg stop a running
+  statement with SQLSTATE 57014. No scheduling decision is made while a request
+  is outstanding, so a request reaches only the command that was running when it
+  arrived. Requests that name any other backend are not forwarded; one that names
+  another actor's live connection makes the run `inconclusive`.
+- Runs that receive cancel requests record them in schema version 5: each request
+  in arrival order with its actor, arrival time, backend, whether it was
+  forwarded and the step it reached. Secret keys are never recorded. Exact replay
+  requires each request to reach the same step, or find its backend idle. The
+  report tags the command a request reached and lists every request.
+- Stream `COPY ... FROM STDIN` and `COPY ... TO STDOUT` through the proxy, from
+  pg-copy-streams, Postgres.js `writable()` and `readable()`, psycopg `copy()`
+  and libpq, including extended-protocol COPY. The copy is part of one scheduled
+  command, with backpressure in both directions, and a copy that waits on
+  another actor's lock is observed like any other wait. Version 5 completions
+  record each COPY's direction, byte count and SHA-256 digest, never the rows;
+  exact replay requires the same COPY FROM STDIN data. COPY BOTH, used only by
+  replication, is still refused.
+- Schedule cursors and other clients that wait on Flush with the opt-in
+  `flush-stages-v1` profile (`--protocol-profile flush-stages-v1`). Every group
+  of extended-protocol messages that ends in Flush is its own release, so another
+  actor can run between two batches of pg-cursor, pg-query-stream or Postgres.js
+  `cursor()`. A Flush release completes once PostgreSQL has answered all of it;
+  the cycle stays open until its Sync, and only a lone Sync may follow an error.
+  Records are schema version 5 and show each stage's rows and whether the portal
+  was suspended.
 
 ### Qualified profiles
 

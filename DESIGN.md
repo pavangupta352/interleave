@@ -214,6 +214,12 @@ Accessible command names retain step, actor and SQL while also naming the protoc
 
 **The Pair Rule.** Two commands released in the same instant (overlap pairs) are paired in words first: each command's metadata opens with an ink, semibold `Released with step N` tag in every layout, and its accessible name includes the same words. A 1px ink bracket in the step column joins the two step numbers only while both rows are displayed next to each other; filtering or paging that separates them removes the bracket but keeps the words. The scope note states that PostgreSQL chose the interleaving, so row order within a pair is not execution order. The inspector names the partner and offers a `Select step N` text action that reveals it, clearing filters only when they hide it.
 
+A `flush-stages-v1` release that ended with Flush is labeled `Flush stage`; its completion names the boundary (`Flush; the cycle stays open`), the rows returned and a suspended portal, and its summary reads like `2 rows · portal suspended`. The release that closes the cycle is labeled `Sync`. These are written states, not colors.
+
+A command that ran COPY lists each transfer in its completion facts, in order: `COPY from client` or `COPY to client`, with the byte count and SHA-256 digest of the copied data. The rows themselves are never shown.
+
+**The Cancel Rule.** A command that was running when the application's cancel request arrived opens its metadata with an ink, semibold `Cancel request` tag in every layout, and its accessible name and search include the same words. The written error code that follows, usually `57014`, states what PostgreSQL did. The summary adds a cancel-request count only when the record has requests, and the scope note explains the tag only when a request reached a running command. The inspector states when the request arrived and that the application's own timers decide that moment, so a replay can find a different command running.
+
 Arrow keys and Home/End navigate the filtered order, including across the 100-command page boundary. The keyboard sequence uses one command tab stop at a time. Previous and Next controls show whether traversal is available and reveal the next page's opening command when used. Selecting a command updates the inspector and a polite status message.
 
 ### Inspector and SQL field
@@ -226,7 +232,7 @@ Native disclosures hold command identity, actor observations, and record/replay 
 
 Command identity and All actor observations retain their independent open or closed state when another command is selected. Opening a different artifact starts with fresh disclosures. The observations disclosure contains every recorded actor result. Outcome messages, PostgreSQL error messages and actor observation fields are named, focusable evidence regions so keyboard users can scroll their complete text.
 
-Record details include the captured fixture profile, digest, object and row counts; source, installed dependency and runtime identities; the connection profile; and actor startup digests. A multi-producer record states that each connection issues its own ordered commands and labels startups as `alice #0`. Missing identities in older records are labeled explicitly. Long digests wrap within the existing fact layout on narrow screens.
+Record details include the captured fixture profile, digest, object and row counts; source, installed dependency and runtime identities; the connection profile; and actor startup digests. A multi-producer record states that each connection issues its own ordered commands and labels startups as `alice #0`. A record with cancel requests lists each one in arrival order with its actor, arrival time and result: the step it reached, an idle backend that PostgreSQL ignored, or a request Interleave did not forward. Secret keys are never shown or recorded. Missing identities in older records are labeled explicitly. Long digests wrap within the existing fact layout on narrow screens.
 
 The only selection animation is a brief background wash (180ms). It runs only when reduced motion is not requested. Focus and result state do not depend on animation. Print styles hide interactive controls; the rendered ledger page and currently displayed details remain the print content.
 

@@ -18,7 +18,7 @@ import {
   defaultConnectionLimit, fairLane, LaneBinder, laneLabel, parsePlanChoice, recordedConnectionProfile, resolveConnectionProfile,
   resolveOverlap, resolvePlanEntry, validatePlanEntries, type Lane, type LiveLane,
 } from './lanes.js';
-import type { ActorProxy, ActorResult, DatabaseContext, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
+import type { ActorProxy, ActorResult, CancelRecord, DatabaseContext, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
 
 /** How long a multi-producer decision waits for a just-completed connection's next command. */
 const LANE_SETTLE_MS = 25;
@@ -36,6 +36,15 @@ function limit(value: number | undefined, fallback: number, max: number, name: s
   const result = value ?? fallback;
   if (!Number.isSafeInteger(result) || result < 1 || result > max) throw new TypeError(`${name} must be an integer from 1 to ${max}`);
   return result;
+}
+
+function copiedIn(step: TraceStep): string {
+  return JSON.stringify(step.completion?.kind === 'metadata' ? [] : (step.completion?.copy ?? []).filter(copy => copy.direction === 'in'));
+}
+
+function describeCancel(cancel: CancelRecord): string {
+  if (!cancel.forwarded) return 'was not forwarded';
+  return cancel.step === undefined ? 'found its backend idle' : `hit step ${cancel.step}`;
 }
 
 /** Run real application operations once in a new, owned PostgreSQL database. */
@@ -86,13 +95,15 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const transport = providedDatabase?.transport ?? resolvePostgresTransport(options.databaseUrl, options.upstreamTls);
   const started = performance.now();
   const controller = new AbortController();
+  // flush-stages-v1 records exist only in version 5.
+  const flush = protocolProfile === 'flush-stages-v1';
   const result: RunResult = {
-    schemaVersion: multi || overlap ? 4 : 3, scenario: scenario.name, outcome: 'harness-error', mode,
+    schemaVersion: flush ? 5 : multi || overlap ? 4 : 3, scenario: scenario.name, outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
     environment: { serverVersion: 'unknown', nodeVersion: process.version, ...(source ? { source } : {}), transport: runTransportIdentity(transport) },
     startedAt: new Date().toISOString(), durationMs: 0,
     limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile,
-      ...(multi || overlap ? { connectionProfile } : {}), ...(overlap ? { overlap } : {}) },
+      ...(multi || overlap || flush ? { connectionProfile } : {}), ...(overlap ? { overlap } : {}) },
     cleanup: { complete: false },
   };
   let database: OwnedDatabase | undefined = providedDatabase;
@@ -132,6 +143,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   // Plan entries are decisions; an overlapped pair is one decision and two steps.
   let decisions = 0;
   let overlapped = false;
+  // No decision is made while PostgreSQL has not yet acted on a forwarded cancel
+  // request, so the request can only hit the step that was running when it arrived.
+  let pendingCancels = 0;
   let evidenceBytes = Buffer.byteLength(JSON.stringify(result)) + 256;
   assertEvidenceEnvelope(result, maxEvidenceBytes);
 
@@ -140,6 +154,8 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     failure ??= new Interrupted(outcome, why);
     wake();
   };
+  // Cancel requests and COPY transfers are version 5 evidence, with an explicit connection profile.
+  const requireVersion5 = (): void => { result.schemaVersion = 5; result.limits.connectionProfile = connectionProfile; };
   const retain = (value: unknown): boolean => {
     const bytes = Buffer.byteLength(JSON.stringify(value)) + 128;
     if (evidenceBytes + bytes > maxEvidenceBytes) {
@@ -253,6 +269,32 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
             wake();
             return;
           }
+          if (event.type === 'cancel') {
+            const lane = event.forwarded ? lanes.get(laneLabel(actor, event.connection)) : undefined;
+            const running = lane?.running?.step.backendPid === event.backendPid ? lane.running.step : undefined;
+            const record: CancelRecord = {
+              at: performance.now() - started, actor, backendPid: event.backendPid, forwarded: event.forwarded,
+              ...(event.forwarded ? { connection: event.connection } : {}), ...(running ? { step: running.index } : {}),
+            };
+            if (event.forwarded) {
+              pendingCancels++;
+              void event.acknowledged.then(() => { pendingCancels--; runtimeEpoch++; wake(); });
+            }
+            const index = result.cancels?.length ?? 0;
+            if (!retain({ record, connectionProfile })) { wake(); return; }
+            if (!result.cancels) { requireVersion5(); result.cancels = []; }
+            result.cancels.push(record);
+            const owner = pids.get(event.backendPid);
+            if (!event.forwarded && owner !== undefined && owner !== actor && livePids.has(event.backendPid)) {
+              stop('inconclusive', `${actor} sent a cancel request for a connection of ${owner}; Interleave forwards a cancel request only to a connection of the actor that sent it`);
+            }
+            const recorded = mode === 'replay' ? options.replay!.cancels?.[index] : undefined;
+            if (mode === 'replay' && (!recorded || recorded.actor !== record.actor || recorded.forwarded !== record.forwarded || recorded.step !== record.step)) {
+              stop('incompatible', `Replay cancel request ${index} from ${actor} ${describeCancel(record)}; ${recorded ? `the recorded request from ${recorded.actor} ${describeCancel(recorded)}` : 'the recorded run sent no such request'}`);
+            }
+            wake();
+            return;
+          }
           const key = `${actor}\0${event.connection}`;
           if (event.type === 'connected') {
             pids.set(event.backendPid, actor); pidLanes.set(event.backendPid, { actor, connection: event.connection });
@@ -323,7 +365,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       // rather than after waiting for a connection or actor that will never proceed.
       const mismatch = binder?.mismatch(current);
       if (mismatch) throw new Interrupted('incompatible', mismatch);
-      if ([...lanes.values()].some(lane => lane.running && !lane.running.blocked)) { laneWait = undefined; await pause(); continue; }
+      if (pendingCancels || [...lanes.values()].some(lane => lane.running && !lane.running.blocked)) { laneWait = undefined; await pause(); continue; }
       const allReady = names.every(actor => settled.has(actor) || active(actor));
       if (!allReady) { laneWait = undefined; await pause(); continue; }
       if (multi) {
@@ -407,7 +449,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           index: position, actor, connection: unit.connection, ordinal: unit.ordinal,
           protocol: unit.protocol, sql: unit.sql, fingerprint: unit.fingerprint, backendPid: unit.backendPid,
           available, releasedAt, waits: [],
-          ...(protocolProfile === 'describe-flush-v1' ? { stage, cycle,
+          ...(protocolProfile !== 'sync-cycle-v1' ? { stage, cycle,
             ...(unit.prefixOrdinal === undefined ? {} : { prefixOrdinal: unit.prefixOrdinal }) } : {}),
           ...(chosen.length > 1 ? { overlap: result.trace.length } : {}),
         };
@@ -428,10 +470,14 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       for (const { lane, unit, step } of group) {
         unit.release().then(completion => {
           lane.activityAt = performance.now();
-          if (retain(completion)) {
+          if (retain({ completion, connectionProfile })) {
             step.completedAt = performance.now() - started;
-            step.completion = protocolProfile === 'describe-flush-v1' && completion.kind !== 'metadata'
+            step.completion = protocolProfile !== 'sync-cycle-v1' && completion.kind === undefined
               ? { ...completion, kind: 'ready' } : completion;
+            if (completion.kind !== 'metadata' && completion.copy) requireVersion5();
+            // Data sent by COPY FROM STDIN is application input, like SQL and parameters.
+            const recorded = mode === 'replay' ? options.replay!.trace[step.index] : undefined;
+            if (recorded && copiedIn(recorded) !== copiedIn(step)) stop('incompatible', `Replay COPY data changed for ${describeLane(lane)} at step ${step.index}`);
           }
           delete lane.running;
           runtimeEpoch++;
@@ -452,6 +498,15 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       throw new Interrupted('incompatible', 'Application finished before consuming every recorded actor connection');
     }
     if (mode === 'replay' && result.trace.length !== options.replay!.trace.length) throw new Interrupted('incompatible', 'Application finished before consuming every replay step');
+    if (mode === 'replay') {
+      const recordedCancels = options.replay!.cancels ?? [];
+      const liveCancels = result.cancels ?? [];
+      if (liveCancels.length < recordedCancels.length) throw new Interrupted('incompatible', `Application sent ${liveCancels.length} of the recorded run's ${recordedCancels.length} cancel requests`);
+      for (const [index, live] of liveCancels.entries()) {
+        const connection = live.connection === undefined ? undefined : binder ? binder.recordedFor(live.actor, live.connection) : live.connection;
+        if (connection !== recordedCancels[index]!.connection) throw new Interrupted('incompatible', `Replay cancel request ${index} from ${live.actor} named a different connection`);
+      }
+    }
     if (mode !== 'replay' && (options.plan?.length ?? 0) > decisions) throw new Interrupted('incompatible', 'Application finished before consuming every requested schedule choice');
     if (mode === 'replay') {
       // Single-producer blockers are actors. Multi-producer blockers are recorded
@@ -507,6 +562,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     let reason = error instanceof Interrupted ? message(error) : connectionFailureMessage(error) ?? message(error);
     if (mode === 'replay' && overlapped && error instanceof Interrupted && error.outcome === 'incompatible') {
       reason = message(`${reason}; this run released overlapped pairs, and PostgreSQL may interleave them differently on each replay`);
+    }
+    if (mode === 'replay' && (options.replay!.cancels?.length || result.cancels?.length) && error instanceof Interrupted && error.outcome === 'incompatible') {
+      reason = message(`${reason}; the application's own timers decide when a cancel request arrives, so it can find a different step running on each replay`);
     }
     result.reason = applicationRejected
       ? message(`One or more application operations rejected before execution was interrupted; ${reason}`)

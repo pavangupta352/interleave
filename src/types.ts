@@ -4,12 +4,13 @@ import type { SourceIdentity } from './source-identity.js';
 import type { ResolvedPostgresTransport, TransportIdentity, UpstreamTlsInput } from './postgres-transport.js';
 
 export type ProtocolKind = 'simple' | 'extended';
-export type ProtocolProfile = 'sync-cycle-v1' | 'describe-flush-v1';
+export type ProtocolProfile = 'sync-cycle-v1' | 'describe-flush-v1' | 'flush-stages-v1';
 /** Single-producer allows one live command connection per actor; multi-producer schedules every connection as a lane. */
 export type ConnectionProfile = 'single-producer-v1' | 'multi-producer-v1';
 /** Opt-in release of two queued command units in the same instant. */
 export type OverlapMode = 'pairs';
-export type StepStage = 'complete' | 'describe' | 'execute' | 'recover';
+/** `flush` and `sync` are stages of flush-stages-v1: a release ending in Flush, and the Sync that closes its cycle. */
+export type StepStage = 'complete' | 'describe' | 'execute' | 'recover' | 'flush' | 'sync';
 export type TransactionStatus = 'I' | 'T' | 'E';
 export type Outcome = 'passed' | 'violation' | 'actor-error' | 'incompatible' | 'inconclusive' | 'harness-error';
 
@@ -42,6 +43,14 @@ export interface Scenario {
   invariant(context: DatabaseContext & { results: ActorResult[] }): Promise<void>;
 }
 
+/** Version 5: the data one COPY moved, as PostgreSQL's CopyData payloads. */
+export interface CopyTransfer {
+  /** `in` for COPY FROM STDIN, sent by the client; `out` for COPY TO STDOUT. */
+  direction: 'in' | 'out';
+  bytes: number;
+  sha256: string;
+}
+
 export interface ReadyCompletion {
   /** Required in version 2 artifacts; absent in original version 1 records. */
   kind?: 'ready';
@@ -49,6 +58,8 @@ export interface ReadyCompletion {
   commandTags: string[];
   rowCount: number;
   error?: { code: string; message: string };
+  /** Version 5: each COPY in the command, in order. */
+  copy?: CopyTransfer[];
 }
 
 export type MetadataCompletion = {
@@ -70,7 +81,21 @@ export type MetadataCompletion = {
   resultShape?: never;
 });
 
-export type UnitCompletion = ReadyCompletion | MetadataCompletion;
+/** flush-stages-v1: PostgreSQL acknowledged every message before a Flush, or reported an error. */
+export interface FlushCompletion {
+  kind: 'flush';
+  commandTags: string[];
+  /** DataRow messages returned in this stage. */
+  rows: number;
+  /** The stage's last Execute stopped at its row limit with the portal still open. */
+  suspended?: true;
+  error?: { code: string; message: string };
+  copy?: CopyTransfer[];
+  transactionStatus?: never;
+  rowCount?: never;
+}
+
+export type UnitCompletion = ReadyCompletion | MetadataCompletion | FlushCompletion;
 
 export interface PendingUnit {
   actor: string;
@@ -95,7 +120,14 @@ export interface ConnectionIdentity {
 export type ProxyEvent =
   | { type: 'startup'; actor: string; connection: number; fingerprint: string }
   | { type: 'connected'; actor: string; connection: number; backendPid: number }
-  | { type: 'disconnected'; actor: string; connection: number };
+  | { type: 'disconnected'; actor: string; connection: number }
+  /**
+   * A CancelRequest reached this actor's endpoint. It is forwarded only when it names a
+   * backend of one of the actor's own live connections; `acknowledged` settles once
+   * PostgreSQL has acted on it, or once forwarding failed and onError was called.
+   */
+  | { type: 'cancel'; actor: string; backendPid: number; connection: number; forwarded: true; acknowledged: Promise<void> }
+  | { type: 'cancel'; actor: string; backendPid: number; connection?: never; forwarded: false; acknowledged?: never };
 
 export interface ProxyOptions {
   upstreamUrl: string;
@@ -169,6 +201,22 @@ export interface TraceStep extends StepIdentity {
   overlap?: number;
 }
 
+/** Version 5: a CancelRequest that reached an actor's endpoint. The secret key is never recorded. */
+export interface CancelRecord {
+  /** Milliseconds after the run started when the request arrived. */
+  at: number;
+  /** Actor whose endpoint received the request. */
+  actor: string;
+  /** Backend process ID the request named. */
+  backendPid: number;
+  /** True when it named one of the actor's own live connections and was forwarded to PostgreSQL. */
+  forwarded: boolean;
+  /** The actor connection that owned that backend; present exactly when forwarded. */
+  connection?: number;
+  /** Index of the step running on that backend when the request arrived; absent when it was idle. */
+  step?: number;
+}
+
 export interface Failure {
   name: string;
   message: string;
@@ -184,8 +232,8 @@ export interface RunTransportIdentity {
 }
 
 export interface RunResult {
-  /** Version 4 records the connection profile and overlap mode; 1-3 remain readable. */
-  schemaVersion: 1 | 2 | 3 | 4;
+  /** Version 4 records the connection profile and overlap mode; version 5 adds cancel requests. */
+  schemaVersion: 1 | 2 | 3 | 4 | 5;
   scenario: string;
   outcome: Outcome;
   mode: 'explore' | 'replay' | 'guided';
@@ -194,6 +242,8 @@ export interface RunResult {
   /** Accepted actor startup attempts. Optional only for reading legacy artifacts. */
   connections?: ConnectionIdentity[];
   trace: TraceStep[];
+  /** Version 5 only: cancel requests in arrival order. */
+  cancels?: CancelRecord[];
   actors: ActorResult[];
   failure?: Failure;
   reason?: string;
@@ -202,9 +252,9 @@ export interface RunResult {
   durationMs: number;
   limits: {
     maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number; maxConnectionsPerActor?: number; protocolProfile?: ProtocolProfile;
-    /** Present, and required, only in version 4. */
+    /** Present, and required, only in versions 4 and 5. */
     connectionProfile?: ConnectionProfile;
-    /** Version 4 only: pairs may be released together. */
+    /** Versions 4 and 5: pairs may be released together. */
     overlap?: OverlapMode;
   };
   cleanup: { complete: boolean; error?: string };
