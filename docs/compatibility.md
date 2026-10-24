@@ -281,6 +281,12 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 - The report labeled Flush stages and the closing Sync, with rows returned and
   the suspended portal, in Chromium at desktop and mobile sizes.
 
+- The [cursor example](../examples/cursor/README.md), installed from the package:
+  an interest job that reads accounts through pg-cursor and writes through a
+  second pool connection lost a concurrent deposit on its second explored order,
+  with both `flush-stages-v1` and `multi-producer-v1`; the atomic version passed
+  all 19 orders.
+
 Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, libpq pipeline mode with
 flush requests, pgjdbc, and Firefox and WebKit for the report.
 

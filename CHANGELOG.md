@@ -36,7 +36,8 @@
   `cursor()`. A Flush release completes once PostgreSQL has answered all of it;
   the cycle stays open until its Sync, and only a lone Sync may follow an error.
   Records are schema version 5 and show each stage's rows and whether the portal
-  was suspended.
+  was suspended. The [cursor example](examples/cursor/README.md) is an interest job
+  that loses a concurrent deposit between two batches.
 
 ### Qualified profiles
 
