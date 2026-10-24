@@ -72,3 +72,43 @@ test.each(['8.23.0', '8.11.5'])('init workload exports and clean-replays with or
     expect(await readFile(join(destination, path))).toEqual(bytes);
   }
 }, 120_000);
+
+test('an app sharing no package instance with its local-archive runtime exports through the original app installation', async () => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), 'interleave unshared install ')); temporary.push(root);
+  const archives = join(root, 'original archives'); await mkdir(archives);
+  const pack = JSON.parse(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', archives], repository))[0];
+  const archive = join(archives, pack.filename);
+  // Postgres.js has no dependencies, so nothing the scenario loads is also an
+  // installed instance of Interleave's runtime graph.
+  const app = join(root, 'original app'); await mkdir(app);
+  await writeFile(join(app, 'package.json'), `${JSON.stringify({ name: 'unshared-regression', version: '1.0.0', private: true, type: 'module' }, null, 2)}\n`);
+  await writeFile(join(app, 'scenario.mjs'), await readFile(join(repository, 'examples/postgresjs/scenario.mjs')));
+  execute('npm', ['install', archive, 'postgres@3.4.9', '--ignore-scripts'], app);
+  const cli = join(app, 'node_modules/@pavangupta352/interleave/dist/cli.js');
+  const artifact = join(root, 'original run.json');
+  execute(process.execPath, [cli, 'run', 'scenario.mjs', '--project-root', app, '--protocol-profile', 'describe-flush-v1', '--max-runs', '1', '--timeout-ms', '20000', '--out', artifact, '--json'], app, 1);
+  const recorded = JSON.parse(await readFile(artifact, 'utf8'));
+  expect(recorded.outcome).toBe('violation'); expect(recorded.cleanup.complete).toBe(true);
+  expect(recorded.environment.source.sharedPackages).toEqual([]);
+  // The separate installation cannot install the app lock's local runtime archive.
+  const separate = join(root, 'separate regression');
+  const refused = JSON.parse(execute(process.execPath, [cli, 'export', 'scenario.mjs', artifact, '--project-root', app, '--out', separate, '--json'], app, 2));
+  expect(refused.error.message).toMatch(/^Only integrity-pinned registry\/tarball dependencies are supported in portable locks: node_modules\/@pavangupta352\/interleave; supply the original archive with --runtime-archive/);
+  const destination = join(root, 'portable unshared regression');
+  const result = JSON.parse(execute(process.execPath, [cli, 'export', 'scenario.mjs', artifact, '--project-root', app, '--runtime-archive', archive, '--out', destination, '--json'], app));
+  const manifest = await verifyRegressionExport(destination);
+  expect(manifest.installation?.layout).toBe('shared-app');
+  // Every locked package, the runtime included, is bundled as its original archive.
+  const locked = Object.keys(JSON.parse(await readFile(join(app, 'package-lock.json'), 'utf8')).packages).filter(Boolean).sort();
+  expect(locked).toEqual(expect.arrayContaining(['node_modules/@pavangupta352/interleave', 'node_modules/pg', 'node_modules/postgres']));
+  expect(manifest.installation?.packages.map(item => item.lockPath)).toEqual(locked);
+  await rm(archives, { recursive: true });
+  const install = execute(process.execPath, ['install.mjs', '--offline'], destination, 0, { npm_config_registry: 'https://unavailable.invalid/' });
+  expect(install).toContain('complete installed identity match');
+  const [command, ...args] = result.replay.command;
+  const replayed = JSON.parse(execute(command, [...args, '--json'], destination, 1));
+  expect(replayed.outcome).toBe('violation'); expect(replayed.cleanup.complete).toBe(true);
+  expect(replayed.environment.source).toEqual(recorded.environment.source);
+  expect(replayed.failure.fingerprint).toBe(recorded.failure.fingerprint);
+  expect(replayed.trace.map((step: { fingerprint: string }) => step.fingerprint)).toEqual(recorded.trace.map((step: { fingerprint: string }) => step.fingerprint));
+}, 120_000);

@@ -149,8 +149,11 @@ export async function exportRegression(
     await addInclude(projectRoot, includePath, selected);
   }
   const recordedSource = requireRecordedSource(validatedRun);
-  const shared = recordedSource.sharedPackages.length > 0;
-  if (!shared && (options.runtimeArchive !== undefined || options.dependencyArchives !== undefined)) throw new Error('Archive selection is only supported for a recorded shared app installation');
+  // Shared package instances need the original app installation. Supplied
+  // original archives also select it: an app-installed runtime whose app shares
+  // no package instance with it still replays through the original app lock.
+  const shared = recordedSource.sharedPackages.length > 0
+    || options.runtimeArchive !== undefined || options.dependencyArchives !== undefined;
   validatePackageLock(
     selected.get('app/package.json')!.bytes,
     selected.get('app/package-lock.json')!.bytes, undefined, shared,
@@ -705,7 +708,9 @@ function validatePackageLock(packageBytes: Buffer, lockBytes: Buffer, runtimeTar
     const resolved = requiredString(dependency.resolved, `Locked dependency ${path} resolved`);
     if (!(runtimeTarball && path === 'node_modules/@pavangupta352/interleave' && resolved === `file:${runtimeTarball}`)
         && !(shared && resolved.startsWith('file:')) && !/^https?:\/\//.test(resolved)) {
-      throw new Error(`Only integrity-pinned registry/tarball dependencies are supported in portable locks: ${path}`);
+      // The shared app installation bundles original local archives; the separate one cannot.
+      const hint = !shared && resolved.startsWith('file:') ? '; supply the original archive with --runtime-archive or --dependency-archive to export the original app installation' : '';
+      throw new Error(`Only integrity-pinned registry/tarball dependencies are supported in portable locks: ${path}${hint}`);
     }
     if (typeof dependency.integrity !== 'string' || !/^(?:sha512|sha384|sha256|sha1)-[A-Za-z0-9+/=]+(?:\s+(?:sha512|sha384|sha256|sha1)-[A-Za-z0-9+/=]+)*$/.test(dependency.integrity)) {
       throw new Error(`Locked dependency is missing a supported integrity digest: ${path}`);

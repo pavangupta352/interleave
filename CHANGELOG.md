@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Export accepts `--runtime-archive` and `--dependency-archive` (`runtimeArchive`
+  and `dependencyArchives`) for a recording whose application shares no installed
+  package with Interleave's runtime, and exports it as an offline installation of
+  the original application lock. Before, such a recording could not be exported
+  when the application had installed Interleave from a local archive: export
+  rejected the archive options, and the separate installation rejected the local
+  runtime entry in the application lock. A Knex 3.3.0 application is one such
+  case. Without an archive option, export still uses the separate installation,
+  and its error for a local archive entry now names the two options.
+
 ## 0.2.0 — 25 October 2026
 
 Interleave can now schedule actors that use several connections at once,

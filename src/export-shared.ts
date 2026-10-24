@@ -177,9 +177,10 @@ export async function fetchRegistryArchive(url: string, remaining: number): Prom
 
 export async function prepareSharedArchives(options: { projectRoot: string; runtimeRoot: string; runtimeArchive?: string; dependencyArchives?: string[] }, source: SourceIdentity, lock: Buffer): Promise<{ installation: SharedInstallation; archives: SharedArchive[]; runtimeArchive: SharedArchive }> {
   const expected = join(options.projectRoot, ...SHARED_RUNTIME.split('/'));
-  if (expected !== options.runtimeRoot) throw new Error('Shared instances require the same top-level app-installed runtime; separate installations cannot preserve them');
+  const outside = 'The shared app installation requires exporting with the same top-level app-installed runtime; a separate installation cannot preserve shared package instances or use supplied archives';
+  if (expected !== options.runtimeRoot) throw new Error(outside);
   await assertNoSymlinkComponents(options.projectRoot, expected);
-  if (await realpath(expected) !== options.runtimeRoot) throw new Error('Shared instances require the same top-level app-installed runtime; separate installations cannot preserve them');
+  if (await realpath(expected) !== options.runtimeRoot) throw new Error(outside);
   for (const path of ['.npmrc', 'npm-shrinkwrap.json']) if (await lstat(join(options.projectRoot, path)).then(() => true, (error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return false; throw error; })) throw new Error(`Shared export does not support application ${path}; use a plain npm package-lock profile`);
   const locked = lockedPackages(lock); graphMapping(source, locked);
   if (options.dependencyArchives !== undefined && (!Array.isArray(options.dependencyArchives) || options.dependencyArchives.length > MAX_PACKAGES || options.dependencyArchives.some(path => typeof path !== 'string'))) throw new TypeError('dependencyArchives must be a bounded array of ordinary archive paths');

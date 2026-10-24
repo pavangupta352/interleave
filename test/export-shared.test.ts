@@ -26,12 +26,13 @@ async function fixture(importPath = 'driver', importRuntime = true) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'interleave-shared-export-')); roots.push(root);
   const projectRoot = join(root, 'app'), build = join(root, 'runtime'), driver = join(root, 'driver');
   await mkdir(join(projectRoot, 'archives'), { recursive: true }); await mkdir(join(build, 'dist'), { recursive: true }); await mkdir(driver);
-  const driverName = importPath.startsWith('@') ? '@fixture/driver' : 'driver';
-  const driverArchive = `${driverName === 'driver' ? '' : 'fixture-'}driver-1.0.0.tgz`;
+  // `solo` is an application package that nothing in the runtime depends on.
+  const driverName = importPath.startsWith('@') ? '@fixture/driver' : importPath === 'solo' ? 'solo' : 'driver';
+  const driverArchive = `${driverName === '@fixture/driver' ? 'fixture-' : ''}${driverName === 'solo' ? 'solo' : 'driver'}-1.0.0.tgz`;
   await json(join(driver, 'package.json'), { name: driverName, version: '1.0.0', main: 'index.js', exports: { '.': './index.js', './subpath': './index.js' } });
   await writeFile(join(driver, 'index.js'), 'module.exports=42;');
   await npm(['pack', '--pack-destination', join(projectRoot, 'archives')], driver);
-  await json(join(build, 'package.json'), { name: '@pavangupta352/interleave', version: '0.1.0-test', type: 'module', main: 'dist/index.js', files: ['dist', 'README.md'], dependencies: { [driverName]: '1.0.0' } });
+  await json(join(build, 'package.json'), { name: '@pavangupta352/interleave', version: '0.1.0-test', type: 'module', main: 'dist/index.js', files: ['dist', 'README.md'], dependencies: driverName === 'solo' ? {} : { [driverName]: '1.0.0' } });
   for (const file of ['source-identity.js', 'index.js', 'cli.js']) await writeFile(join(build, 'dist', file), 'throw Error("inert format fixture must not execute");');
   await writeFile(join(build, 'README.md'), 'original documentation');
   await npm(['pack', '--pack-destination', join(projectRoot, 'archives')], build);
@@ -42,7 +43,7 @@ async function fixture(importPath = 'driver', importRuntime = true) {
   const scenarioFile = join(projectRoot, 'scenario.mjs'); await writeFile(scenarioFile, `${importRuntime ? "import '@pavangupta352/interleave';" : ''}import '${importPath}';`);
   const options = { projectRoot, runtimeRoot, scenarioFile, destination: join(root, 'export'), runtimeArchive };
   const run = await bindExportFixture(inert, options);
-  expect(run.environment.source!.sharedPackages).toHaveLength(1);
+  expect(run.environment.source!.sharedPackages).toHaveLength(driverName === 'solo' ? 0 : 1);
   return { root, build, run, options };
 }
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -63,6 +64,20 @@ test('exports a plain-object scenario without adding an otherwise unused runtime
   const result = await exportRegression(run, options);
   await expect(verifyRegressionExport(result.destination)).resolves.toHaveProperty('installation.layout', 'shared-app');
   expect(JSON.parse(await readFile(join(result.destination, 'run.json'), 'utf8')).environment.source).toEqual(run.environment.source);
+});
+
+test('supplied archives export an app-installed runtime through the original app installation when no package instance is shared', async () => {
+  const { run, options, root } = await fixture('solo', false);
+  const result = await exportRegression(run, options);
+  const manifest = await verifyRegressionExport(result.destination);
+  expect(manifest).toMatchObject({ installation: { layout: 'shared-app', profile: 'npm-offline-v1' }, replay: { install: [['node', 'install.mjs']] } });
+  expect(manifest.installation?.packages.map(item => item.lockPath)).toEqual(['node_modules/@pavangupta352/interleave', 'node_modules/solo']);
+  expect(JSON.parse(await readFile(join(result.destination, 'run.json'), 'utf8')).environment.source).toEqual(run.environment.source);
+  // Without archives the separate installation is chosen, and it cannot install
+  // the app lock's local runtime archive.
+  const { runtimeArchive: _explicit, ...discovered } = options;
+  await expect(exportRegression(run, { ...discovered, destination: join(root, 'separate export') })).rejects.toThrow(
+    /portable locks: node_modules\/@pavangupta352\/interleave; supply the original archive with --runtime-archive/);
 });
 
 test('still rejects changed runtime implementation bytes without an application runtime API import', async () => {
