@@ -1,4 +1,4 @@
-import type { MetadataCompletion, ReadyCompletion, TransactionStatus } from '../types.js';
+import type { FlushCompletion, MetadataCompletion, ReadyCompletion, TransactionStatus } from '../types.js';
 export function backendError(frame: Buffer): { code: string; message: string } {
   let offset = 5; let code = ''; let message = '';
   while (offset < frame.length && frame[offset] !== 0) {
@@ -30,6 +30,34 @@ export class BackendSummary {
       return { transactionStatus: status as TransactionStatus, commandTags: [...this.tags], rowCount: this.rows, ...(this.error ? { error: this.error } : {}) };
     }
     return undefined;
+  }
+}
+
+/**
+ * flush-stages-v1: completes once PostgreSQL has acknowledged every message the
+ * stage sent before its Flush, as the frontend journal records, or on an error,
+ * after which PostgreSQL discards everything until Sync.
+ */
+export class FlushSummary {
+  private readonly tags: string[] = [];
+  private rows = 0;
+  private suspended = false;
+  constructor(private readonly journal: { operations: readonly unknown[]; index: number }) {}
+  accept(frame: Buffer): FlushCompletion | undefined {
+    const type = String.fromCharCode(frame[0]!);
+    if (type === 'Z') throw new Error('Unsupported profile: ReadyForQuery inside a Flush stage');
+    if (type === 'E') return { kind: 'flush', commandTags: [...this.tags], rows: this.rows, error: backendError(frame) };
+    if (type === 'D') this.rows++;
+    else if (type === 's') this.suspended = true;
+    else if (type === 'C' || type === 'I') {
+      this.suspended = false;
+      if (type === 'C') {
+        if (frame.at(-1) !== 0) throw new Error('Malformed backend command tag');
+        this.tags.push(frame.toString('utf8', 5, frame.length - 1));
+      }
+    }
+    if (this.journal.index !== this.journal.operations.length) return undefined;
+    return { kind: 'flush', commandTags: [...this.tags], rows: this.rows, ...(this.suspended ? { suspended: true as const } : {}) };
   }
 }
 

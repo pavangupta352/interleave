@@ -47,11 +47,16 @@ export class FrontendAssembler {
   private bytes = 0;
   private metadataBytes = 0;
   private readonly maxBuffered: number;
-  constructor(limits: FrameLimits = {}) { this.maxBuffered = positiveLimit(limits.maxBufferedBytes, DEFAULT_BUFFER_LIMIT); }
+  /** flush-stages-v1: Flush ends a release as Sync does, and the cycle stays open. */
+  private readonly flushStages: boolean;
+  constructor(limits: FrameLimits & { protocolProfile?: ProtocolProfile } = {}) {
+    this.maxBuffered = positiveLimit(limits.maxBufferedBytes, DEFAULT_BUFFER_LIMIT);
+    this.flushStages = limits.protocolProfile === 'flush-stages-v1';
+  }
   get bufferedBytes(): number { return this.bytes; }
   /** Build a proposed head cycle without changing the acknowledged session state. */
   fork(): FrontendAssembler {
-    const copy = new FrontendAssembler({ maxBufferedBytes: this.maxBuffered });
+    const copy = new FrontendAssembler({ maxBufferedBytes: this.maxBuffered, ...(this.flushStages ? { protocolProfile: 'flush-stages-v1' as const } : {}) });
     for (const [name, statement] of this.statements) copy.statements.set(name, statement);
     for (const [name, portal] of this.portals) copy.portals.set(name, portal);
     copy.metadataBytes = this.metadataBytes;
@@ -147,19 +152,59 @@ export class FrontendAssembler {
     unit.fingerprint = hash(JSON.stringify(['describe-flush-v1', 'execute', prefix.fingerprint, unit.fingerprint]));
     return unit;
   }
+  /** Exactly Parse/statement Describe/Flush of one statement: the describe-flush-v1 prefix. */
+  static isDescribePrefix(frames: Buffer[]): boolean {
+    if (frames.length !== 3 || frames.map(frame => String.fromCharCode(frame[0]!)).join('') !== 'PDH' || frames[2]!.length !== 5) return false;
+    try {
+      const name = new Reader(frames[0]!).cstring(); const describe = new Reader(frames[1]!);
+      return describe.take(1).toString() === 'S' && describe.cstring().equals(name);
+    } catch { return false; }
+  }
+  /** flush-stages-v1: the first release of a cycle that ends in Flush. */
+  flushStage(frames: Buffer[]): FrontendUnit {
+    if (this.bytes || frames.at(-1)?.[0] !== 72) throw new Error('Invalid Flush stage state');
+    let unit: FrontendUnit | undefined;
+    for (const frame of frames) unit = this.accept(frame);
+    if (!unit) throw new Error('Incomplete Flush stage');
+    unit.stage = 'flush';
+    unit.fingerprint = hash(JSON.stringify(['flush-stages-v1', 'flush', unit.fingerprint]));
+    return unit;
+  }
+  /**
+   * flush-stages-v1: a later release of an open cycle, chained to the stage before
+   * it. After an error PostgreSQL discards everything until Sync, so only Sync may follow.
+   */
+  flushContinuation(frames: Buffer[], previous: FrontendUnit, error?: { code: string; message: string }): FrontendUnit {
+    if (this.bytes || (previous.stage !== 'flush' && previous.stage !== 'describe')) throw new Error('Invalid Flush continuation state');
+    if (error) {
+      if (frames.length !== 1 || frames[0]![0] !== 83 || frames[0]!.length !== 5) throw new Error('Unsupported profile: after an error in an open cycle only Sync may follow');
+      return { protocol: 'extended', stage: 'recover', sql: previous.sql,
+        fingerprint: hash(JSON.stringify(['flush-stages-v1', 'recover', previous.fingerprint])), bytes: frames[0]!,
+        reconciliation: { operations: [], index: 0, failed: false } };
+    }
+    let unit: FrontendUnit | undefined;
+    for (const frame of frames) unit = this.accept(frame);
+    if (!unit) throw new Error('Incomplete Flush continuation');
+    unit.stage = frames.at(-1)![0] === 72 ? 'flush' : 'sync';
+    // A bare Sync or Close names the statement of the stage it ends.
+    if (!unit.sql) unit.sql = previous.sql;
+    unit.fingerprint = hash(JSON.stringify(['flush-stages-v1', unit.stage, previous.fingerprint, unit.fingerprint]));
+    return unit;
+  }
   private reset(): void {
     this.frames = []; this.backendOperations = []; this.bytes = 0; this.executions = []; this.operations = []; this.executionDependencies.clear();
   }
   accept(frame: Buffer): FrontendUnit | undefined {
     const type = String.fromCharCode(frame[0]!); const reader = new Reader(frame);
-    if (type === 'H') throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync');
+    if (type === 'H' && !this.flushStages) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync, or select flush-stages-v1');
     if ('dcf'.includes(type)) throw new Error('Unsupported profile: COPY data outside COPY FROM STDIN');
     if (type === 'Q') {
       if (this.bytes) throw new Error('Unsupported profile: Simple Query inside an unfinished extended cycle');
       const sql = reader.cstring(); reader.done();
       return { protocol: 'simple', sql: sql.toString('utf8'), fingerprint: hash(Buffer.concat([Buffer.from('simple\0'), sql])), bytes: frame, reconciliation: { operations: [], index: 0, failed: false } };
     }
-    if (!'PBDECS'.includes(type)) throw new Error('Unsupported profile: frontend protocol message');
+    if (!'PBDECSH'.includes(type)) throw new Error('Unsupported profile: frontend protocol message');
+    if (type === 'H' && !this.frames.length) throw new Error('Unsupported profile: Flush without pending extended messages');
     this.bytes += frame.length;
     if (this.bytes > this.maxBuffered) throw new Error('Protocol cycle buffered-byte limit exceeded');
     this.frames.push(frame);
@@ -228,16 +273,20 @@ export class FrontendCycleBuffer {
   private hasPrefix = false;
   private readonly maxBuffered: number;
   private readonly staged: boolean;
+  private readonly flushStages: boolean;
   constructor(limits: FrameLimits & { protocolProfile?: ProtocolProfile } = {}) {
     this.maxBuffered = positiveLimit(limits.maxBufferedBytes, DEFAULT_BUFFER_LIMIT);
     this.staged = limits.protocolProfile === 'describe-flush-v1';
+    this.flushStages = limits.protocolProfile === 'flush-stages-v1';
   }
   get bufferedBytes(): number { return this.bytes; }
   accept(frame: Buffer): Buffer[] | undefined {
     const type = String.fromCharCode(frame[0]!);
-    if (type === 'H') {
-      if (!this.staged) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync');
-      if (this.hasPrefix || this.frames.length !== 2 || this.frames[0]![0] !== 80 || this.frames[1]![0] !== 68 || frame.length !== 5) throw new Error('Unsupported profile: early Flush requires one Parse/Describe prefix');
+    if (type === 'H' && this.flushStages) {
+      if (!this.frames.length || frame.length !== 5) throw new Error('Unsupported profile: Flush without pending extended messages');
+    } else if (type === 'H') {
+      if (!this.staged) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync, or select flush-stages-v1');
+      if (this.hasPrefix || this.frames.length !== 2 || this.frames[0]![0] !== 80 || this.frames[1]![0] !== 68 || frame.length !== 5) throw new Error('Unsupported profile: early Flush requires one Parse/Describe prefix; select flush-stages-v1 for other Flush stages');
     }
     if ('dcf'.includes(type)) throw new Error('Unsupported profile: COPY data outside COPY FROM STDIN');
     if (type === 'Q') {
@@ -251,7 +300,7 @@ export class FrontendCycleBuffer {
     this.frames.push(frame);
     if (type !== 'S' && type !== 'H') return undefined;
     const cycle = this.frames; this.frames = []; this.bytes = 0;
-    if (type === 'H') this.hasPrefix = true;
+    if (type === 'H') { this.hasPrefix = true; if (this.flushStages) this.cycleBytes = 0; }
     else { this.cycleBytes = 0; this.hasPrefix = false; }
     return cycle;
   }

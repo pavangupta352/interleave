@@ -49,7 +49,7 @@ describe('version 5 cancel request artifacts', () => {
   });
 
   test.each([
-    ['version 5 without cancels or COPY', (r: any) => { delete r.cancels; }, /^\$: a version 5 record has at least one cancel request or COPY transfer; use version 3 or 4$/],
+    ['version 5 without cancels or COPY', (r: any) => { delete r.cancels; }, /^\$: a version 5 record uses flush-stages-v1 or has at least one cancel request or COPY transfer; use version 3 or 4$/],
     ['an empty list', (r: any) => { r.cancels = []; }, /\$\.cancels: omit cancels when no cancel request arrived/],
     ['cancels before version 5', (r: any) => { r.schemaVersion = 3; delete r.limits.connectionProfile; }, /\$\.cancels: cancel requests require version 5/],
     ['a missing connection profile', (r: any) => { delete r.limits.connectionProfile; }, /\$\.limits\.connectionProfile: required field is missing/],

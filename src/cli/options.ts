@@ -61,8 +61,8 @@ export function parseCliArgs(args: string[]) {
   if (parsed.values['upstream-ca'] !== undefined && !parsed.values['upstream-tls']) throw new TypeError('--upstream-ca requires --upstream-tls');
   if (parsed.values.docker && parsed.values['upstream-tls']) throw new TypeError('--docker provisions a plaintext loopback server; use --database-url with --upstream-tls');
   if (parsed.values['fixture-profile'] === 'postgresql17-pgvector0.8.6-v1' && parsed.values['postgres-image'] !== undefined && parsed.values['postgres-image'] !== POSTGRES_IMAGES[3]) throw new TypeError('The pgvector fixture profile requires its matching pgvector image');
-  if (parsed.values['protocol-profile'] !== undefined && !['sync-cycle-v1', 'describe-flush-v1'].includes(parsed.values['protocol-profile'])) {
-    throw new TypeError('--protocol-profile must be sync-cycle-v1 or describe-flush-v1');
+  if (parsed.values['protocol-profile'] !== undefined && !['sync-cycle-v1', 'describe-flush-v1', 'flush-stages-v1'].includes(parsed.values['protocol-profile'])) {
+    throw new TypeError('--protocol-profile must be sync-cycle-v1, describe-flush-v1 or flush-stages-v1');
   }
   if (parsed.values['connection-profile'] !== undefined && !['single-producer-v1', 'multi-producer-v1'].includes(parsed.values['connection-profile'])) {
     throw new TypeError('--connection-profile must be single-producer-v1 or multi-producer-v1');
@@ -125,7 +125,7 @@ Connections: --max-connections-per-actor <1..8>; extra sessions must remain quer
 Overlap: --overlap pairs (run) also explores releasing two actors' next commands
          together, so statements can race inside PostgreSQL; --plan may then name
          pairs such as alice+bob. Off by default.
-Protocol: --protocol-profile <sync-cycle-v1|describe-flush-v1>; default sync-cycle-v1
+Protocol: --protocol-profile <sync-cycle-v1|describe-flush-v1|flush-stages-v1>; default sync-cycle-v1
 Fixture: --fixture-profile <native|postgresql17-pgvector0.8.6-v1>; default native
 Search: --max-runs <n>, --total-timeout-ms <n>, --max-candidates <n>,
         --max-search-bytes <n>, --plan <alice,bob,...>, --keep-going

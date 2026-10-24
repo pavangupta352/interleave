@@ -157,8 +157,9 @@ isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize
 - By default each actor holds one command-producing connection at a time; the
   `multi-producer-v1` profile schedules several. `COPY ... FROM STDIN` and
   `COPY ... TO STDOUT` stream through as part of one command. Cursors and
-  pipelines that wait on Flush, and replication's COPY BOTH, are not supported
-  and fail explicitly. Pipelined queries that end each cycle with Sync are
+  pipelines that wait on Flush need `--protocol-profile flush-stages-v1`; under
+  the default profile they fail explicitly, as replication's COPY BOTH always
+  does. Pipelined queries that end each cycle with Sync are
   scheduled one cycle at a time.
 - A cancel request reaches PostgreSQL only when it names a connection of the
   actor that sent it, and the record lists every request. The application's own

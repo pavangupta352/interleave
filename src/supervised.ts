@@ -71,13 +71,15 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
   const transport = resolvePostgresTransport(options.databaseUrl, options.upstreamTls);
   const started = performance.now();
   const multi = connectionProfile === 'multi-producer-v1';
+  // flush-stages-v1 records exist only in version 5.
+  const flush = protocolProfile === 'flush-stages-v1';
   const result: RunResult = {
-    schemaVersion: multi || overlap ? 4 : 3, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
+    schemaVersion: flush ? 5 : multi || overlap ? 4 : 3, scenario: basename(scenarioFile).slice(0, 256), outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
     environment: { serverVersion: 'unknown', nodeVersion: process.version, transport: runTransportIdentity(transport) },
     startedAt: new Date().toISOString(), durationMs: 0,
     limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile,
-      ...(multi || overlap ? { connectionProfile } : {}), ...(overlap ? { overlap } : {}) },
+      ...(multi || overlap || flush ? { connectionProfile } : {}), ...(overlap ? { overlap } : {}) },
     cleanup: { complete: false },
   };
   assertEvidenceEnvelope(result, maxEvidenceBytes);

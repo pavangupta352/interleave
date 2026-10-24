@@ -249,6 +249,37 @@ records real `40P01` rollback and `40001` whole-transaction retries on PostgreSQ
 PostgreSQL can choose another deadlock victim on replay; a resulting change in
 the application's COMMIT/ROLLBACK order is correctly reported as incompatible.
 
+## Cursors and Flush stages
+
+The opt-in `flush-stages-v1` profile releases each group of extended-protocol
+messages that ends in Flush, and keeps the cycle open until its Sync. That is how
+cursor clients read a large result in batches: Execute with a row limit, Flush,
+and PortalSuspended until the last batch. Another actor's commands can run
+between two batches, which is where a cursor's snapshot and locks meet other
+writers. Each Flush release completes once PostgreSQL has answered every message
+in it.
+
+Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
+
+- pg-cursor 2.22.1 with node-postgres 8.23.0 read five rows two at a time while
+  another actor committed an update between two batches. The cursor kept the
+  portal's snapshot and returned the old value; a schedule that ran the update
+  first returned the new one. Exact replay repeated the stage sequence.
+- A cursor closed after its first batch ended its cycle with Close and Sync. An
+  error in a later batch (SQLSTATE 22012) was followed by a Sync-only recovery,
+  and the connection's next query ran. Exact replay.
+- A `SELECT ... FOR UPDATE` cursor's batch waited for a row that another actor
+  had updated in an open transaction. The scheduler observed the lock wait inside
+  the open cycle and released the other actor's COMMIT. Exact replay.
+- pg-query-stream 4.17.1 with a batch size of two, and Postgres.js 3.4.9
+  `cursor()` with a parameterized statement (described first) and with an early
+  `break`, with exact replay.
+- The report labeled Flush stages and the closing Sync, with rows returned and
+  the suspended portal, in Chromium at desktop and mobile sizes.
+
+Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, libpq pipeline mode with
+flush requests, pgjdbc, and Firefox and WebKit for the report.
+
 ## External programs as actors
 
 `processActor` runs a separate program per actor and gives it only that actor's
@@ -268,8 +299,9 @@ stay within the qualified protocol subset. Examples include libpq-based drivers,
 pgx, Npgsql and JDBC. That subset covers simple queries and ordinary extended
 cycles, including pipelined cycles that each end with Sync, and
 [cancel requests](#cancel-requests) and [streaming COPY](#streaming-copy); it
-does not include cursors and pipelines that wait on Flush. Those clients have
-not been qualified. Treat them as unverified until their own workflow runs.
+needs `flush-stages-v1` for cursors and pipelines that wait on Flush (see
+[cursors and Flush stages](#cursors-and-flush-stages)). Those clients have not
+been qualified. Treat them as unverified until their own workflow runs.
 
 ## TypeORM
 

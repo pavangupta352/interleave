@@ -2,7 +2,7 @@ import net, { type Socket } from 'node:net';
 import { createHash, type Hash } from 'node:crypto';
 import { resolvePostgresTransport, restorePostgresTransport } from './postgres-transport.js';
 import { connectPostgresUpstream, DeferredUpstream, UpstreamConnectionError } from './protocol/upstream-transport.js';
-import { BackendSummary, MetadataSummary } from './protocol/backend.js';
+import { BackendSummary, FlushSummary, MetadataSummary } from './protocol/backend.js';
 import { FrameDecoder, DEFAULT_BUFFER_LIMIT, positiveLimit } from './protocol/framing.js';
 import { FrontendAssembler, FrontendCycleBuffer, type FrontendUnit } from './protocol/frontend.js';
 import type { ActorProxy, PendingUnit, ProxyEvent, ProxyOptions, UnitCompletion } from './types.js';
@@ -47,8 +47,10 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   const maxConnections = options.maxConnectionsPerActor === undefined ? 1 : options.maxConnectionsPerActor;
   if (!Number.isSafeInteger(maxConnections) || maxConnections < 1 || maxConnections > 8) throw new Error('maxConnectionsPerActor must be an integer between 1 and 8');
   const profile = options.protocolProfile === undefined ? 'sync-cycle-v1' : options.protocolProfile;
-  if (profile !== 'sync-cycle-v1' && profile !== 'describe-flush-v1') throw new Error('protocolProfile must be sync-cycle-v1 or describe-flush-v1');
-  const staged = profile === 'describe-flush-v1';
+  if (profile !== 'sync-cycle-v1' && profile !== 'describe-flush-v1' && profile !== 'flush-stages-v1') throw new Error('protocolProfile must be sync-cycle-v1, describe-flush-v1 or flush-stages-v1');
+  const staged = profile !== 'sync-cycle-v1';
+  // Every Flush ends a release; the cycle stays open, between stages, until its Sync.
+  const flushStages = profile === 'flush-stages-v1';
   const connectionProfile = options.connectionProfile === undefined ? 'single-producer-v1' : options.connectionProfile;
   if (connectionProfile !== 'single-producer-v1' && connectionProfile !== 'multi-producer-v1') throw new Error('connectionProfile must be single-producer-v1 or multi-producer-v1');
   // Each admitted session is already sequential; multi-producer lets every one send commands.
@@ -199,7 +201,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     const queue: Queued[] = [];
     let prefix: { original: FrontendUnit; cycle: number; ordinal: number; complete: boolean; error?: { code: string; message: string } } | undefined;
     interface CopyMeter { direction: 'in' | 'out'; bytes: number; hash: Hash }
-    let inFlight: { original: FrontendUnit; summary: BackendSummary | MetadataSummary; errorSeen: boolean; copies: CopyMeter[]; resolve(value: UnitCompletion): void; reject(error: Error): void } | undefined;
+    let inFlight: { original: FrontendUnit; summary: BackendSummary | MetadataSummary | FlushSummary; errorSeen: boolean; copies: CopyMeter[]; resolve(value: UnitCompletion): void; reject(error: Error): void } | undefined;
     // COPY FROM STDIN streams the client's copy messages upstream as part of the in-flight
     // unit; `counting` ends when PostgreSQL ends the copy, `ended` when the client does.
     let copyIn: { unit: object; meter: CopyMeter; counting: boolean; ended: boolean } | undefined;
@@ -252,9 +254,11 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       let original: FrontendUnit | undefined;
       if (prefix) {
         if (!prefix.complete) return;
-        original = proposed.continuation(entry.frames, prefix.original, prefix.error);
-      } else if (staged && entry.frames.at(-1)![0] === 72) original = proposed.describe(entry.frames);
-      else for (const frame of entry.frames) original = proposed.accept(frame);
+        original = flushStages ? proposed.flushContinuation(entry.frames, prefix.original, prefix.error)
+          : proposed.continuation(entry.frames, prefix.original, prefix.error);
+      } else if (staged && entry.frames.at(-1)![0] === 72) {
+        original = flushStages && !FrontendAssembler.isDescribePrefix(entry.frames) ? proposed.flushStage(entry.frames) : proposed.describe(entry.frames);
+      } else for (const frame of entry.frames) original = proposed.accept(frame);
       if (!original) throw new Error('Incomplete frontend scheduling unit');
       const retained = original;
       const stage = retained.stage ?? 'complete';
@@ -273,10 +277,12 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           if (closed || failed || closing) return Promise.reject(new Error('Proxy connection closed before release'));
           if (!ready || inFlight || queue[0] !== entry) return Promise.reject(new Error('Scheduling units must release in connection order after prior completion'));
           released = true; queue.shift(); retainedBytes -= entry.byteLength;
-          if (stage === 'complete' || stage === 'describe') nextCycle++;
-          if (stage === 'describe') prefix = { original: retained, cycle, ordinal: entry.ordinal, complete: false };
+          if (stage === 'complete' || stage === 'describe' || (stage === 'flush' && !prefix)) nextCycle++;
+          // The open cycle remembers its latest stage; the next stage chains to it.
+          if (stage === 'describe' || stage === 'flush') prefix = { original: retained, cycle, ordinal: entry.ordinal, complete: false };
+          const summary = stage === 'describe' ? new MetadataSummary() : stage === 'flush' ? new FlushSummary(retained.reconciliation) : new BackendSummary(prefixError);
           return new Promise<UnitCompletion>((resolve, reject) => {
-            inFlight = { original: retained, summary: stage === 'describe' ? new MetadataSummary() : new BackendSummary(prefixError), errorSeen: Boolean(prefixError), copies: [], resolve, reject };
+            inFlight = { original: retained, summary, errorSeen: Boolean(prefixError), copies: [], resolve, reject };
             guard(() => { checkRetained(); write(upstream, retained.bytes, client); });
           });
         },
@@ -409,19 +415,25 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           write(client, frame, upstream); announce(); continue;
         }
         if (inFlight) assembler.reconcile(inFlight.original, frame);
-        else if (prefix && !['N', 'S', 'A'].includes(type)) throw new Error('Unsupported profile: backend response outside a released metadata stage');
+        else if (prefix && !['N', 'S', 'A'].includes(type)) throw new Error('Unsupported profile: backend response outside a released stage');
         const completion = inFlight?.summary.accept(frame);
         if (!terminated) write(client, frame, upstream);
         if (completion && inFlight) {
           const current = inFlight; inFlight = undefined;
+          const copies = current.copies.length ? current.copies.map(({ direction, bytes, hash }) => ({ direction, bytes, sha256: hash.digest('hex') })) : undefined;
           if (completion.kind === 'metadata') {
             if (!prefix) throw new Error('Missing open metadata cycle');
             prefix.complete = true;
             if (completion.result === 'error') prefix.error = completion.error;
+          } else if (completion.kind === 'flush') {
+            if (!prefix) throw new Error('Missing open Flush cycle');
+            prefix.complete = true;
+            if (completion.error) prefix.error = completion.error;
+            if (copies) completion.copy = copies;
           } else {
             prefix = undefined;
             if (staged) completion.kind = 'ready';
-            if (current.copies.length) completion.copy = current.copies.map(({ direction, bytes, hash }) => ({ direction, bytes, sha256: hash.digest('hex') }));
+            if (copies) completion.copy = copies;
           }
           current.resolve(completion);
           if (pendingTerminate) { const frame = pendingTerminate; pendingTerminate = undefined; upstream.end(frame); }

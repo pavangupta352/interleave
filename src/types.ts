@@ -4,12 +4,13 @@ import type { SourceIdentity } from './source-identity.js';
 import type { ResolvedPostgresTransport, TransportIdentity, UpstreamTlsInput } from './postgres-transport.js';
 
 export type ProtocolKind = 'simple' | 'extended';
-export type ProtocolProfile = 'sync-cycle-v1' | 'describe-flush-v1';
+export type ProtocolProfile = 'sync-cycle-v1' | 'describe-flush-v1' | 'flush-stages-v1';
 /** Single-producer allows one live command connection per actor; multi-producer schedules every connection as a lane. */
 export type ConnectionProfile = 'single-producer-v1' | 'multi-producer-v1';
 /** Opt-in release of two queued command units in the same instant. */
 export type OverlapMode = 'pairs';
-export type StepStage = 'complete' | 'describe' | 'execute' | 'recover';
+/** `flush` and `sync` are stages of flush-stages-v1: a release ending in Flush, and the Sync that closes its cycle. */
+export type StepStage = 'complete' | 'describe' | 'execute' | 'recover' | 'flush' | 'sync';
 export type TransactionStatus = 'I' | 'T' | 'E';
 export type Outcome = 'passed' | 'violation' | 'actor-error' | 'incompatible' | 'inconclusive' | 'harness-error';
 
@@ -80,7 +81,21 @@ export type MetadataCompletion = {
   resultShape?: never;
 });
 
-export type UnitCompletion = ReadyCompletion | MetadataCompletion;
+/** flush-stages-v1: PostgreSQL acknowledged every message before a Flush, or reported an error. */
+export interface FlushCompletion {
+  kind: 'flush';
+  commandTags: string[];
+  /** DataRow messages returned in this stage. */
+  rows: number;
+  /** The stage's last Execute stopped at its row limit with the portal still open. */
+  suspended?: true;
+  error?: { code: string; message: string };
+  copy?: CopyTransfer[];
+  transactionStatus?: never;
+  rowCount?: never;
+}
+
+export type UnitCompletion = ReadyCompletion | MetadataCompletion | FlushCompletion;
 
 export interface PendingUnit {
   actor: string;

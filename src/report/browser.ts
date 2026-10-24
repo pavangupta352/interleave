@@ -70,7 +70,7 @@ function cancelOutcome(cancel: CancelRecord): string {
 }
 function shortSql(value: string): string { return value.replace(/\s+/g, ' ').trim() || '(empty command)'; }
 function stageLabel(step: TraceStep): string {
-  return ({ complete: 'Complete query', describe: 'Describe', execute: 'Execute', recover: 'Recover' })[step.stage ?? 'complete'];
+  return ({ complete: 'Complete query', describe: 'Describe', execute: 'Execute', recover: 'Recover', flush: 'Flush stage', sync: 'Sync' })[step.stage ?? 'complete'];
 }
 function commandLabels(step: TraceStep): { protocol: string; stage?: string; completion: string; waits?: string; overlap?: string; cancel?: string } {
   const other = partner(step);
@@ -81,7 +81,8 @@ function commandLabels(step: TraceStep): { protocol: string; stage?: string; com
     ...(step.stage && step.stage !== 'complete' ? { stage: stageLabel(step) } : {}),
     completion: step.completion?.error ? `Error · ${step.completion.error.code}`
       : step.completion?.kind === 'metadata' ? 'Metadata received'
-        : step.completion ? `${step.completion.rowCount} ${step.completion.rowCount === 1 ? 'row' : 'rows'}` : 'Incomplete',
+        : step.completion?.kind === 'flush' ? `${step.completion.rows} ${step.completion.rows === 1 ? 'row' : 'rows'}${step.completion.suspended ? ' · portal suspended' : ''}`
+          : step.completion ? `${step.completion.rowCount} ${step.completion.rowCount === 1 ? 'row' : 'rows'}` : 'Incomplete',
     ...(step.waits.length ? { waits: `${step.waits.length} wait ${step.waits.length === 1 ? 'observation' : 'observations'}` } : {}),
   };
 }
@@ -115,7 +116,7 @@ function renderShell(): void {
   const commandConnections = new Set(run.trace.map(step => `${step.actor}#${step.connection}`)).size;
   const pairs = pairCount();
   const cancels = run.cancels?.length ?? 0;
-  for (const value of [`${run.trace.length.toLocaleString('en-US')} ${protocolProfile() === 'describe-flush-v1' ? 'releases' : 'commands'}`, `${actors.length} actors`,
+  for (const value of [`${run.trace.length.toLocaleString('en-US')} ${protocolProfile() === 'sync-cycle-v1' ? 'commands' : 'releases'}`, `${actors.length} actors`,
     ...(laneActors.size ? [`${commandConnections} command connections`] : []),
     ...(pairs ? [`${pairs.toLocaleString('en-US')} overlapped ${pairs === 1 ? 'pair' : 'pairs'}`] : []),
     ...(cancels ? [`${cancels.toLocaleString('en-US')} cancel ${cancels === 1 ? 'request' : 'requests'}`] : []), `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
@@ -148,7 +149,7 @@ function renderShell(): void {
   selectionTools.append(selectionLabel, inspect);
   const ledger = node('div', 'ledger'); ledger.id = 'ledger';
   const pagination = node('div', 'pagination'); pagination.id = 'pagination';
-  const scope = node('p', 'scope-note', `${protocolProfile() === 'describe-flush-v1' ? 'Each row is a scheduled release. A query may have separate description and execution stages.' : 'Each row is a client command released to PostgreSQL.'}${laneActors.size ? ' An actor’s connections share its column; each is labeled by its connection number and runs its commands in order.' : ''}${pairs ? ' A command marked “Released with step” was sent in the same instant as that step; PostgreSQL chose how the two interleaved, so their row order is not execution order.' : ''}${run.cancels?.some(cancel => cancel.step !== undefined) ? ' A command marked “Cancel request” was running when the application asked PostgreSQL to cancel it.' : ''} PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.`);
+  const scope = node('p', 'scope-note', `${protocolProfile() === 'describe-flush-v1' ? 'Each row is a scheduled release. A query may have separate description and execution stages.' : protocolProfile() === 'flush-stages-v1' ? 'Each row is a scheduled release. An extended-protocol cycle can span several Flush stages before its Sync, and other actors may run between them.' : 'Each row is a client command released to PostgreSQL.'}${laneActors.size ? ' An actor’s connections share its column; each is labeled by its connection number and runs its commands in order.' : ''}${pairs ? ' A command marked “Released with step” was sent in the same instant as that step; PostgreSQL chose how the two interleaved, so their row order is not execution order.' : ''}${run.cancels?.some(cancel => cancel.step !== undefined) ? ' A command marked “Cancel request” was running when the application asked PostgreSQL to cancel it.' : ''} PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.`);
   evidence.append(toolbar, hint, selectionTools, ledger, pagination, scope);
   const inspector = node('aside', 'inspector'); inspector.id = 'inspector'; inspector.setAttribute('aria-label', 'Selected command evidence'); inspector.tabIndex = -1;
   workspace.append(evidence, inspector); main.append(summary, workspace);
@@ -325,9 +326,12 @@ function renderInspector(): void {
     const sql = node('section', 'inspector-section'); const sqlHeading = node('div', 'section-heading'); sqlHeading.append(node('h3', undefined, 'SQL sent to PostgreSQL'));
     const copy = button('Copy SQL', () => void copyText(step.sql, copy), 'text-button'); sqlHeading.append(copy);
     const code = node('pre', 'sql-full'); code.tabIndex = 0; code.append(node('code', undefined, step.sql || '(empty command)')); sql.append(sqlHeading, code);
-    if (step.protocol === 'extended') sql.append(node('p', 'detail-note', step.stage === 'describe'
+    if (step.protocol === 'extended') sql.append(node('p', 'detail-note', step.stage === 'flush'
+      ? 'This release ended with Flush. PostgreSQL answered its messages and the cycle stayed open for a later release; other actors could run in between.'
+      : step.stage === 'sync' ? 'This release closed the open cycle with Sync.'
+      : step.stage === 'describe'
       ? 'This release describes the query before parameter values are sent. Values are bound into the later execution fingerprint.'
-      : step.stage === 'recover' ? 'This release sends Sync after the description error. The SQL above identifies the failed query.'
+      : step.stage === 'recover' ? `This release sends Sync after the ${protocolProfile() === 'flush-stages-v1' ? 'error earlier in its cycle' : 'description error'}. The SQL above identifies the failed query.`
         : 'Parameter values are bound into the command fingerprint; they are not displayed as query text.'));
     contents.push(sql);
     const completion = node('section', 'inspector-section'); completion.append(node('h3', undefined, 'PostgreSQL completion'));
@@ -338,6 +342,14 @@ function renderInspector(): void {
       if (step.completion.result === 'described') {
         addFact(facts, 'Parameters described', String(step.completion.parameterCount));
         addFact(facts, 'Result columns', step.completion.resultShape === 'no-data' ? 'No result columns (NoData)' : String(step.completion.columnCount));
+      }
+    } else if (step.completion?.kind === 'flush') {
+      addFact(facts, 'Boundary', 'Flush; the cycle stays open');
+      addFact(facts, 'Command tags', step.completion.commandTags.join(' · ') || 'None');
+      addFact(facts, 'Rows returned', String(step.completion.rows));
+      if (step.completion.suspended) addFact(facts, 'Portal', 'Suspended at its row limit');
+      for (const copy of step.completion.copy ?? []) {
+        addFact(facts, copy.direction === 'in' ? 'COPY from client' : 'COPY to client', `${copy.bytes.toLocaleString('en-US')} ${copy.bytes === 1 ? 'byte' : 'bytes'} · SHA-256 ${copy.sha256}`);
       }
     } else if (step.completion) {
       addFact(facts, 'Command tags', step.completion.commandTags.join(' · ') || 'None'); addFact(facts, 'Rows affected / returned', String(step.completion.rowCount));

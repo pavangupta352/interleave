@@ -405,3 +405,32 @@ export async function checkCopyReport(page, url, artifact) {
     return { checks: ['real COPY in', 'real COPY out', 'transfer digests', 'rows not displayed', 'mobile overflow', 'no errors or external requests'] };
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }
+
+/** A Flush stage names its boundary, rows and portal state; Sync closes the open cycle. */
+export async function checkFlushReport(page, url, artifact) {
+  const errors = [], requests = [];
+  const onError = error => errors.push(error.message);
+  const onRequest = request => { if (request.url() !== url) requests.push(request.url()); };
+  page.on('pageerror', onError); page.on('request', onRequest);
+  try {
+    await page.goto(url);
+    await page.getByRole('heading', { name: artifact.scenario, exact: true }).waitFor();
+    const suspended = artifact.trace.find(step => step.completion?.kind === 'flush' && step.completion.suspended);
+    const closing = artifact.trace.find(step => step.stage === 'sync');
+    assert.ok(suspended && closing, 'The real run recorded a suspended fetch and a closing Sync');
+    assert.equal(await page.locator('.metadata').getByText(`${artifact.trace.length} releases`, { exact: true }).count(), 1);
+    assert.ok((await page.locator('.scope-note').textContent()).includes('can span several Flush stages before its Sync'));
+    const rows = suspended.completion.rows;
+    assert.equal(await page.getByRole('button', { name: new RegExp(`^Step ${suspended.index + 1}, alice: SELECT id, value FROM items ORDER BY id\\. Flush stage\\. Extended stage\\. ${rows} rows · portal suspended$`) }).count(), 1);
+    await page.locator(`.command[data-step="${suspended.index}"]`).click();
+    const completion = await page.locator('.inspector-section').filter({ hasText: 'PostgreSQL completion' }).textContent();
+    for (const fact of ['BoundaryFlush; the cycle stays open', `Rows returned${rows}`, 'PortalSuspended at its row limit']) assert.ok(completion.includes(fact), `The completion lists ${fact}`);
+    assert.ok((await page.locator('.inspector').textContent()).includes('This release ended with Flush.'));
+    await page.locator(`.command[data-step="${closing.index}"]`).click();
+    assert.ok((await page.locator('.inspector').textContent()).includes('This release closed the open cycle with Sync.'));
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Flush stages fit the viewport');
+    assert.equal(await page.getByText(/undefined|NaN/).count(), 0);
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    return { checks: ['real cursor batches', 'release count', 'scope note', 'Flush accessible name', 'Flush completion facts', 'Flush note', 'Sync note', 'mobile overflow', 'no errors or external requests'] };
+  } finally { page.off('pageerror', onError); page.off('request', onRequest); }
+}

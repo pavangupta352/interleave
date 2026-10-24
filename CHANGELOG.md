@@ -25,6 +25,14 @@
   record each COPY's direction, byte count and SHA-256 digest, never the rows;
   exact replay requires the same COPY FROM STDIN data. COPY BOTH, used only by
   replication, is still refused.
+- Schedule cursors and other clients that wait on Flush with the opt-in
+  `flush-stages-v1` profile (`--protocol-profile flush-stages-v1`). Every group
+  of extended-protocol messages that ends in Flush is its own release, so another
+  actor can run between two batches of pg-cursor, pg-query-stream or Postgres.js
+  `cursor()`. A Flush release completes once PostgreSQL has answered all of it;
+  the cycle stays open until its Sync, and only a lone Sync may follow an error.
+  Records are schema version 5 and show each stage's rows and whether the portal
+  was suspended.
 
 ## 0.2.0 — 25 October 2026
 

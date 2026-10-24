@@ -25,6 +25,12 @@ back to the description. **Recover** represents Sync after a description error.
 A query may therefore occupy more than one row. Both original version 1 and
 staged version 2 records can be imported into the same viewer.
 
+For `flush-stages-v1` records, a **Flush stage** row is a release that ended with
+Flush, such as one batch of a cursor. Its completion shows the command tags, the
+rows returned and whether the portal was suspended at its row limit; the cycle
+stays open, and other actors' rows can appear before the next stage. **Sync**
+closes the cycle, and **Recover** is the lone Sync after an error in it.
+
 A `multi-producer-v1` record (schema version 4) keeps one column per actor. When
 an actor's commands used more than one connection, each of its commands is
 labeled with its connection: `Connection #1` in the desktop column, and

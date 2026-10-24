@@ -53,7 +53,7 @@ describe('version 5 COPY transfer artifacts', () => {
     ['an empty digest for data', (r: any) => { r.trace[0].completion.copy[0].sha256 = sha256(''); }, /copy\[0\]\.sha256: contradicts the byte count/],
     ['data digest for no bytes', (r: any) => { r.trace[0].completion.copy[0].bytes = 0; }, /copy\[0\]\.sha256: contradicts the byte count/],
     ['an extra transfer field', (r: any) => { r.trace[0].completion.copy[0].rows = 2; }, /rows/],
-    ['version 5 without COPY or cancels', (r: any) => { for (const step of r.trace) delete step.completion.copy; }, /^\$: a version 5 record has at least one cancel request or COPY transfer/],
+    ['version 5 without COPY or cancels', (r: any) => { for (const step of r.trace) delete step.completion.copy; }, /^\$: a version 5 record uses flush-stages-v1 or has at least one cancel request or COPY transfer/],
   ])('reject %s', (_name, mutate, message) => {
     const original = run(); mutate(original);
     expect(() => parseRunArtifact(original)).toThrow(message);

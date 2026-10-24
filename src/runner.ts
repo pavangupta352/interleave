@@ -95,13 +95,15 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const transport = providedDatabase?.transport ?? resolvePostgresTransport(options.databaseUrl, options.upstreamTls);
   const started = performance.now();
   const controller = new AbortController();
+  // flush-stages-v1 records exist only in version 5.
+  const flush = protocolProfile === 'flush-stages-v1';
   const result: RunResult = {
-    schemaVersion: multi || overlap ? 4 : 3, scenario: scenario.name, outcome: 'harness-error', mode,
+    schemaVersion: flush ? 5 : multi || overlap ? 4 : 3, scenario: scenario.name, outcome: 'harness-error', mode,
     plan: [...(options.plan ?? [])], trace: [], actors: [], connections: [],
     environment: { serverVersion: 'unknown', nodeVersion: process.version, ...(source ? { source } : {}), transport: runTransportIdentity(transport) },
     startedAt: new Date().toISOString(), durationMs: 0,
     limits: { maxSteps, timeoutMs, maxEvidenceBytes, maxConnectionsPerActor, protocolProfile,
-      ...(multi || overlap ? { connectionProfile } : {}), ...(overlap ? { overlap } : {}) },
+      ...(multi || overlap || flush ? { connectionProfile } : {}), ...(overlap ? { overlap } : {}) },
     cleanup: { complete: false },
   };
   let database: OwnedDatabase | undefined = providedDatabase;
@@ -447,7 +449,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           index: position, actor, connection: unit.connection, ordinal: unit.ordinal,
           protocol: unit.protocol, sql: unit.sql, fingerprint: unit.fingerprint, backendPid: unit.backendPid,
           available, releasedAt, waits: [],
-          ...(protocolProfile === 'describe-flush-v1' ? { stage, cycle,
+          ...(protocolProfile !== 'sync-cycle-v1' ? { stage, cycle,
             ...(unit.prefixOrdinal === undefined ? {} : { prefixOrdinal: unit.prefixOrdinal }) } : {}),
           ...(chosen.length > 1 ? { overlap: result.trace.length } : {}),
         };
@@ -470,7 +472,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           lane.activityAt = performance.now();
           if (retain({ completion, connectionProfile })) {
             step.completedAt = performance.now() - started;
-            step.completion = protocolProfile === 'describe-flush-v1' && completion.kind !== 'metadata'
+            step.completion = protocolProfile !== 'sync-cycle-v1' && completion.kind === undefined
               ? { ...completion, kind: 'ready' } : completion;
             if (completion.kind !== 'metadata' && completion.copy) requireVersion5();
             // Data sent by COPY FROM STDIN is application input, like SQL and parameters.

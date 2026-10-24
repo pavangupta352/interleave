@@ -1,12 +1,13 @@
 # Cancellation, COPY and cursors
 
-Status, 25 October 2026: cancellation routing and streaming COPY are
-implemented (sections 1 and 2; see [cancel requests](../compatibility.md#cancel-requests)
-and [streaming COPY](../compatibility.md#streaming-copy) for what was checked).
-Cursors that wait on Flush are still refused with an explicit `Unsupported
-profile` error, so an application that uses them stops before any evidence is
-recorded. Each item has integration tests against real PostgreSQL and a real
-driver.
+Status, 25 October 2026: all three are implemented; see
+[cancel requests](../compatibility.md#cancel-requests),
+[streaming COPY](../compatibility.md#streaming-copy) and
+[cursors and Flush stages](../compatibility.md#cursors-and-flush-stages) for what
+was checked. Section 3 became the more general `flush-stages-v1` profile: every
+group of messages that ends in Flush is a release, not only Execute batches, so
+the same profile covers pipelines that send a flush request. Each item has
+integration tests against real PostgreSQL and a real driver.
 
 ## 1. Cancellation routing
 
