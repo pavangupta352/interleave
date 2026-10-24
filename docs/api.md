@@ -406,8 +406,9 @@ instance graph through one offline installation. `exportRegression` accepts
 `dependencyArchives?: string[]` for original local/private tarballs. Safe
 contained files and locked official-registry HTTPS tarballs are discovered
 automatically. All required archives must be available and verified; unsupported
-topology or install hooks fail explicitly. The separate installation profile
-remains available for recordings without shared instances.
+topology or install hooks fail explicitly. Supplying either archive option also
+selects this profile for a recording without shared instances. Otherwise such a
+recording uses the separate installation profile.
 
 `artifactFile?: string` preserves original JSON bytes after checking that the
 parsed artifact equals the supplied run. The CLI supplies its selected artifact

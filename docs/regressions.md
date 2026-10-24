@@ -35,12 +35,17 @@ The recording must also have complete command and cleanup evidence, with
 fixture and actor connection identities. Export creation and offline verification
 reject missing identities even when the legacy artifact remains readable.
 
-When the application and Interleave share installed packages, export requires
-the recording runtime to be the unambiguous ordinary top-level application
-installation at `node_modules/@pavangupta352/interleave`. The application source
-must import that Interleave package. Export preserves the entire recorded
-package graph and every shared instance; an external/global runtime, ambiguous
-Interleave copies, or a lock that changes sharing is rejected.
+Export uses the shared profile when the application and Interleave share
+installed packages, or when you supply `--runtime-archive` or
+`--dependency-archive`. Supplying an archive covers an application that installed
+Interleave from a local archive and shares no other installed package with it,
+such as the [Knex example](../examples/knex/README.md#export); the separate
+profile cannot install such a lock. The shared profile requires the recording
+runtime to be the unambiguous ordinary top-level application installation at
+`node_modules/@pavangupta352/interleave`, and any import of Interleave in the
+application source must resolve to that package. Export preserves the entire
+recorded package graph and every shared instance; an external/global runtime,
+ambiguous Interleave copies, or a lock that changes sharing is rejected.
 
 The shared profile needs the original runtime archive matching the app lock's
 SHA-512 integrity. Supply it explicitly when it cannot be discovered:

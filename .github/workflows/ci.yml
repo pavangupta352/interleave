@@ -341,6 +341,71 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  orms:
+    name: ${{ matrix.label }} / PostgreSQL ${{ matrix.postgres }} / Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        orm: [sequelize, knex, mikro-orm]
+        node: ['22.18.0', '24.7.0']
+        postgres: ['16', '17', '18']
+        include:
+          - orm: sequelize
+            label: Sequelize 6.37.8
+          - orm: knex
+            label: Knex 3.3.0
+          - orm: mikro-orm
+            label: MikroORM 6.6.17
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: interleave-test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      INTERLEAVE_ORM: ${{ matrix.orm }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies and build
+        run: |
+          npm ci
+          npm run build
+      - name: Pack the runtime under test before installing the example
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime"
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/runtime" > "$RUNNER_TEMP/pack.json"
+          echo "INTERLEAVE_ORM_RUNTIME_ARCHIVE=$RUNNER_TEMP/runtime/$(node -p 'require(process.argv[1])[0].filename' "$RUNNER_TEMP/pack.json")" >> "$GITHUB_ENV"
+      - name: ORM gate (installed archive, record, replay, reduction, retry, drift, interruption and portable export)
+        env:
+          TEST_DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/postgres', 'postgres', 'interleave-test', job.services.postgres.ports[5432]) }}
+          INTERLEAVE_ORM_EVIDENCE: ${{ runner.temp }}/orm-evidence
+        run: npm run test:orms
+      - name: Retain ORM evidence
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: orm-${{ matrix.orm }}-node${{ matrix.node }}-pg${{ matrix.postgres }}
+          path: |
+            ${{ runner.temp }}/orm-evidence
+            !${{ runner.temp }}/**/node_modules
+          if-no-files-found: ignore
+          retention-days: 14
+
   browser:
     name: Offline report / Chromium, Firefox and WebKit
     runs-on: ubuntu-24.04
@@ -363,7 +428,7 @@ jobs:
   release-candidate:
     name: Prepare release assets (no publication)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [postgres, pgvector, managed, tls, python, ruby, php, go, java, typeorm, prisma, browser]
+    needs: [postgres, pgvector, managed, tls, python, ruby, php, go, java, typeorm, prisma, orms, browser]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

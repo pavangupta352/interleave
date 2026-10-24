@@ -19,6 +19,17 @@
   [compatibility](docs/compatibility.md#external-programs-as-actors) for how each
   driver's protocol cycles become scheduling steps and which startup parameters
   tie exact replay to a directory or time zone.
+- Sequelize 6.37.8, Knex 3.3.0 and MikroORM 6.6.17 over node-postgres 8.23.0 on
+  PostgreSQL 16, 17 and 18 with Node.js 22.18.0 and 24.7.0, through isolated
+  [Sequelize](examples/sequelize/README.md), [Knex](examples/knex/README.md) and
+  [MikroORM](examples/mikro-orm/README.md) examples with per-actor helpers. The
+  installed-package gate `npm run test:orms` runs 14 checks per row, including
+  exact replay, minimization, guided replay of a repair, retry, cancellation and
+  portable export. The MikroORM helper turns off `ensureDatabase`, whose SQL
+  contains the generated database name. See
+  [compatibility](docs/compatibility.md#sequelize-knex-and-mikroorm).
+- The new `orms` CI job family runs that gate for every row, and release
+  candidates require it.
 
 ### Fixes
 
@@ -26,6 +37,15 @@
   executing it records that statement's SQL once. pgx's Parse/Describe/Sync
   prepare cycle previously showed the statement twice, as if it had run two
   commands.
+- Export accepts `--runtime-archive` and `--dependency-archive` (`runtimeArchive`
+  and `dependencyArchives`) for a recording whose application shares no installed
+  package with Interleave's runtime, and exports it as an offline installation of
+  the original application lock. Before, such a recording could not be exported
+  when the application had installed Interleave from a local archive: export
+  rejected the archive options, and the separate installation rejected the local
+  runtime entry in the application lock. A Knex 3.3.0 application is one such
+  case. Without an archive option, export still uses the separate installation,
+  and its error for a local archive entry now names the two options.
 
 ## 0.2.0 — 25 October 2026
 

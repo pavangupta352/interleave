@@ -115,7 +115,7 @@ test.each([undefined, 'failure', 'cancelled', 'skipped'])('rejects a tagged CI r
     GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'pavangupta352/interleave', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2',
     GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: f.ref,
     INTERLEAVE_RELEASE_NEEDS: JSON.stringify({ postgres: { result: 'success' }, pgvector: { result: 'success' }, tls: { result: 'success' }, python: { result: 'success' },
-      ruby: { result: 'success' }, php: { result: 'success' }, go: { result: 'success' }, java: { result: 'success' }, typeorm: { result: 'success' }, prisma: { result: 'success' }, browser: { result: 'success' },
+      ruby: { result: 'success' }, php: { result: 'success' }, go: { result: 'success' }, java: { result: 'success' }, typeorm: { result: 'success' }, prisma: { result: 'success' }, orms: { result: 'success' }, browser: { result: 'success' },
       ...(result === undefined ? {} : { managed: { result } }) }),
   };
   await expect(prepareRelease({ repository: f.repository, tag, out, archive, qualificationEnvironment }))
@@ -134,7 +134,7 @@ test('records all required CI job families in the verified tagged release manife
   const f = await fixture(); const tag = `v${f.version}`;
   await execFile('git', ['-C', f.repository, 'tag', tag]);
   const out = join(f.root, 'qualified candidate');
-  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', tls: 'success', python: 'success', ruby: 'success', php: 'success', go: 'success', java: 'success', typeorm: 'success', prisma: 'success', browser: 'success' };
+  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', tls: 'success', python: 'success', ruby: 'success', php: 'success', go: 'success', java: 'success', typeorm: 'success', prisma: 'success', orms: 'success', browser: 'success' };
   const qualificationEnvironment = {
     GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'pavangupta352/interleave', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2',
     GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: f.ref,

@@ -1,0 +1,8 @@
+{
+  "name": "interleave-knex-example",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": { "node": "22.18.0 || 24.7.0" },
+  "dependencies": { "knex": "3.3.0", "pg": "8.23.0" }
+}
