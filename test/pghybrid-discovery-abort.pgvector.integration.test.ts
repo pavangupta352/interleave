@@ -30,12 +30,15 @@ test.each(['cancel', 'deadline'] as const)('contains the real Postgres.js defaul
     const until = Date.now() + 7000;
     while (!settled && Date.now() < until) {
       names = await readNames();
-      connected = (await admin.query("SELECT 1 FROM pg_stat_activity WHERE datname = ANY($1::text[]) AND application_name = 'pghybrid-adapter-qualification'", [names])).rowCount! > 0;
+      // Idle means PostgreSQL finished startup and sent ReadyForQuery to the driver.
+      connected = (await admin.query("SELECT 1 FROM pg_stat_activity WHERE datname = ANY($1::text[]) AND application_name = 'pghybrid-adapter-qualification' AND state = 'idle'", [names])).rowCount! > 0;
       if (connected) break;
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     expect(connected, 'The actual caller must connect before the intended interruption').toBe(true);
-    if (interruption === 'cancel') controller.abort();
+    // The driver sends its type discovery query as soon as it is ready; the scheduler
+    // holds it. Interrupt only once it is pending, so its rejection is the one contained.
+    if (interruption === 'cancel') { await new Promise(resolve => setTimeout(resolve, 250)); controller.abort(); }
     const run = await running;
     console.log(JSON.stringify({ pghybridDiscoveryAbort: { interruption, outcome: run.outcome, reason: run.reason,
       traceSteps: run.trace.length, sourceBound: Boolean(run.environment.source), cleanup: run.cleanup } }));
