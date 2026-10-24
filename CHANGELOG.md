@@ -12,7 +12,7 @@
 ### Qualified profiles
 
 - Ruby 4.0.5, PHP 8.5.0, Go 1.27.1 and Java 21 programs through `processActor`
-  on PostgreSQL 16 and Node.js 24.7.0. In each, the unsafe checkout oversells,
+  on PostgreSQL 16 with Node.js 22.18.0 and 24.7.0. In each, the unsafe checkout oversells,
   exact replay repeats the failure, an edited program makes exact replay
   incompatible, and the repaired checkout passes a fully explored frontier (47,
   619, 295 and 183 schedules). See

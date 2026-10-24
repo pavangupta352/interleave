@@ -59,7 +59,7 @@ that name instead of the path.
 
 ## What was verified
 
-On macOS (arm64) with PostgreSQL 16 and Node.js 24.7.0, using Ruby 4.0.5,
+On macOS (arm64) with PostgreSQL 16, on both Node.js 22.18.0 and 24.7.0, using Ruby 4.0.5,
 Bundler 4.0.11 and pg 1.6.3 (the arm64-darwin native gem, which bundles libpq
 18.1), an installed-package run of these commands found the oversell (exit 1),
 replayed it exactly (exit 1), reported `incompatible` after `checkout.rb`

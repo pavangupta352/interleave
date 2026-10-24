@@ -60,7 +60,7 @@ first 100 runs of the repaired checkout's search left 158 schedules pending.
 
 ## What was verified
 
-On macOS (arm64) with PostgreSQL 16 and Node.js 24.7.0, using Homebrew PHP 8.5.0
+On macOS (arm64) with PostgreSQL 16, on both Node.js 22.18.0 and 24.7.0, using Homebrew PHP 8.5.0
 (`pdo_pgsql` with libpq 18.1), an installed-package run of these commands found
 the oversell (exit 1), replayed it exactly (exit 1), replayed the same failure
 from a copy of the application in another directory (exit 1), reported

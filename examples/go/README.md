@@ -57,7 +57,7 @@ application's directory.
 
 ## What was verified
 
-On macOS (arm64) with PostgreSQL 16 and Node.js 24.7.0, using Go 1.27.1 and pgx
+On macOS (arm64) with PostgreSQL 16, on both Node.js 22.18.0 and 24.7.0, using Go 1.27.1 and pgx
 5.11.0, an installed-package run of these commands found the oversell (exit 1),
 replayed it exactly (exit 1), replayed the same failure from a copy of the
 application in another directory (exit 1), reported `incompatible` after
