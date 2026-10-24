@@ -38,6 +38,10 @@ function limit(value: number | undefined, fallback: number, max: number, name: s
   return result;
 }
 
+function copiedIn(step: TraceStep): string {
+  return JSON.stringify(step.completion?.kind === 'metadata' ? [] : (step.completion?.copy ?? []).filter(copy => copy.direction === 'in'));
+}
+
 function describeCancel(cancel: CancelRecord): string {
   if (!cancel.forwarded) return 'was not forwarded';
   return cancel.step === undefined ? 'found its backend idle' : `hit step ${cancel.step}`;
@@ -148,6 +152,8 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     failure ??= new Interrupted(outcome, why);
     wake();
   };
+  // Cancel requests and COPY transfers are version 5 evidence, with an explicit connection profile.
+  const requireVersion5 = (): void => { result.schemaVersion = 5; result.limits.connectionProfile = connectionProfile; };
   const retain = (value: unknown): boolean => {
     const bytes = Buffer.byteLength(JSON.stringify(value)) + 128;
     if (evidenceBytes + bytes > maxEvidenceBytes) {
@@ -272,10 +278,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
               pendingCancels++;
               void event.acknowledged.then(() => { pendingCancels--; runtimeEpoch++; wake(); });
             }
-            // Cancel requests are evidence: version 5 records them with an explicit connection profile.
             const index = result.cancels?.length ?? 0;
             if (!retain({ record, connectionProfile })) { wake(); return; }
-            if (!result.cancels) { result.schemaVersion = 5; result.limits.connectionProfile = connectionProfile; result.cancels = []; }
+            if (!result.cancels) { requireVersion5(); result.cancels = []; }
             result.cancels.push(record);
             const owner = pids.get(event.backendPid);
             if (!event.forwarded && owner !== undefined && owner !== actor && livePids.has(event.backendPid)) {
@@ -463,10 +468,14 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       for (const { lane, unit, step } of group) {
         unit.release().then(completion => {
           lane.activityAt = performance.now();
-          if (retain(completion)) {
+          if (retain({ completion, connectionProfile })) {
             step.completedAt = performance.now() - started;
             step.completion = protocolProfile === 'describe-flush-v1' && completion.kind !== 'metadata'
               ? { ...completion, kind: 'ready' } : completion;
+            if (completion.kind !== 'metadata' && completion.copy) requireVersion5();
+            // Data sent by COPY FROM STDIN is application input, like SQL and parameters.
+            const recorded = mode === 'replay' ? options.replay!.trace[step.index] : undefined;
+            if (recorded && copiedIn(recorded) !== copiedIn(step)) stop('incompatible', `Replay COPY data changed for ${describeLane(lane)} at step ${step.index}`);
           }
           delete lane.running;
           runtimeEpoch++;

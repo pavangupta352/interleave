@@ -59,6 +59,7 @@
     "drizzle-orm": "0.45.2",
     "esbuild": "0.28.2",
     "kysely": "0.29.5",
+    "pg-copy-streams": "7.0.0",
     "playwright": "1.63.0",
     "postgres": "3.4.9",
     "tsx": "4.23.13",

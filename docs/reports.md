@@ -41,6 +41,10 @@ inspector names the partner step, explains that a replay cannot force the same
 interleaving, and **Select step N** moves to the partner, clearing filters that
 hide it.
 
+A command that ran COPY lists each transfer with its completion: **COPY from
+client** or **COPY to client**, the byte count and the SHA-256 digest of the
+copied data. The copied rows are not shown.
+
 When the application sent a cancel request while a command ran, that command says
 **Cancel request** next to its result, usually SQLSTATE 57014, and searching for
 "cancel request" finds it. The summary counts the requests. The inspector shows

@@ -342,6 +342,9 @@ function renderInspector(): void {
     } else if (step.completion) {
       addFact(facts, 'Command tags', step.completion.commandTags.join(' · ') || 'None'); addFact(facts, 'Rows affected / returned', String(step.completion.rowCount));
       addFact(facts, 'Transaction', ({ I: 'Idle', T: 'In transaction', E: 'Failed transaction' })[step.completion.transactionStatus]);
+      for (const copy of step.completion.copy ?? []) {
+        addFact(facts, copy.direction === 'in' ? 'COPY from client' : 'COPY to client', `${copy.bytes.toLocaleString('en-US')} ${copy.bytes === 1 ? 'byte' : 'bytes'} · SHA-256 ${copy.sha256}`);
+      }
     }
     addFact(facts, 'Released', formatMs(step.releasedAt)); if (step.completedAt !== undefined) addFact(facts, 'Completed', formatMs(step.completedAt));
     const other = partner(step);

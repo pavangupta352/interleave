@@ -153,7 +153,7 @@ export class FrontendAssembler {
   accept(frame: Buffer): FrontendUnit | undefined {
     const type = String.fromCharCode(frame[0]!); const reader = new Reader(frame);
     if (type === 'H') throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync');
-    if ('dcf'.includes(type)) throw new Error('Unsupported profile: streaming COPY');
+    if ('dcf'.includes(type)) throw new Error('Unsupported profile: COPY data outside COPY FROM STDIN');
     if (type === 'Q') {
       if (this.bytes) throw new Error('Unsupported profile: Simple Query inside an unfinished extended cycle');
       const sql = reader.cstring(); reader.done();
@@ -233,7 +233,7 @@ export class FrontendCycleBuffer {
       if (!this.staged) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync');
       if (this.hasPrefix || this.frames.length !== 2 || this.frames[0]![0] !== 80 || this.frames[1]![0] !== 68 || frame.length !== 5) throw new Error('Unsupported profile: early Flush requires one Parse/Describe prefix');
     }
-    if ('dcf'.includes(type)) throw new Error('Unsupported profile: streaming COPY');
+    if ('dcf'.includes(type)) throw new Error('Unsupported profile: COPY data outside COPY FROM STDIN');
     if (type === 'Q') {
       if (this.bytes || this.hasPrefix) throw new Error('Unsupported profile: Simple Query inside an unfinished extended cycle');
       return [frame];

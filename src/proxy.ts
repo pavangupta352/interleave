@@ -1,5 +1,5 @@
 import net, { type Socket } from 'node:net';
-import { createHash } from 'node:crypto';
+import { createHash, type Hash } from 'node:crypto';
 import { resolvePostgresTransport, restorePostgresTransport } from './postgres-transport.js';
 import { connectPostgresUpstream, DeferredUpstream, UpstreamConnectionError } from './protocol/upstream-transport.js';
 import { BackendSummary, MetadataSummary } from './protocol/backend.js';
@@ -198,7 +198,12 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     interface Queued { frames: Buffer[]; byteLength: number; ordinal: number; unit?: PendingUnit }
     const queue: Queued[] = [];
     let prefix: { original: FrontendUnit; cycle: number; ordinal: number; complete: boolean; error?: { code: string; message: string } } | undefined;
-    let inFlight: { original: FrontendUnit; summary: BackendSummary | MetadataSummary; errorSeen: boolean; resolve(value: UnitCompletion): void; reject(error: Error): void } | undefined;
+    interface CopyMeter { direction: 'in' | 'out'; bytes: number; hash: Hash }
+    let inFlight: { original: FrontendUnit; summary: BackendSummary | MetadataSummary; errorSeen: boolean; copies: CopyMeter[]; resolve(value: UnitCompletion): void; reject(error: Error): void } | undefined;
+    // COPY FROM STDIN streams the client's copy messages upstream as part of the in-flight
+    // unit; `counting` ends when PostgreSQL ends the copy, `ended` when the client does.
+    let copyIn: { unit: object; meter: CopyMeter; counting: boolean; ended: boolean } | undefined;
+    let copyOut: CopyMeter | undefined;
     function checkRetained(): void {
       const inFlightBytes = inFlight?.original.bytes.length ?? 0;
       const prefixBytes = prefix && prefix.original !== inFlight?.original ? prefix.original.bytes.length : 0;
@@ -271,7 +276,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           if (stage === 'complete' || stage === 'describe') nextCycle++;
           if (stage === 'describe') prefix = { original: retained, cycle, ordinal: entry.ordinal, complete: false };
           return new Promise<UnitCompletion>((resolve, reject) => {
-            inFlight = { original: retained, summary: stage === 'describe' ? new MetadataSummary() : new BackendSummary(prefixError), errorSeen: Boolean(prefixError), resolve, reject };
+            inFlight = { original: retained, summary: stage === 'describe' ? new MetadataSummary() : new BackendSummary(prefixError), errorSeen: Boolean(prefixError), copies: [], resolve, reject };
             guard(() => { checkRetained(); write(upstream, retained.bytes, client); });
           });
         },
@@ -328,6 +333,24 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           }
           write(upstream, frame, client); continue;
         }
+        if (copyIn) {
+          const active = inFlight !== undefined && inFlight === copyIn.unit;
+          if ('dcf'.includes(type)) {
+            // After PostgreSQL ends a copy it discards further copy messages, as it would directly.
+            if (type === 'd') { if (copyIn.counting) { copyIn.meter.bytes += frame.length - 5; copyIn.meter.hash.update(frame.subarray(5)); } }
+            else { copyIn.counting = false; copyIn.ended = true; }
+            write(upstream, frame, client); continue;
+          }
+          if (active && (type === 'H' || type === 'S')) {
+            // PostgreSQL ignores Flush and Sync during copy-in. After an extended
+            // cycle's CopyDone, the client's Sync is what completes the cycle.
+            if (type === 'S' && copyIn.ended) copyIn = undefined;
+            write(upstream, frame, client); continue;
+          }
+          if (active && !copyIn.ended) throw new Error('Unsupported profile: frontend message during COPY FROM STDIN');
+          copyIn = undefined;
+        }
+        if ('dcf'.includes(type)) throw new Error('Unsupported profile: COPY data outside COPY FROM STDIN');
         if (type === 'X') {
           if (frame.length !== 5) throw new Error('Malformed Terminate message');
           if (queue.length || cycles.bufferedBytes || (prefix && (!inFlight || inFlight.original.stage === 'describe')) || (inFlight && !inFlight.errorSeen)) throw new Error('Actor disconnected with unfinished scheduled work');
@@ -354,7 +377,21 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       for (const frame of backend.push(chunk)) {
         if (closed || failed) break;
         const type = String.fromCharCode(frame[0]!);
-        if ('GHW'.includes(type)) throw new Error('Unsupported profile: streaming COPY');
+        if (type === 'W') throw new Error('Unsupported profile: COPY BOTH is used only by replication');
+        if (type === 'G' || type === 'H') {
+          if (!inFlight || inFlight.summary instanceof MetadataSummary || copyOut || (copyIn && copyIn.unit === inFlight && !copyIn.ended)) {
+            throw new Error('Unsupported profile: COPY response outside a released command');
+          }
+          const meter: CopyMeter = { direction: type === 'G' ? 'in' : 'out', bytes: 0, hash: createHash('sha256') };
+          inFlight.copies.push(meter);
+          if (type === 'G') copyIn = { unit: inFlight, meter, counting: true, ended: false }; else copyOut = meter;
+        } else if (type === 'd' || type === 'c') {
+          if (!copyOut) throw new Error('Unsupported profile: backend COPY data outside COPY TO STDOUT');
+          if (type === 'd') { copyOut.bytes += frame.length - 5; copyOut.hash.update(frame.subarray(5)); } else copyOut = undefined;
+        } else if (type === 'C' || type === 'E') {
+          copyOut = undefined;
+          if (copyIn && copyIn.unit === inFlight) copyIn.counting = false;
+        }
         if (type === 'K') {
           if (frame.length !== 13) throw new Error('Unsupported backend key format');
           backendPid = frame.readInt32BE(5); // Deliberately never retain or emit the secret key.
@@ -384,6 +421,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
           } else {
             prefix = undefined;
             if (staged) completion.kind = 'ready';
+            if (current.copies.length) completion.copy = current.copies.map(({ direction, bytes, hash }) => ({ direction, bytes, sha256: hash.digest('hex') }));
           }
           current.resolve(completion);
           if (pendingTerminate) { const frame = pendingTerminate; pendingTerminate = undefined; upstream.end(frame); }

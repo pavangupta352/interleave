@@ -380,3 +380,28 @@ export async function checkCancelReport(page, url, artifact, legacy) {
     return { checks: ['real cancelled command', 'request not forwarded', 'cancelled command selected', 'cancel accessible name', 'cancel tag in every layout', 'cancel count', 'scope note', 'inspector arrival and caveat', 'cancel search', 'record details in arrival order', 'mobile overflow', 'legacy without cancels', 'no errors or external requests'] };
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }
+
+/** A command that ran COPY lists each transfer's direction, byte count and digest, never the rows. */
+export async function checkCopyReport(page, url, artifact) {
+  const errors = [], requests = [];
+  const onError = error => errors.push(error.message);
+  const onRequest = request => { if (request.url() !== url) requests.push(request.url()); };
+  page.on('pageerror', onError); page.on('request', onRequest);
+  try {
+    await page.goto(url);
+    await page.getByRole('heading', { name: artifact.scenario, exact: true }).waitFor();
+    for (const direction of ['in', 'out']) {
+      const step = artifact.trace.find(candidate => candidate.completion?.copy?.[0]?.direction === direction);
+      assert.ok(step, `The real run recorded a COPY ${direction}`);
+      const [transfer] = step.completion.copy;
+      await page.locator(`.command[data-step="${step.index}"]`).click();
+      const completion = await page.locator('.inspector-section').filter({ hasText: 'PostgreSQL completion' }).textContent();
+      assert.ok(completion.includes(`${direction === 'in' ? 'COPY from client' : 'COPY to client'}${transfer.bytes} bytes · SHA-256 ${transfer.sha256}`), `The completion lists the COPY ${direction} transfer`);
+      assert.ok(!completion.includes('apple'), 'Copied rows are not displayed as completion evidence');
+    }
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'COPY digests fit the viewport');
+    assert.equal(await page.getByText(/undefined|NaN/).count(), 0);
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    return { checks: ['real COPY in', 'real COPY out', 'transfer digests', 'rows not displayed', 'mobile overflow', 'no errors or external requests'] };
+  } finally { page.off('pageerror', onError); page.off('request', onRequest); }
+}

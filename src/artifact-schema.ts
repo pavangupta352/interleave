@@ -4,6 +4,7 @@ import type {
   ActorResult,
   CancelRecord,
   ConnectionIdentity,
+  CopyTransfer,
   Failure,
   MetadataCompletion,
   RunResult,
@@ -179,7 +180,7 @@ export function parseRunArtifact(input: unknown): RunResult {
   const ordinalByConnection = new Map<string, number>();
   const trace: TraceStep[] = [];
   for (let index = 0; index < traceValues.length; index += 1) {
-    const step = validateTraceStep(traceValues[index], index, traceVersion, lanes, overlap);
+    const step = validateTraceStep(traceValues[index], index, traceVersion, lanes, overlap, version === 5);
     if (connections !== undefined && !connectionKeys.has(`${step.actor}\0${step.connection}`)) {
       throw new TypeError(`$.trace[${index}]: command references an unrecorded actor startup`);
     }
@@ -205,9 +206,11 @@ export function parseRunArtifact(input: unknown): RunResult {
   }
 
   if (overlap) validateOverlapPairs(trace, lanes);
-  if (version === 5) field(root, 'cancels', '$');
-  else if (hasOwn(root, 'cancels')) throw new TypeError('$.cancels: cancel requests require version 5');
-  const cancels = version === 5 ? validateCancels(root.cancels, trace, connectionKeys, durationMs) : [];
+  if (version !== 5 && hasOwn(root, 'cancels')) throw new TypeError('$.cancels: cancel requests require version 5');
+  const cancels = hasOwn(root, 'cancels') ? validateCancels(root.cancels, trace, connectionKeys, durationMs) : [];
+  if (version === 5 && !cancels.length && !trace.some(step => step.completion?.kind !== 'metadata' && step.completion?.copy)) {
+    throw new TypeError('$: a version 5 record has at least one cancel request or COPY transfer; use version 3 or 4');
+  }
   for (const cancel of cancels) allActorNames.add(cancel.actor);
   for (let index = 0; index < trace.length; index += 1) {
     const step = trace[index]!;
@@ -424,7 +427,7 @@ function validateTransportIdentity(value: unknown, path: string): void {
  */
 function validateCancels(value: unknown, trace: TraceStep[], connectionKeys: Set<string>, durationMs: number): CancelRecord[] {
   const values = arrayValue(value, '$.cancels', MAX_ARRAY_ITEMS);
-  if (!values.length) throw new TypeError('$.cancels: a version 5 record lists at least one cancel request; use version 3 or 4');
+  if (!values.length) throw new TypeError('$.cancels: omit cancels when no cancel request arrived');
   const pidByConnection = new Map<string, number>();
   for (const step of trace) pidByConnection.set(`${step.actor}\0${step.connection}`, step.backendPid);
   const cancels: CancelRecord[] = [];
@@ -486,7 +489,7 @@ function validateOverlapPairs(trace: TraceStep[], lanes: boolean): void {
   }
 }
 
-function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes: boolean, overlap: boolean): TraceStep {
+function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes: boolean, overlap: boolean, copies: boolean): TraceStep {
   const path = `$.trace[${index}]`;
   const step = shape(value, path, [
     'index', 'actor', 'connection', 'ordinal', 'protocol', 'sql', 'fingerprint',
@@ -552,7 +555,7 @@ function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes:
   }
   let completion: UnitCompletion | undefined;
   if (hasCompletion) {
-    completion = validateCompletion(step.completion, `${path}.completion`, version, stage === 'describe');
+    completion = validateCompletion(step.completion, `${path}.completion`, version, stage === 'describe', copies);
     if (stage === 'recover' && completion.kind !== 'metadata' && (completion.commandTags.length !== 0 || completion.rowCount !== 0)) {
       throw new TypeError(`${path}.completion: Sync-only recovery cannot complete executed commands or rows`);
     }
@@ -586,10 +589,10 @@ function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes:
   };
 }
 
-function validateCompletion(value: unknown, path: string, version: 1 | 2, metadata: boolean): UnitCompletion {
+function validateCompletion(value: unknown, path: string, version: 1 | 2, metadata: boolean, copies: boolean): UnitCompletion {
   if (metadata) return validateMetadataCompletion(value, path);
   const completion = shape(value, path, [
-    'transactionStatus', 'commandTags', 'rowCount', 'error', ...(version === 2 ? ['kind'] : []),
+    'transactionStatus', 'commandTags', 'rowCount', 'error', ...(version === 2 ? ['kind'] : []), ...(copies ? ['copy'] : []),
   ], ['transactionStatus', 'commandTags', 'rowCount', ...(version === 2 ? ['kind'] : [])]);
   if (version === 2 && completion.kind !== 'ready') throw new TypeError(`${path}.kind: expected ready completion`);
   const transactionStatus = enumValue(
@@ -617,7 +620,23 @@ function validateCompletion(value: unknown, path: string, version: 1 | 2, metada
       message: boundedString(errorValue.message, `${path}.error.message`, 0, MAX_GENERAL_STRING_BYTES),
     };
   }
-  return { ...(version === 2 ? { kind: 'ready' as const } : {}), transactionStatus, commandTags, rowCount, ...(error === undefined ? {} : { error }) };
+  const copy = hasOwn(completion, 'copy') ? validateCopyTransfers(completion.copy, `${path}.copy`) : undefined;
+  return { ...(version === 2 ? { kind: 'ready' as const } : {}), transactionStatus, commandTags, rowCount, ...(error === undefined ? {} : { error }), ...(copy ? { copy } : {}) };
+}
+
+const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+/** Version 5: byte counts and SHA-256 digests of the CopyData each COPY moved. */
+function validateCopyTransfers(value: unknown, path: string): CopyTransfer[] {
+  const values = arrayValue(value, path, MAX_COMMAND_TAGS);
+  if (!values.length) throw new TypeError(`${path}: omit copy when the command moved no COPY data`);
+  return values.map((item, index) => {
+    const transfer = shape(item, `${path}[${index}]`, ['direction', 'bytes', 'sha256'], ['direction', 'bytes', 'sha256']);
+    const direction = enumValue(transfer.direction, `${path}[${index}].direction`, ['in', 'out']);
+    const bytes = safeInteger(transfer.bytes, `${path}[${index}].bytes`, 0);
+    const sha256 = fingerprintValue(transfer.sha256, `${path}[${index}].sha256`);
+    if ((bytes === 0) !== (sha256 === EMPTY_SHA256)) throw new TypeError(`${path}[${index}].sha256: contradicts the byte count`);
+    return { direction, bytes, sha256 };
+  });
 }
 
 function validateMetadataCompletion(value: unknown, path: string): MetadataCompletion {

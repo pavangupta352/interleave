@@ -143,6 +143,50 @@ Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, libpq `PQcancel` called
 directly, pgjdbc `Statement.setQueryTimeout`, and Firefox and WebKit for the
 report.
 
+## Streaming COPY
+
+`COPY ... FROM STDIN` and `COPY ... TO STDOUT` run as one scheduled command.
+Once Interleave releases it and PostgreSQL starts the copy, the client's
+CopyData, CopyDone and CopyFail messages go upstream at once, and PostgreSQL's
+copied rows go to the client, with backpressure in both directions. The command
+completes at ReadyForQuery. For an extended-protocol COPY, which libpq's
+`PQsendQueryParams` sends, the Sync that the client sends after CopyDone stays
+part of the same command. Each CopyData message is limited to 16 MiB, the
+proxy's message limit.
+
+Records that contain COPY use schema version 5. Each COPY in a command's
+completion lists its direction, byte count and the SHA-256 digest of the copied
+data; the rows themselves are not recorded. Data sent with COPY FROM STDIN is
+application input, so exact replay requires the same bytes and reports
+`incompatible` when they change. Copied-out data is a result, like rows, and is
+not compared. Replication's COPY BOTH is refused.
+
+Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
+
+- pg-copy-streams 7.0.0 with node-postgres 8.23.0 copied in and out with exact
+  replay, and replay with changed input rows was `incompatible`.
+- Postgres.js 3.4.9 `writable()` and `readable()` streams, in the
+  `describe-flush-v1` profile, with exact replay.
+- A destroyed pg-copy-streams stream sent CopyFail after one row: PostgreSQL
+  answered SQLSTATE 57014, the record kept the 8 bytes sent, and the next query
+  on that connection ran.
+- 200,000 rows (19,488,890 bytes) copied in, then read back slowly through COPY
+  TO STDOUT, kept their exact byte counts and digests.
+- Two actors copying the same key in open transactions: the second copy waited
+  for the first actor's transaction, the scheduler observed that lock wait and
+  released the first actor's COMMIT, the second copy failed with 23505, and the
+  run replayed exactly.
+- psycopg 3.3.6 `copy()` in both directions, and an extended-protocol COPY
+  through libpq 18.0's `PQsendQueryParams`, from a Python process actor, with
+  exact replay.
+- node-postgres without a copy stream: copied-out data was measured and
+  discarded by the driver, and a copy in failed with the driver's own CopyFail.
+- The report listed each transfer's direction, byte count and digest in
+  Chromium at desktop and mobile sizes.
+
+Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, pgjdbc `CopyManager`,
+binary-format COPY, and Firefox and WebKit for the report.
+
 ## PostgreSQL 17 with pgvector 0.8.6
 
 The separate `postgresql17-pgvector0.8.6-v1` fixture profile is qualified on
@@ -223,9 +267,9 @@ Other clients are expected to work when they read `DATABASE_URL` or the libpq
 stay within the qualified protocol subset. Examples include libpq-based drivers,
 pgx, Npgsql and JDBC. That subset covers simple queries and ordinary extended
 cycles, including pipelined cycles that each end with Sync, and
-[cancel requests](#cancel-requests); it does not include COPY, or cursors and
-pipelines that wait on Flush. Those clients have not been qualified. Treat them
-as unverified until their own workflow runs.
+[cancel requests](#cancel-requests) and [streaming COPY](#streaming-copy); it
+does not include cursors and pipelines that wait on Flush. Those clients have
+not been qualified. Treat them as unverified until their own workflow runs.
 
 ## TypeORM
 

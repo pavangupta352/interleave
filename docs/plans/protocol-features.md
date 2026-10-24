@@ -1,11 +1,12 @@
 # Cancellation, COPY and cursors
 
-Status, 25 October 2026: cancellation routing is implemented (section 1; see
-[cancel requests](../compatibility.md#cancel-requests) for what was checked).
-COPY and cursors are still refused with an explicit `Unsupported profile` error,
-so an application that uses them stops before any evidence is recorded. This
-plan adds them one at a time, in the order below, each with integration tests
-against real PostgreSQL and a real driver.
+Status, 25 October 2026: cancellation routing and streaming COPY are
+implemented (sections 1 and 2; see [cancel requests](../compatibility.md#cancel-requests)
+and [streaming COPY](../compatibility.md#streaming-copy) for what was checked).
+Cursors that wait on Flush are still refused with an explicit `Unsupported
+profile` error, so an application that uses them stops before any evidence is
+recorded. Each item has integration tests against real PostgreSQL and a real
+driver.
 
 ## 1. Cancellation routing
 

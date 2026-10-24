@@ -17,6 +17,14 @@
   forwarded and the step it reached. Secret keys are never recorded. Exact replay
   requires each request to reach the same step, or find its backend idle. The
   report tags the command a request reached and lists every request.
+- Stream `COPY ... FROM STDIN` and `COPY ... TO STDOUT` through the proxy, from
+  pg-copy-streams, Postgres.js `writable()` and `readable()`, psycopg `copy()`
+  and libpq, including extended-protocol COPY. The copy is part of one scheduled
+  command, with backpressure in both directions, and a copy that waits on
+  another actor's lock is observed like any other wait. Version 5 completions
+  record each COPY's direction, byte count and SHA-256 digest, never the rows;
+  exact replay requires the same COPY FROM STDIN data. COPY BOTH, used only by
+  replication, is still refused.
 
 ## 0.2.0 — 25 October 2026
 

@@ -155,9 +155,11 @@ isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize
   released pair interleaves, so replaying such a failure can succeed only some of
   the time.
 - By default each actor holds one command-producing connection at a time; the
-  `multi-producer-v1` profile schedules several. COPY and cursors or pipelines
-  that wait on Flush are not supported and fail explicitly. Pipelined queries
-  that end each cycle with Sync are scheduled one cycle at a time.
+  `multi-producer-v1` profile schedules several. `COPY ... FROM STDIN` and
+  `COPY ... TO STDOUT` stream through as part of one command. Cursors and
+  pipelines that wait on Flush, and replication's COPY BOTH, are not supported
+  and fail explicitly. Pipelined queries that end each cycle with Sync are
+  scheduled one cycle at a time.
 - A cancel request reaches PostgreSQL only when it names a connection of the
   actor that sent it, and the record lists every request. The application's own
   timers decide when a request arrives, so replaying one can find a different

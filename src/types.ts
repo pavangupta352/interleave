@@ -42,6 +42,14 @@ export interface Scenario {
   invariant(context: DatabaseContext & { results: ActorResult[] }): Promise<void>;
 }
 
+/** Version 5: the data one COPY moved, as PostgreSQL's CopyData payloads. */
+export interface CopyTransfer {
+  /** `in` for COPY FROM STDIN, sent by the client; `out` for COPY TO STDOUT. */
+  direction: 'in' | 'out';
+  bytes: number;
+  sha256: string;
+}
+
 export interface ReadyCompletion {
   /** Required in version 2 artifacts; absent in original version 1 records. */
   kind?: 'ready';
@@ -49,6 +57,8 @@ export interface ReadyCompletion {
   commandTags: string[];
   rowCount: number;
   error?: { code: string; message: string };
+  /** Version 5: each COPY in the command, in order. */
+  copy?: CopyTransfer[];
 }
 
 export type MetadataCompletion = {
