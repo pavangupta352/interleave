@@ -44,6 +44,12 @@ test.each([false, true])('clean install preserves app pg 8.11.5 and bundled runt
   const runtimeRoot = new URL('../', import.meta.url).pathname;
   const bound = await bindExportFixture(inertRun, { projectRoot, scenarioFile, runtimeRoot });
   const exported = await exportRegression(bound, { projectRoot, scenarioFile, destination: join(root, 'ready'), runtimeRoot });
+  // The runtime lock keeps every runtime dependency at the version the recording had
+  // installed, even when the registry has newer releases in range.
+  const lockedRuntime = (await json(join(exported.destination, 'package-lock.json'))).packages as Record<string, { version: string }>;
+  for (const item of bound.environment.source!.components.runtime.dependencies.packages) {
+    expect(lockedRuntime[`node_modules/${item.name}`]?.version, item.name).toBe(item.version);
+  }
   const appLockBefore = await readFile(join(exported.destination, 'app/package-lock.json'), 'utf8');
   const runtimeLockBefore = await readFile(join(exported.destination, 'package-lock.json'), 'utf8');
   for (const [command, ...args] of exported.replay.install) execute(command, [...args, '--ignore-scripts'], exported.destination);

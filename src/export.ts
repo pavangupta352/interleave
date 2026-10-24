@@ -202,7 +202,7 @@ export async function exportRegression(
     } else {
       fileRecords.push(fileRecord(runtime.relativePath, 'interleave-runtime', runtime.bytes));
       await assertOwnership();
-      await createRuntimeLock(staging, runtime, fileRecords);
+      await createRuntimeLock(staging, runtime, fileRecords, recordedSource);
     }
     assertSameSourceIdentity(recordedSource, await captureExportSourceIdentity(scenarioPath, sourceOptions, runtimeRoot));
     if (artifactPath && originalArtifact && !(await readOrdinaryFile(artifactPath)).equals(originalArtifact)) throw new Error('Original artifact changed while being exported');
@@ -344,7 +344,9 @@ export async function verifyRegressionExport(directory: string): Promise<Regress
     bytes: await readOrdinaryFile(join(root, manifest.runtime.package), MAX_FILE_BYTES, root),
   });
   const runtimePackage = jsonObject(runtimePackageBytes, 'Runtime installation package');
-  if (JSON.stringify(runtimePackage) !== JSON.stringify(runtimeInstallationPackage(manifest.runtime.package))) {
+  // Exports from before version pinning carry no overrides; both forms name only the bundled runtime.
+  const expected = [runtimeInstallationPackage(manifest.runtime.package, runtimeDependencyPins(recordedSource)), runtimeInstallationPackage(manifest.runtime.package)];
+  if (!expected.some(item => JSON.stringify(item) === JSON.stringify(runtimePackage))) {
     throw new Error('Runtime installation manifest does not match the declared bundled runtime');
   }
   await validateLockedTree(join(root, 'app'));
@@ -717,17 +719,43 @@ async function validateLockedTree(directory: string): Promise<void> {
   await runCommand(npmExecutable(), ['ls', '--package-lock-only', '--all', '--json', '--ignore-scripts', '--include=dev', '--include=optional', '--include=peer'], directory);
 }
 
-function runtimeInstallationPackage(tarball: string): Record<string, unknown> {
-  return { name: 'interleave-regression-runtime', version: '1.0.0', private: true, dependencies: { '@pavangupta352/interleave': `file:${tarball}` } };
+function runtimeInstallationPackage(tarball: string, pins?: Record<string, string>): Record<string, unknown> {
+  return { name: 'interleave-regression-runtime', version: '1.0.0', private: true, dependencies: { '@pavangupta352/interleave': `file:${tarball}` },
+    ...(pins ? { overrides: pins } : {}) };
 }
 
-async function createRuntimeLock(root: string, runtime: RuntimePackage, records: RegressionFile[]): Promise<void> {
-  const metadata = Buffer.from(`${JSON.stringify(runtimeInstallationPackage(runtime.relativePath), null, 2)}\n`);
+/**
+ * The exact versions the recorded runtime had installed. Without them, npm would
+ * resolve the runtime's dependency ranges to the newest releases, and a release
+ * published after the recording would make the exported runtime differ from it.
+ */
+/** @internal Exported for tests. */
+export function runtimeDependencyPins(source: Pick<SourceIdentity, 'components'>): Record<string, string> | undefined {
+  const versions = new Map<string, Set<string>>();
+  for (const item of source.components.runtime.dependencies.packages) {
+    const seen = versions.get(item.name) ?? new Set<string>();
+    seen.add(item.version); versions.set(item.name, seen);
+  }
+  // A name installed in several versions cannot be pinned by name; the replay's
+  // runtime identity check still reports any difference.
+  const pins = [...versions].filter(([, seen]) => seen.size === 1).map(([name, seen]) => [name, [...seen][0]!] as const)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return pins.length ? Object.fromEntries(pins) : undefined;
+}
+
+async function createRuntimeLock(root: string, runtime: RuntimePackage, records: RegressionFile[], source: SourceIdentity): Promise<void> {
+  const pins = runtimeDependencyPins(source);
+  const metadata = Buffer.from(`${JSON.stringify(runtimeInstallationPackage(runtime.relativePath, pins), null, 2)}\n`);
   await writeGeneratedFile(root, 'package.json', 'runtime-manifest', metadata, records);
   await runCommand(npmExecutable(), ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], root);
   const lock = await readOrdinaryFile(join(root, 'package-lock.json'), MAX_FILE_BYTES, root);
   validatePackageLock(metadata, lock, runtime.relativePath);
   validateRuntimeBinding(lock, runtime);
+  for (const [path, value] of Object.entries(plainObject(jsonObject(lock, 'Runtime dependency lock').packages, 'Runtime lock packages'))) {
+    const name = path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
+    const version = plainObject(value, `Locked runtime dependency ${path}`).version;
+    if (path && pins?.[name] !== undefined && version !== pins[name]) throw new Error(`Runtime lock could not keep ${name} at its recorded version ${pins[name]}`);
+  }
   records.push(fileRecord('package-lock.json', 'runtime-lock', lock));
 }
 

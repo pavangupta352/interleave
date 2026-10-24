@@ -298,7 +298,11 @@ For separate installations, the commands perform these operations:
 1. `npm ci --prefix app` installs the selected application's locked dependencies.
 2. `npm ci` installs the hashed bundled runtime and its separately locked
    dependencies in the regression root. Application dependencies remain in
-   `app/node_modules` according to the application lock.
+   `app/node_modules` according to the application lock. The runtime lock keeps
+   each of Interleave's own dependencies at the version the recording had
+   installed: the root `package.json` lists those versions as npm `overrides`, so
+   a newer release published after the recording cannot change the replayed
+   runtime.
 3. `node node_modules/@pavangupta352/interleave/dist/cli.js replay
    <scenario-entry> run.json --project-root app` performs strict replay through
    that bundled runtime and inherits the recording's include declarations.

@@ -2,8 +2,8 @@
 
 ## 0.2.0 — 25 October 2026
 
-Schedule actors that use several connections at once, explore races inside a
-single statement, and record Prisma ORM 7 applications.
+Interleave can now schedule actors that use several connections at once,
+explore races inside a single statement, and record Prisma ORM 7 applications.
 
 ### Features
 
@@ -48,6 +48,15 @@ single statement, and record Prisma ORM 7 applications.
   waiting for; the parent's backstop now follows the worker's deadline.
 - A fixture capture that is not quiescent names how many other sessions were busy
   and their states.
+
+### Fixes
+
+- Exports in the separate installation profile pin Interleave's own dependencies
+  to the versions the recording had installed. Before, a dependency release
+  published after the recording made the exported runtime differ from it, and the
+  export's exact replay reported `incompatible`. This started when pg-protocol
+  1.16.1, pg-connection-string 2.14.1 and pg-cloudflare 1.4.1 were published on
+  30 September 2026, and also affects 0.1.0.
 
 ### Qualified profiles
 
