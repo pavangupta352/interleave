@@ -1,5 +1,6 @@
 node_modules/
 dist/
+examples/prisma/generated/
 coverage/
 .local/
 .interleave/
