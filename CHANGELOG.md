@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — 27 September 2026
+## 0.2.0 — 25 October 2026
 
 Schedule actors that use several connections at once, explore races inside a
 single statement, and record Prisma ORM 7 applications.
