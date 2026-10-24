@@ -46,6 +46,7 @@
     "test:typeorm": "node scripts/test-typeorm.mjs",
     "test:typeorm-functional": "node scripts/test-typeorm-functional.mjs",
     "test:prisma": "node scripts/test-prisma.mjs",
+    "test:orms": "node scripts/test-orms.mjs",
     "pretest": "npm run build",
     "pretest:unit": "npm run build",
     "pretest:integration": "npm run build"
