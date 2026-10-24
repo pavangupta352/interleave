@@ -132,6 +132,7 @@ The same workflow is available from JavaScript: `explore`, `runOnce`,
 | Drizzle 0.45.2, Kysely 0.29.5 | Ordinary query-builder CRUD and transactions over node-postgres, each actor with its own pool |
 | TypeORM 1.1.1 and 0.3.31 | A per-actor DataSource helper with transactions and serialization-failure retry, on Node.js 22.18; [example](examples/typeorm/README.md) |
 | Prisma ORM 7.10.0 | `@prisma/adapter-pg` over node-postgres 8.23.0 with the generated client recorded as source, on Node.js 22.18 and 24.7; [example](examples/prisma/README.md). Portable export is not supported for this client |
+| Sequelize 6.37.8, Knex 3.3.0, MikroORM 6.6.17 | Per-actor helpers over node-postgres 8.23.0 with each ORM's own transactions and startup commands, serialization-failure retry and portable export, on Node.js 22.18 and 24.7; [Sequelize](examples/sequelize/README.md), [Knex](examples/knex/README.md) and [MikroORM](examples/mikro-orm/README.md) examples |
 | Any language | `processActor` runs a separate program as an actor; qualified with Python and psycopg 3.3.6 ([example](examples/python/README.md)) |
 | Connection pools | `--connection-profile multi-producer-v1` schedules each connection of an actor: `pg.Pool` with `max: 2`, a Kysely side query beside a transaction, Postgres.js with `max: 2` ([details](docs/compatibility.md#multi-connection-actors)) |
 | Races inside one statement | `--overlap pairs` releases two commands together and lets PostgreSQL interleave them ([details](docs/compatibility.md#statement-overlap)) |

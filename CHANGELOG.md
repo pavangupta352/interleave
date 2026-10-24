@@ -14,6 +14,20 @@
   case. Without an archive option, export still uses the separate installation,
   and its error for a local archive entry now names the two options.
 
+### Qualified profiles
+
+- Sequelize 6.37.8, Knex 3.3.0 and MikroORM 6.6.17 over node-postgres 8.23.0 on
+  PostgreSQL 16, 17 and 18 with Node.js 22.18.0 and 24.7.0, through isolated
+  [Sequelize](examples/sequelize/README.md), [Knex](examples/knex/README.md) and
+  [MikroORM](examples/mikro-orm/README.md) examples with per-actor helpers. The
+  installed-package gate `npm run test:orms` runs 14 checks per row, including
+  exact replay, minimization, guided replay of a repair, retry, cancellation and
+  portable export. The MikroORM helper turns off `ensureDatabase`, whose SQL
+  contains the generated database name. See
+  [compatibility](docs/compatibility.md#sequelize-knex-and-mikroorm).
+- The new `orms` CI job family runs that gate for every row, and release
+  candidates require it.
+
 ## 0.2.0 — 25 October 2026
 
 Interleave can now schedule actors that use several connections at once,

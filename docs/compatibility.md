@@ -179,6 +179,111 @@ The [TypeORM example](../examples/typeorm/README.md) gives each actor its own Da
 
 TypeORM 1.1.1 requires Node.js 20.19+, 22.13+ or 24.11+, so Node.js 24.7 is not a supported row. Closing a TypeORM client is not a PostgreSQL CancelRequest: a blocked backend can keep waiting until its blocker finishes or the generated database is cleaned up. Relations, `manager.transaction()`, pessimistic locks and deadlock retry have not been qualified.
 
+## Sequelize, Knex and MikroORM
+
+The [Sequelize](../examples/sequelize/README.md), [Knex](../examples/knex/README.md)
+and [MikroORM](../examples/mikro-orm/README.md) examples give each actor its own
+ORM instance with a pool of one connection over node-postgres 8.23.0. The helpers
+keep each ORM's own transaction API and startup commands. The MikroORM helper
+turns off `ensureDatabase`, whose SQL contains the generated database name, so
+exact replay could never match it.
+
+| ORM | Installed packages | Commands per actor before the first application query |
+| --- | --- | --- |
+| Sequelize 6.37.8 | `sequelize` 6.37.8, `pg` 8.23.0 | Three. Session settings and a type query on a version connection that Sequelize closes, then the session settings again on the pool connection |
+| Knex 3.3.0 | `knex` 3.3.0, `pg` 8.23.0 | One: `select version();` |
+| MikroORM 6.6.17 | `@mikro-orm/core`, `@mikro-orm/knex` and `@mikro-orm/postgresql` 6.6.17, `knex` 3.2.10, `pg` 8.23.0, and `pg` 8.20.0 nested under `@mikro-orm/postgresql` for type parsers only | Two: `select version();` and `select 1` |
+
+`npm run test:orms`, with `INTERLEAVE_ORM` set to `sequelize`, `knex` or
+`mikro-orm`, installs the example's lock and the Interleave archive under test
+into a new application and runs 14 checks there against real PostgreSQL:
+
+1. The CLI records the unsafe read-then-write as a violation, with both actors
+   reading 0 and writing 1. The startup commands are scheduled steps with the
+   exact SQL listed in each example's README, and every connection presents the
+   same startup parameters.
+   Exact replay repeats the failure, the actor values, the source and fixture
+   identity and every step fingerprint.
+2. Library `explore` finds the same failure, and library `replay` repeats it.
+3. CLI minimization keeps the failure fingerprint and reports `locally-minimal`.
+4. The atomic write, which keeps the read, passes under the same alternation
+   with written values 1 and 2.
+5. After the entry switches to the atomic write, exact replay is `incompatible`
+   before any import or setup, and guided replay of the recorded order passes.
+6. CRUD commits. A duplicate primary key fails with 23505 in transaction state
+   E, ROLLBACK returns to state I, the marker row is absent and the same
+   connection keeps working.
+7. With both snapshots taken first, bob's UPDATE waits on alice's row lock and
+   fails with 40001 after her COMMIT. Without retry the outcome is `actor-error`
+   and the invariant is not called.
+8. With whole-transaction retry, bob checks that his failed attempt's marker is
+   gone and commits on his second attempt after reading 1.
+9. Both serializable behaviors pass under a serial schedule (two checks).
+10. After a comment is appended to the copied helper, exact replay is
+    `incompatible` before any import or setup.
+11. A 5-second deadline while bob never issues a command leaves alice's first
+    ORM command unreleased. The run is `inconclusive`, alice's operation
+    rejected, bob's fulfilled, and cleanup is complete.
+12. `export --runtime-archive` with the original archive, `install.mjs
+    --offline` and the exported exact replay repeat the failure with the same
+    identities and fingerprints.
+13. No generated database, backend or command process remains, and the
+    application lock is unchanged.
+
+The evidence directory keeps `install.json`, numbered command records (`NN.json`,
+`NN.stdout`, `NN.stderr`), every run artifact, the journals (`imports.txt`,
+`owned.txt`, `invariants.jsonl`), `identity.json` with the recorded packages,
+`api-summary.json`, `minimize-summary.json`, `export-manifest.json`,
+`cleanup.json`, `results.json` with each check's duration, and the exported
+bundle.
+
+All 18 rows passed on 25 October 2026 on macOS arm64, against the official
+`postgres:16`, `postgres:17` and `postgres:18` images (PostgreSQL 16.15, 17.11
+and 18.6), with the Interleave 0.2.0 archive built from commit `d572265`. Each
+cell gives the passing checks and the gate's duration. The rows ran one at a
+time, and other work on the machine slowed some of them. The `orms` CI job runs
+the same gate for each row on Ubuntu 24.04.
+
+| ORM | Node.js / npm | PostgreSQL 16.15 | PostgreSQL 17.11 | PostgreSQL 18.6 |
+| --- | --- | --- | --- | --- |
+| Sequelize 6.37.8 | 22.18.0 / 10.9.3 | 14/14, 108 s | 14/14, 119 s | 14/14, 65 s |
+| Sequelize 6.37.8 | 24.7.0 / 11.5.1 | 14/14, 64 s | 14/14, 59 s | 14/14, 58 s |
+| Knex 3.3.0 | 22.18.0 / 10.9.3 | 14/14, 44 s | 14/14, 39 s | 14/14, 40 s |
+| Knex 3.3.0 | 24.7.0 / 11.5.1 | 14/14, 55 s | 14/14, 60 s | 14/14, 39 s |
+| MikroORM 6.6.17 | 22.18.0 / 10.9.3 | 14/14, 62 s | 14/14, 63 s | 14/14, 66 s |
+| MikroORM 6.6.17 | 24.7.0 / 11.5.1 | 14/14, 60 s | 14/14, 72 s | 14/14, 94 s |
+
+The recorded source identity was 20,541,744 bytes in 2,906 files for Sequelize,
+7,856,485 bytes in 1,704 files for Knex and 11,820,145 bytes in 2,619 files for
+MikroORM, within the default bounds. Minimization reduced the 10, 6 and 12
+recorded choices to none in 5, 4 and 5 attempts, because the fair fallback alone
+reproduces each lost update. The library search found it on its first run.
+
+None of the three ORMs declares a dependency on the pg that opens its
+connections. Sequelize and Knex list `pg` only in `peerDependenciesMeta` and load
+it with a computed `require`, which the recorded dependency graph does not
+follow. MikroORM depends on its own pg 8.20.0 for type parsers and connects
+through Knex 3.2.10, which loads pg the same way. In these examples npm installs
+one copy of pg 8.23.0 that Interleave's own runtime also depends on, so every
+recording hashes its files as part of the runtime component, and for MikroORM
+also through pg-pool's peer dependency. An application whose pg version differs
+from Interleave's gets two installations. Unless a declared relationship reaches
+the copy its ORM loads, only the recorded `package-lock.json` covers that copy,
+not its installed files.
+
+The Knex application shares no installed package with Interleave's runtime,
+because Knex pins pg-connection-string 2.6.2 while pg 8.23.0 uses its own 2.14.0.
+Interleave 0.2.0 could not export such a recording when the application had
+installed Interleave from a local archive. Supplying `--runtime-archive` now
+exports it as an offline installation of the original application lock.
+
+Not checked: other APIs of these ORMs (Sequelize associations, hooks and CLS
+transactions; Knex migrations, streams and its `connectionPool` option;
+MikroORM relations, decorators, `em.lock()` and migrations), deadlock (`40P01`)
+handling, serialization failures at COMMIT, pools larger than one connection or
+the multi-connection profile, the `pg-native` bindings, Sequelize 7, MikroORM 7,
+Windows, and exact replay across Node.js or PostgreSQL versions.
+
 ## Prisma ORM 7.10.0
 
 Prisma ORM 7.10.0 is qualified through its node-postgres driver adapter:

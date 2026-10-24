@@ -39,8 +39,8 @@ Export uses the shared profile when the application and Interleave share
 installed packages, or when you supply `--runtime-archive` or
 `--dependency-archive`. Supplying an archive covers an application that installed
 Interleave from a local archive and shares no other installed package with it,
-such as a Knex 3.3.0 application; the separate profile cannot install such a
-lock. The shared profile requires the recording
+such as the [Knex example](../examples/knex/README.md#export); the separate
+profile cannot install such a lock. The shared profile requires the recording
 runtime to be the unambiguous ordinary top-level application installation at
 `node_modules/@pavangupta352/interleave`, and any import of Interleave in the
 application source must resolve to that package. Export preserves the entire
