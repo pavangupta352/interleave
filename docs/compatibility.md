@@ -139,9 +139,11 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 - The report tagged the command a request reached and listed every request in
   Chromium at desktop and mobile sizes.
 
-Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, libpq `PQcancel` called
-directly, pgjdbc `Statement.setQueryTimeout`, and Firefox and WebKit for the
-report.
+CI run 40141761205 repeated these checks: the integration and verified-TLS
+suites on PostgreSQL 16, 17 and 18 with Node.js 22.18.0 and 24.7.0, the psycopg
+case on PostgreSQL 16 with Node.js 24.7.0, and the report in Chromium, Firefox
+and WebKit. Not yet checked: libpq `PQcancel` called directly and pgjdbc
+`Statement.setQueryTimeout`.
 
 ## Streaming COPY
 
@@ -184,8 +186,10 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 - The report listed each transfer's direction, byte count and digest in
   Chromium at desktop and mobile sizes.
 
-Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, pgjdbc `CopyManager`,
-binary-format COPY, and Firefox and WebKit for the report.
+CI run 40141761205 repeated these checks on PostgreSQL 16, 17 and 18 with
+Node.js 22.18.0 and 24.7.0, the psycopg and libpq case on PostgreSQL 16 with
+Node.js 24.7.0, and the report in Chromium, Firefox and WebKit. Not yet checked:
+pgjdbc `CopyManager` and binary-format COPY.
 
 ## PostgreSQL 17 with pgvector 0.8.6
 
