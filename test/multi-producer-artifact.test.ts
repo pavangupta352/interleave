@@ -94,7 +94,7 @@ describe('version 4 multi-producer artifacts', () => {
     ['blocker on its own lane', (r: any) => { r.trace[1].waits[0].blockerPids = [102]; }, /cannot block itself/],
     ['blocker absent from trace', (r: any) => { r.trace[1].waits[0].blockerPids = [999]; }, /absent from the released trace/],
     ['too many available lanes', (r: any) => { r.trace[2].available = Array.from({ length: 65 }, (_, index) => `bob#${index}`); }, /65|64 item limit/],
-    ['unsupported version', (r: any) => { r.schemaVersion = 5; }, /expected 1, 2, 3 or 4/],
+    ['unsupported version', (r: any) => { r.schemaVersion = 6; }, /expected 1, 2, 3, 4 or 5/],
   ])('reject %s', (_name, mutate, message) => {
     const original = run(); mutate(original);
     expect(() => parseRunArtifact(original)).toThrow(message);

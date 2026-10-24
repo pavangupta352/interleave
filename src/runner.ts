@@ -18,7 +18,7 @@ import {
   defaultConnectionLimit, fairLane, LaneBinder, laneLabel, parsePlanChoice, recordedConnectionProfile, resolveConnectionProfile,
   resolveOverlap, resolvePlanEntry, validatePlanEntries, type Lane, type LiveLane,
 } from './lanes.js';
-import type { ActorProxy, ActorResult, DatabaseContext, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
+import type { ActorProxy, ActorResult, CancelRecord, DatabaseContext, Outcome, OwnedDatabase, PendingUnit, RunOptions, RunResult, Scenario, TraceStep } from './types.js';
 
 /** How long a multi-producer decision waits for a just-completed connection's next command. */
 const LANE_SETTLE_MS = 25;
@@ -36,6 +36,11 @@ function limit(value: number | undefined, fallback: number, max: number, name: s
   const result = value ?? fallback;
   if (!Number.isSafeInteger(result) || result < 1 || result > max) throw new TypeError(`${name} must be an integer from 1 to ${max}`);
   return result;
+}
+
+function describeCancel(cancel: CancelRecord): string {
+  if (!cancel.forwarded) return 'was not forwarded';
+  return cancel.step === undefined ? 'found its backend idle' : `hit step ${cancel.step}`;
 }
 
 /** Run real application operations once in a new, owned PostgreSQL database. */
@@ -132,6 +137,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   // Plan entries are decisions; an overlapped pair is one decision and two steps.
   let decisions = 0;
   let overlapped = false;
+  // No decision is made while PostgreSQL has not yet acted on a forwarded cancel
+  // request, so the request can only hit the step that was running when it arrived.
+  let pendingCancels = 0;
   let evidenceBytes = Buffer.byteLength(JSON.stringify(result)) + 256;
   assertEvidenceEnvelope(result, maxEvidenceBytes);
 
@@ -253,6 +261,33 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
             wake();
             return;
           }
+          if (event.type === 'cancel') {
+            const lane = event.forwarded ? lanes.get(laneLabel(actor, event.connection)) : undefined;
+            const running = lane?.running?.step.backendPid === event.backendPid ? lane.running.step : undefined;
+            const record: CancelRecord = {
+              at: performance.now() - started, actor, backendPid: event.backendPid, forwarded: event.forwarded,
+              ...(event.forwarded ? { connection: event.connection } : {}), ...(running ? { step: running.index } : {}),
+            };
+            if (event.forwarded) {
+              pendingCancels++;
+              void event.acknowledged.then(() => { pendingCancels--; runtimeEpoch++; wake(); });
+            }
+            // Cancel requests are evidence: version 5 records them with an explicit connection profile.
+            const index = result.cancels?.length ?? 0;
+            if (!retain({ record, connectionProfile })) { wake(); return; }
+            if (!result.cancels) { result.schemaVersion = 5; result.limits.connectionProfile = connectionProfile; result.cancels = []; }
+            result.cancels.push(record);
+            const owner = pids.get(event.backendPid);
+            if (!event.forwarded && owner !== undefined && owner !== actor && livePids.has(event.backendPid)) {
+              stop('inconclusive', `${actor} sent a cancel request for a connection of ${owner}; Interleave forwards a cancel request only to a connection of the actor that sent it`);
+            }
+            const recorded = mode === 'replay' ? options.replay!.cancels?.[index] : undefined;
+            if (mode === 'replay' && (!recorded || recorded.actor !== record.actor || recorded.forwarded !== record.forwarded || recorded.step !== record.step)) {
+              stop('incompatible', `Replay cancel request ${index} from ${actor} ${describeCancel(record)}; ${recorded ? `the recorded request from ${recorded.actor} ${describeCancel(recorded)}` : 'the recorded run sent no such request'}`);
+            }
+            wake();
+            return;
+          }
           const key = `${actor}\0${event.connection}`;
           if (event.type === 'connected') {
             pids.set(event.backendPid, actor); pidLanes.set(event.backendPid, { actor, connection: event.connection });
@@ -323,7 +358,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       // rather than after waiting for a connection or actor that will never proceed.
       const mismatch = binder?.mismatch(current);
       if (mismatch) throw new Interrupted('incompatible', mismatch);
-      if ([...lanes.values()].some(lane => lane.running && !lane.running.blocked)) { laneWait = undefined; await pause(); continue; }
+      if (pendingCancels || [...lanes.values()].some(lane => lane.running && !lane.running.blocked)) { laneWait = undefined; await pause(); continue; }
       const allReady = names.every(actor => settled.has(actor) || active(actor));
       if (!allReady) { laneWait = undefined; await pause(); continue; }
       if (multi) {
@@ -452,6 +487,15 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       throw new Interrupted('incompatible', 'Application finished before consuming every recorded actor connection');
     }
     if (mode === 'replay' && result.trace.length !== options.replay!.trace.length) throw new Interrupted('incompatible', 'Application finished before consuming every replay step');
+    if (mode === 'replay') {
+      const recordedCancels = options.replay!.cancels ?? [];
+      const liveCancels = result.cancels ?? [];
+      if (liveCancels.length < recordedCancels.length) throw new Interrupted('incompatible', `Application sent ${liveCancels.length} of the recorded run's ${recordedCancels.length} cancel requests`);
+      for (const [index, live] of liveCancels.entries()) {
+        const connection = live.connection === undefined ? undefined : binder ? binder.recordedFor(live.actor, live.connection) : live.connection;
+        if (connection !== recordedCancels[index]!.connection) throw new Interrupted('incompatible', `Replay cancel request ${index} from ${live.actor} named a different connection`);
+      }
+    }
     if (mode !== 'replay' && (options.plan?.length ?? 0) > decisions) throw new Interrupted('incompatible', 'Application finished before consuming every requested schedule choice');
     if (mode === 'replay') {
       // Single-producer blockers are actors. Multi-producer blockers are recorded
@@ -507,6 +551,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
     let reason = error instanceof Interrupted ? message(error) : connectionFailureMessage(error) ?? message(error);
     if (mode === 'replay' && overlapped && error instanceof Interrupted && error.outcome === 'incompatible') {
       reason = message(`${reason}; this run released overlapped pairs, and PostgreSQL may interleave them differently on each replay`);
+    }
+    if (mode === 'replay' && (options.replay!.cancels?.length || result.cancels?.length) && error instanceof Interrupted && error.outcome === 'incompatible') {
+      reason = message(`${reason}; the application's own timers decide when a cancel request arrives, so it can find a different step running on each replay`);
     }
     result.reason = applicationRejected
       ? message(`One or more application operations rejected before execution was interrupted; ${reason}`)

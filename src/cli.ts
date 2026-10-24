@@ -204,7 +204,8 @@ function describe(result: RunResult | ExplorationResult | MinimizationResult): s
     return `Reduced ${result.originalChoices} choices to ${result.reducedChoices} in ${result.attempts} attempts; ${result.stopReason}.${result.reason ? `\n${result.reason}` : ''}\n${describe(result.run)}${attempt}`;
   }
   const pairs = result.trace.filter(step => step.overlap === step.index).length;
-  const overlapped = pairs ? `, ${pairs} overlapped pair${pairs === 1 ? '' : 's'}` : '';
+  const cancels = result.cancels?.length ?? 0;
+  const overlapped = `${pairs ? `, ${pairs} overlapped pair${pairs === 1 ? '' : 's'}` : ''}${cancels ? `, ${cancels} cancel request${cancels === 1 ? '' : 's'}` : ''}`;
   return `${result.scenario}: ${result.outcome} (${result.mode}); ${result.trace.length} ${(result.limits.protocolProfile ?? (result.schemaVersion === 2 ? 'describe-flush-v1' : 'sync-cycle-v1')) === 'describe-flush-v1' ? 'releases' : 'commands'}${overlapped}; cleanup ${result.cleanup.complete ? 'complete' : 'incomplete'}.${result.reason ? `\n${result.reason}` : ''}${result.failure ? `\n${result.failure.message}` : ''}`;
 }
 

@@ -2,6 +2,7 @@ import { assertScenarioName } from './scenario.js';
 import { validateSourceIdentity } from './source-schema.js';
 import type {
   ActorResult,
+  CancelRecord,
   ConnectionIdentity,
   Failure,
   MetadataCompletion,
@@ -43,7 +44,7 @@ const SQLSTATE = /^[0-9A-Z]{5}$/;
 const PROTOTYPE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 const ROOT_KEYS = [
-  'schemaVersion', 'scenario', 'outcome', 'mode', 'plan', 'connections', 'trace', 'actors',
+  'schemaVersion', 'scenario', 'outcome', 'mode', 'plan', 'connections', 'trace', 'cancels', 'actors',
   'failure', 'reason', 'environment', 'startedAt', 'durationMs', 'limits', 'cleanup',
 ] as const;
 const REQUIRED_ROOT_KEYS = [
@@ -91,8 +92,8 @@ export function parseRunArtifact(input: unknown): RunResult {
 
   const root = shape(value, '$', ROOT_KEYS, REQUIRED_ROOT_KEYS);
   const version = field(root, 'schemaVersion', '$');
-  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
-    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1, 2, 3 or 4');
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) {
+    throw new TypeError('$.schemaVersion: unsupported run artifact version; expected 1, 2, 3, 4 or 5');
   }
   // Schema 3 separates scheduling from transport. Legacy trace validators retain
   // their exact grammar; the explicit profile selects one for new evidence.
@@ -104,10 +105,11 @@ export function parseRunArtifact(input: unknown): RunResult {
   // Schema 4 records the connection profile and overlap mode. Multi-producer plans
   // and available choices name lanes, and lanes of one actor may block each other.
   // Overlap plans may name pairs, and paired steps record their shared release.
+  // Schema 5 keeps those rules and adds the cancel requests that reached actors.
   const limitsRecord = plainRecord(field(root, 'limits', '$'), '$.limits');
-  const lanes = version === 4 && enumValue(field(limitsRecord, 'connectionProfile', '$.limits'), '$.limits.connectionProfile',
+  const lanes = version >= 4 && enumValue(field(limitsRecord, 'connectionProfile', '$.limits'), '$.limits.connectionProfile',
     ['single-producer-v1', 'multi-producer-v1']) === 'multi-producer-v1';
-  const overlap = version === 4 && hasOwn(limitsRecord, 'overlap')
+  const overlap = version >= 4 && hasOwn(limitsRecord, 'overlap')
     && enumValue(limitsRecord.overlap, '$.limits.overlap', ['pairs']) === 'pairs';
   if (version === 4 && !lanes && !overlap) {
     throw new TypeError('$.limits.overlap: a version 4 single-producer record requires overlap pairs; use version 3');
@@ -203,6 +205,10 @@ export function parseRunArtifact(input: unknown): RunResult {
   }
 
   if (overlap) validateOverlapPairs(trace, lanes);
+  if (version === 5) field(root, 'cancels', '$');
+  else if (hasOwn(root, 'cancels')) throw new TypeError('$.cancels: cancel requests require version 5');
+  const cancels = version === 5 ? validateCancels(root.cancels, trace, connectionKeys, durationMs) : [];
+  for (const cancel of cancels) allActorNames.add(cancel.actor);
   for (let index = 0; index < trace.length; index += 1) {
     const step = trace[index]!;
     if (index > 0 && step.releasedAt < trace[index - 1]!.releasedAt) {
@@ -299,6 +305,11 @@ export function parseRunArtifact(input: unknown): RunResult {
         }
       }
     }
+    for (let index = 0; index < cancels.length; index += 1) {
+      if (!actorNames.has(cancels[index]!.actor)) {
+        throw new TypeError(`$.cancels[${index}].actor: actor is absent from recorded actor results`);
+      }
+    }
   }
   if ((outcome === 'passed' || outcome === 'violation') && rejectedActors !== 0) {
     throw new TypeError(`$.actors: ${outcome} outcomes require every actor to be fulfilled`);
@@ -344,9 +355,9 @@ export function parseRunArtifact(input: unknown): RunResult {
     limitsRecord,
     '$.limits',
     ['maxSteps', 'timeoutMs', 'maxEvidenceBytes', 'maxConnectionsPerActor', ...(version !== 1 ? ['protocolProfile'] : []),
-      ...(version === 4 ? ['connectionProfile', 'overlap'] : [])],
+      ...(version >= 4 ? ['connectionProfile', 'overlap'] : [])],
     ['maxSteps', 'timeoutMs', ...(version !== 1 ? ['protocolProfile'] : []),
-      ...(version === 4 ? ['maxConnectionsPerActor', 'connectionProfile'] : [])],
+      ...(version >= 4 ? ['maxConnectionsPerActor', 'connectionProfile'] : [])],
   );
   if (version === 2 && limits.protocolProfile !== 'describe-flush-v1') {
     throw new TypeError('$.limits.protocolProfile: version 2 requires describe-flush-v1');
@@ -405,6 +416,54 @@ function validateTransportIdentity(value: unknown, path: string): void {
   enumValue(upstream.trustSource, `${upstreamPath}.trustSource`, ['node-bundled', 'custom-ca']);
   fingerprintValue(upstream.trustFingerprint, `${upstreamPath}.trustFingerprint`);
   fingerprintValue(upstream.referenceFingerprint, `${upstreamPath}.referenceFingerprint`);
+}
+
+/**
+ * A forwarded request names a recorded connection of its own actor; a step it hit
+ * ran on that backend and was released before the request arrived.
+ */
+function validateCancels(value: unknown, trace: TraceStep[], connectionKeys: Set<string>, durationMs: number): CancelRecord[] {
+  const values = arrayValue(value, '$.cancels', MAX_ARRAY_ITEMS);
+  if (!values.length) throw new TypeError('$.cancels: a version 5 record lists at least one cancel request; use version 3 or 4');
+  const pidByConnection = new Map<string, number>();
+  for (const step of trace) pidByConnection.set(`${step.actor}\0${step.connection}`, step.backendPid);
+  const cancels: CancelRecord[] = [];
+  for (let index = 0; index < values.length; index += 1) {
+    const path = `$.cancels[${index}]`;
+    const record = shape(values[index], path, ['at', 'actor', 'backendPid', 'forwarded', 'connection', 'step'], ['at', 'actor', 'backendPid', 'forwarded']);
+    const at = finiteNumber(record.at, `${path}.at`, 0);
+    if (at > durationMs) throw new TypeError(`${path}.at: cannot exceed run durationMs`);
+    if (index > 0 && at < cancels[index - 1]!.at) throw new TypeError(`${path}.at: arrival times must be nondecreasing`);
+    const actor = actorId(record.actor, `${path}.actor`);
+    const backendPid = safeInteger(record.backendPid, `${path}.backendPid`, -2147483648);
+    if (backendPid > 2147483647) throw new TypeError(`${path}.backendPid: expected a 32-bit process ID`);
+    const forwarded = booleanValue(record.forwarded, `${path}.forwarded`);
+    const cancel: CancelRecord = { at, actor, backendPid, forwarded };
+    if (forwarded !== hasOwn(record, 'connection')) throw new TypeError(`${path}.connection: present exactly when the request was forwarded`);
+    if (forwarded) {
+      const connection = safeInteger(record.connection, `${path}.connection`, 0);
+      const key = `${actor}\0${connection}`;
+      if (!connectionKeys.has(key)) throw new TypeError(`${path}.connection: references an unrecorded actor startup`);
+      const pid = pidByConnection.get(key);
+      if (pid !== undefined && pid !== backendPid) throw new TypeError(`${path}.backendPid: differs from the backend of that connection`);
+      cancel.connection = connection;
+    }
+    if (hasOwn(record, 'step')) {
+      if (!forwarded) throw new TypeError(`${path}.step: a request that was not forwarded cannot hit a step`);
+      const stepIndex = safeInteger(record.step, `${path}.step`, 0);
+      const step = trace[stepIndex];
+      if (!step) throw new TypeError(`${path}.step: references a step absent from the trace`);
+      if (step.actor !== actor || step.connection !== cancel.connection || step.backendPid !== backendPid) {
+        throw new TypeError(`${path}.step: the step ran on a different connection`);
+      }
+      if (step.releasedAt > at || (step.completedAt !== undefined && step.completedAt < at)) {
+        throw new TypeError(`${path}.step: the step was not running when the request arrived`);
+      }
+      cancel.step = stepIndex;
+    }
+    cancels.push(cancel);
+  }
+  return cancels;
 }
 
 /** Paired steps are adjacent, name the first's index, share one decision and use two lanes. */

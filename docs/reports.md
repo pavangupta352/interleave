@@ -41,6 +41,14 @@ inspector names the partner step, explains that a replay cannot force the same
 interleaving, and **Select step N** moves to the partner, clearing filters that
 hide it.
 
+When the application sent a cancel request while a command ran, that command says
+**Cancel request** next to its result, usually SQLSTATE 57014, and searching for
+"cancel request" finds it. The summary counts the requests. The inspector shows
+when the request arrived and notes that the application's own timers decide that
+moment. **Record & replay details** lists every request in arrival order: the
+step it reached, an idle backend that PostgreSQL ignored, or a request that was
+not forwarded because it named a backend outside the actor's own connections.
+
 Use the arrow keys to move through the filtered order; Home and End select its
 first and last command, including across page boundaries. The ledger renders at
 most 100 commands per page. Search and actor filters preserve the original step

@@ -1,9 +1,11 @@
 # Cancellation, COPY and cursors
 
-Status: design, 25 October 2026. Interleave refuses all three today with an
-explicit `Unsupported profile` error, so an application that uses them stops
-before any evidence is recorded. This plan adds them one at a time, in the order
-below, each with integration tests against real PostgreSQL and a real driver.
+Status, 25 October 2026: cancellation routing is implemented (section 1; see
+[cancel requests](../compatibility.md#cancel-requests) for what was checked).
+COPY and cursors are still refused with an explicit `Unsupported profile` error,
+so an application that uses them stops before any evidence is recorded. This
+plan adds them one at a time, in the order below, each with integration tests
+against real PostgreSQL and a real driver.
 
 ## 1. Cancellation routing
 

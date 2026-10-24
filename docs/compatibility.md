@@ -57,9 +57,11 @@ bundle that installs offline and replays the recording exactly. The report shows
 connection labels in Chromium, Firefox and WebKit at desktop and mobile sizes.
 
 Keep each actor's pool within the per-actor cap (eight in this profile). Other
-drivers, ORMs and pool implementations, larger pools and cancellation routing
-have not been checked with this profile, and the complete release matrix (every
-suite on each PostgreSQL major and Node.js version) has not yet run with it.
+drivers, ORMs and pool implementations and larger pools have not been checked
+with this profile, and the complete release matrix (every suite on each
+PostgreSQL major and Node.js version) has not yet run with it. One
+[cancel request](#cancel-requests) case uses two connections of one actor in
+this profile.
 
 ## Statement overlap
 
@@ -89,6 +91,57 @@ chooses how a pair interleaves; replay cannot force it. On the unchanged Knex
 run and 30 of 30 exact replays repeated it, while 17 of the 46 explored runs that
 paired the two inserts raced; see the
 [case studies](case-studies.md#what-the-fix-left-open).
+
+## Cancel requests
+
+A driver cancels a running query by opening a new connection and sending a
+CancelRequest: 16 bytes holding the backend process ID and the secret key that
+PostgreSQL sent at startup. Interleave reads the request on the actor's
+endpoint. When it names the backend of one of that actor's own live connections,
+Interleave forwards the 16 bytes unchanged over a new upstream connection that
+uses the run's transport policy, plaintext or verified TLS, and waits for
+PostgreSQL to close it. A request naming any other backend is not forwarded.
+
+The scheduler makes no decision while a forwarded request is outstanding, so a
+request can only reach the command that was running when it arrived. If the
+scheduler was still holding that actor's next command, the backend was idle:
+PostgreSQL ignores the request, and the held command runs when it is released.
+A slow network can produce the same ordering without Interleave.
+
+Records with cancel requests use schema version 5. They list each request in
+arrival order with its actor, arrival time, the backend it named, whether it was
+forwarded, and the step it reached. The secret key is not recorded. A request
+naming another actor's live connection stops the run as `inconclusive`; a
+request naming an unknown backend is recorded and the run continues. Exact
+replay requires every request to reach the same step, or find its backend idle,
+as recorded. The application's own timers decide when a request arrives, so
+that is timing dependent.
+
+Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
+
+- Postgres.js 3.4.9 `query.cancel()` stopped `SELECT pg_sleep(30)` with SQLSTATE
+  57014 in the `describe-flush-v1` profile, with a connection cap of one (the
+  request arrives over the cap) and of two (it arrives as an admitted
+  connection). Both replayed exactly.
+- node-postgres 8.23.0 `Client#cancel` for a command the scheduler still held:
+  PostgreSQL ignored the request, the command then completed, and the run
+  replayed exactly.
+- Two node-postgres connections of one actor in `multi-producer-v1`: the request
+  named the sleeping connection, and replay bound it to the recorded one.
+- psycopg 3.3.6 (binary, libpq 18.0) `cancel_safe()` from a Python process actor,
+  with exact replay.
+- Forwarding over verified TLS to a TLS-only server, with exact replay.
+- A libpq-style request for backend 1, with and without an SSLRequest first, was
+  recorded and not forwarded. A request for another actor's backend was not
+  forwarded and the run ended `inconclusive`.
+- Replaying a record whose request had found its backend idle, while the new
+  request reached the running command, was `incompatible`.
+- The report tagged the command a request reached and listed every request in
+  Chromium at desktop and mobile sizes.
+
+Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, libpq `PQcancel` called
+directly, pgjdbc `Statement.setQueryTimeout`, and Firefox and WebKit for the
+report.
 
 ## PostgreSQL 17 with pgvector 0.8.6
 
@@ -169,9 +222,10 @@ Other clients are expected to work when they read `DATABASE_URL` or the libpq
 `PG*` variables, hold one command-producing connection at a time per actor, and
 stay within the qualified protocol subset. Examples include libpq-based drivers,
 pgx, Npgsql and JDBC. That subset covers simple queries and ordinary extended
-cycles, including pipelined cycles that each end with Sync; it does not include
-COPY, cancel requests, or cursors and pipelines that wait on Flush. Those clients
-have not been qualified. Treat them as unverified until their own workflow runs.
+cycles, including pipelined cycles that each end with Sync, and
+[cancel requests](#cancel-requests); it does not include COPY, or cursors and
+pipelines that wait on Flush. Those clients have not been qualified. Treat them
+as unverified until their own workflow runs.
 
 ## TypeORM
 

@@ -95,7 +95,14 @@ export interface ConnectionIdentity {
 export type ProxyEvent =
   | { type: 'startup'; actor: string; connection: number; fingerprint: string }
   | { type: 'connected'; actor: string; connection: number; backendPid: number }
-  | { type: 'disconnected'; actor: string; connection: number };
+  | { type: 'disconnected'; actor: string; connection: number }
+  /**
+   * A CancelRequest reached this actor's endpoint. It is forwarded only when it names a
+   * backend of one of the actor's own live connections; `acknowledged` settles once
+   * PostgreSQL has acted on it, or once forwarding failed and onError was called.
+   */
+  | { type: 'cancel'; actor: string; backendPid: number; connection: number; forwarded: true; acknowledged: Promise<void> }
+  | { type: 'cancel'; actor: string; backendPid: number; connection?: never; forwarded: false; acknowledged?: never };
 
 export interface ProxyOptions {
   upstreamUrl: string;
@@ -169,6 +176,22 @@ export interface TraceStep extends StepIdentity {
   overlap?: number;
 }
 
+/** Version 5: a CancelRequest that reached an actor's endpoint. The secret key is never recorded. */
+export interface CancelRecord {
+  /** Milliseconds after the run started when the request arrived. */
+  at: number;
+  /** Actor whose endpoint received the request. */
+  actor: string;
+  /** Backend process ID the request named. */
+  backendPid: number;
+  /** True when it named one of the actor's own live connections and was forwarded to PostgreSQL. */
+  forwarded: boolean;
+  /** The actor connection that owned that backend; present exactly when forwarded. */
+  connection?: number;
+  /** Index of the step running on that backend when the request arrived; absent when it was idle. */
+  step?: number;
+}
+
 export interface Failure {
   name: string;
   message: string;
@@ -184,8 +207,8 @@ export interface RunTransportIdentity {
 }
 
 export interface RunResult {
-  /** Version 4 records the connection profile and overlap mode; 1-3 remain readable. */
-  schemaVersion: 1 | 2 | 3 | 4;
+  /** Version 4 records the connection profile and overlap mode; version 5 adds cancel requests. */
+  schemaVersion: 1 | 2 | 3 | 4 | 5;
   scenario: string;
   outcome: Outcome;
   mode: 'explore' | 'replay' | 'guided';
@@ -194,6 +217,8 @@ export interface RunResult {
   /** Accepted actor startup attempts. Optional only for reading legacy artifacts. */
   connections?: ConnectionIdentity[];
   trace: TraceStep[];
+  /** Version 5 only: cancel requests in arrival order. */
+  cancels?: CancelRecord[];
   actors: ActorResult[];
   failure?: Failure;
   reason?: string;
@@ -202,9 +227,9 @@ export interface RunResult {
   durationMs: number;
   limits: {
     maxSteps: number; timeoutMs: number; maxEvidenceBytes?: number; maxConnectionsPerActor?: number; protocolProfile?: ProtocolProfile;
-    /** Present, and required, only in version 4. */
+    /** Present, and required, only in versions 4 and 5. */
     connectionProfile?: ConnectionProfile;
-    /** Version 4 only: pairs may be released together. */
+    /** Versions 4 and 5: pairs may be released together. */
     overlap?: OverlapMode;
   };
   cleanup: { complete: boolean; error?: string };

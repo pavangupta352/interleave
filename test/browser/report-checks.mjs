@@ -332,3 +332,51 @@ export async function checkOverlapReport(page, url, artifact, legacy) {
     return { checks: ['real overlapped pair', 'pair plan is not an actor', 'pair accessible names', 'pair tag in every layout', 'ruled bracket', 'pair count', 'execution-order caveat', 'partner inspection and focus', 'filtered partner', 'overlap record detail', 'mobile overflow', 'legacy without pairs'] };
   } finally { page.off('pageerror', onError); page.off('request', onRequest); }
 }
+
+/** The command a cancel request hit says so in words, and every request is listed in arrival order. */
+export async function checkCancelReport(page, url, artifact, legacy) {
+  const errors = [], requests = [];
+  const onError = error => errors.push(error.message);
+  const onRequest = request => { if (request.url() !== url) requests.push(request.url()); };
+  page.on('pageerror', onError); page.on('request', onRequest);
+  try {
+    await page.goto(url);
+    await page.getByRole('heading', { name: artifact.scenario, exact: true }).waitFor();
+    const hit = artifact.cancels.find(cancel => cancel.step !== undefined);
+    assert.ok(hit, 'The real run recorded a request that reached a running command');
+    const step = artifact.trace[hit.step];
+    assert.equal(step.completion?.error?.code, '57014', 'PostgreSQL cancelled the running statement');
+    assert.ok(artifact.cancels.some(cancel => !cancel.forwarded && cancel.backendPid === 1), 'The real run recorded a request it did not forward');
+    assert.equal(await page.locator('.command[aria-pressed="true"]').getAttribute('data-step'), String(step.index), 'The cancelled command is selected first');
+    assert.equal(await page.getByRole('button', { name: new RegExp(`^Step ${step.index + 1}, alice: SELECT pg_sleep\\(30\\)\\. Cancel request\\. Simple query\\. Error · 57014$`) }).count(), 1);
+    const tag = page.locator(`.command[data-step="${step.index}"] .cancel-tag`);
+    assert.ok(await tag.isVisible(), 'Every layout shows the cancel tag'); assert.equal(await tag.textContent(), 'Cancel request');
+    assert.equal(await page.locator('.cancel-tag').count(), 1, 'Only the command the request reached is tagged');
+    assert.equal(await page.locator('.metadata').getByText(`${artifact.cancels.length} cancel requests`, { exact: true }).count(), 1);
+    assert.ok((await page.locator('.scope-note').textContent()).includes('was running when the application asked PostgreSQL to cancel it'));
+    const inspector = await page.locator('.inspector').textContent();
+    assert.ok(inspector.includes('Cancel requestArrived at'), 'The inspector names when the request arrived');
+    assert.ok(inspector.includes('PostgreSQL stops a running statement with error 57014'));
+    await page.locator('#search').fill('cancel request');
+    await page.waitForFunction(() => document.querySelectorAll('.command').length === 1);
+    assert.equal(await page.locator('.command').getAttribute('data-step'), String(step.index), 'Search finds the cancelled command');
+    await page.locator('#search').fill('');
+    await page.waitForFunction(count => document.querySelectorAll('.command').length === count, artifact.trace.length);
+    await page.locator('.record-details summary').click();
+    const record = await page.locator('.record-body').textContent();
+    assert.ok(record.includes(`Cancel requests${artifact.cancels.length} recorded in arrival order; secret keys are never recorded`));
+    assert.ok(record.includes('Not forwarded: backend 1 is not a live connection of alice'));
+    assert.ok(record.includes(`Arrived while step ${step.index + 1} ran`));
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Cancel labels and record details fit the viewport');
+    assert.equal(await page.getByText(/undefined|NaN/).count(), 0);
+    await page.locator('#import-file').evaluate((element, data) => {
+      const transfer = new DataTransfer(); transfer.items.add(new File([JSON.stringify(data)], 'legacy.json', { type: 'application/json' }));
+      element.files = transfer.files; element.dispatchEvent(new Event('change', { bubbles: true }));
+    }, legacy);
+    await page.getByRole('heading', { name: legacy.scenario, exact: true }).waitFor();
+    assert.equal(await page.locator('.cancel-tag').count(), 0, 'Records without cancel requests show no cancel markers');
+    assert.equal(await page.locator('.metadata').getByText(/cancel request/).count(), 0);
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    return { checks: ['real cancelled command', 'request not forwarded', 'cancelled command selected', 'cancel accessible name', 'cancel tag in every layout', 'cancel count', 'scope note', 'inspector arrival and caveat', 'cancel search', 'record details in arrival order', 'mobile overflow', 'legacy without cancels', 'no errors or external requests'] };
+  } finally { page.off('pageerror', onError); page.off('request', onRequest); }
+}

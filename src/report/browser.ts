@@ -1,6 +1,6 @@
 import { ARTIFACT_LIMITS, parseRunArtifact } from '../artifact-schema.js';
 import { parseLaneLabel, parsePlanChoice, parsePlanEntry } from '../lanes.js';
-import type { RunResult, TraceStep } from '../types.js';
+import type { CancelRecord, RunResult, TraceStep } from '../types.js';
 
 const PAGE_SIZE = 100;
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -62,14 +62,21 @@ function partner(step: TraceStep): TraceStep | undefined {
   return step.overlap === undefined ? undefined : run.trace[step.overlap === step.index ? step.index + 1 : step.overlap];
 }
 function pairCount(): number { return run.trace.filter(step => step.overlap === step.index).length; }
+/** The cancel request that arrived while this command ran (version 5). */
+function cancelFor(step: TraceStep): CancelRecord | undefined { return run.cancels?.find(cancel => cancel.step === step.index); }
+function cancelOutcome(cancel: CancelRecord): string {
+  if (!cancel.forwarded) return `Not forwarded: backend ${cancel.backendPid} is not a live connection of ${cancel.actor}`;
+  return cancel.step === undefined ? 'Backend idle; PostgreSQL ignored it' : `Arrived while step ${cancel.step + 1} ran`;
+}
 function shortSql(value: string): string { return value.replace(/\s+/g, ' ').trim() || '(empty command)'; }
 function stageLabel(step: TraceStep): string {
   return ({ complete: 'Complete query', describe: 'Describe', execute: 'Execute', recover: 'Recover' })[step.stage ?? 'complete'];
 }
-function commandLabels(step: TraceStep): { protocol: string; stage?: string; completion: string; waits?: string; overlap?: string } {
+function commandLabels(step: TraceStep): { protocol: string; stage?: string; completion: string; waits?: string; overlap?: string; cancel?: string } {
   const other = partner(step);
   return {
     ...(other ? { overlap: `Released with step ${other.index + 1}` } : {}),
+    ...(cancelFor(step) ? { cancel: 'Cancel request' } : {}),
     protocol: step.protocol === 'extended' ? step.stage && step.stage !== 'complete' ? 'Extended stage' : 'Extended cycle' : 'Simple query',
     ...(step.stage && step.stage !== 'complete' ? { stage: stageLabel(step) } : {}),
     completion: step.completion?.error ? `Error · ${step.completion.error.code}`
@@ -107,9 +114,11 @@ function renderShell(): void {
   const metadata = node('div', 'metadata');
   const commandConnections = new Set(run.trace.map(step => `${step.actor}#${step.connection}`)).size;
   const pairs = pairCount();
+  const cancels = run.cancels?.length ?? 0;
   for (const value of [`${run.trace.length.toLocaleString('en-US')} ${protocolProfile() === 'describe-flush-v1' ? 'releases' : 'commands'}`, `${actors.length} actors`,
     ...(laneActors.size ? [`${commandConnections} command connections`] : []),
-    ...(pairs ? [`${pairs.toLocaleString('en-US')} overlapped ${pairs === 1 ? 'pair' : 'pairs'}`] : []), `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
+    ...(pairs ? [`${pairs.toLocaleString('en-US')} overlapped ${pairs === 1 ? 'pair' : 'pairs'}`] : []),
+    ...(cancels ? [`${cancels.toLocaleString('en-US')} cancel ${cancels === 1 ? 'request' : 'requests'}`] : []), `PostgreSQL ${run.environment.serverVersion}`, `${run.mode} mode`]) metadata.append(node('span', undefined, value));
   const cleanup = node('span', run.cleanup.complete ? 'cleanup-complete' : 'cleanup-incomplete', run.cleanup.complete ? 'Cleanup complete' : 'Cleanup incomplete'); metadata.append(cleanup);
   summary.append(heading, text, metadata);
   if (!run.cleanup.complete) summary.append(node('p', 'cleanup-warning', run.cleanup.error ?? 'Owned resource cleanup did not complete.'));
@@ -139,7 +148,7 @@ function renderShell(): void {
   selectionTools.append(selectionLabel, inspect);
   const ledger = node('div', 'ledger'); ledger.id = 'ledger';
   const pagination = node('div', 'pagination'); pagination.id = 'pagination';
-  const scope = node('p', 'scope-note', `${protocolProfile() === 'describe-flush-v1' ? 'Each row is a scheduled release. A query may have separate description and execution stages.' : 'Each row is a client command released to PostgreSQL.'}${laneActors.size ? ' An actor’s connections share its column; each is labeled by its connection number and runs its commands in order.' : ''}${pairs ? ' A command marked “Released with step” was sent in the same instant as that step; PostgreSQL chose how the two interleaved, so their row order is not execution order.' : ''} PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.`);
+  const scope = node('p', 'scope-note', `${protocolProfile() === 'describe-flush-v1' ? 'Each row is a scheduled release. A query may have separate description and execution stages.' : 'Each row is a client command released to PostgreSQL.'}${laneActors.size ? ' An actor’s connections share its column; each is labeled by its connection number and runs its commands in order.' : ''}${pairs ? ' A command marked “Released with step” was sent in the same instant as that step; PostgreSQL chose how the two interleaved, so their row order is not execution order.' : ''}${run.cancels?.some(cancel => cancel.step !== undefined) ? ' A command marked “Cancel request” was running when the application asked PostgreSQL to cancel it.' : ''} PostgreSQL controls execution and lock resumption. This record does not prove the absence of other races.`);
   evidence.append(toolbar, hint, selectionTools, ledger, pagination, scope);
   const inspector = node('aside', 'inspector'); inspector.id = 'inspector'; inspector.setAttribute('aria-label', 'Selected command evidence'); inspector.tabIndex = -1;
   workspace.append(evidence, inspector); main.append(summary, workspace);
@@ -182,6 +191,12 @@ function renderShell(): void {
   if (upstream !== undefined) addFact(info, 'Actor endpoints', 'Loopback plaintext');
   addFact(info, 'Actor startups', run.connections === undefined ? 'Not recorded in this artifact' : `${run.connections.length.toLocaleString('en-US')} recorded`);
   for (const connection of run.connections ?? []) addFact(info, multiProducer() ? `${connection.actor} #${connection.connection}` : `${connection.actor} · ${connection.connection}`, connection.fingerprint);
+  if (run.cancels) {
+    addFact(info, 'Cancel requests', `${run.cancels.length.toLocaleString('en-US')} recorded in arrival order; secret keys are never recorded`);
+    for (const [index, cancel] of run.cancels.entries()) {
+      addFact(info, `Cancel request ${index + 1}`, `${cancel.connection === undefined ? cancel.actor : owner(cancel.actor, cancel.connection)} · ${formatMs(cancel.at)} · ${cancelOutcome(cancel)}`);
+    }
+  }
   recordBody.append(info);
   if (replayCommand) {
     const command = node('pre', 'replay-command', replayCommand);
@@ -194,7 +209,7 @@ function renderShell(): void {
 }
 function updateLedger(): void {
   // Lane-labelled commands also match the plan notation, `alice#1`.
-  filtered = run.trace.filter(step => (!actorFilter || step.actor === actorFilter) && (!query || `${stepOwner(step)}\n${laneActors.has(step.actor) ? `${step.actor}#${step.connection}` : ''}\n${step.sql}\n${step.completion?.error?.message ?? ''}\n${step.completion?.error?.code ?? ''}`.toLowerCase().includes(query)));
+  filtered = run.trace.filter(step => (!actorFilter || step.actor === actorFilter) && (!query || `${stepOwner(step)}\n${laneActors.has(step.actor) ? `${step.actor}#${step.connection}` : ''}\n${step.sql}\n${step.completion?.error?.message ?? ''}\n${step.completion?.error?.code ?? ''}\n${cancelFor(step) ? 'cancel request' : ''}`.toLowerCase().includes(query)));
   page = Math.min(page, Math.max(0, Math.ceil(filtered.length / PAGE_SIZE) - 1));
   const subset = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const ledger = document.querySelector<HTMLDivElement>('#ledger')!;
@@ -223,7 +238,7 @@ function updateLedger(): void {
         if (actor === step.actor) {
           const evidenceLabels = commandLabels(step);
           const command = button('', () => selectStep(step.index), 'command'); command.dataset.step = String(step.index); command.tabIndex = step.index === focusIndex ? 0 : -1;
-          command.setAttribute('aria-pressed', String(step.index === selected)); command.setAttribute('aria-label', `Step ${step.index + 1}, ${stepOwner(step)}: ${shortSql(step.sql).slice(0, 160)}. ${[laneActors.has(step.actor) ? `Connection #${step.connection}` : undefined, evidenceLabels.overlap, evidenceLabels.stage, evidenceLabels.protocol, evidenceLabels.completion, evidenceLabels.waits].filter(Boolean).join('. ')}`);
+          command.setAttribute('aria-pressed', String(step.index === selected)); command.setAttribute('aria-label', `Step ${step.index + 1}, ${stepOwner(step)}: ${shortSql(step.sql).slice(0, 160)}. ${[laneActors.has(step.actor) ? `Connection #${step.connection}` : undefined, evidenceLabels.overlap, evidenceLabels.cancel, evidenceLabels.stage, evidenceLabels.protocol, evidenceLabels.completion, evidenceLabels.waits].filter(Boolean).join('. ')}`);
           command.setAttribute('aria-controls', 'inspector');
           command.append(node('span', 'mobile-actor', stepOwner(step)), node('code', 'sql-preview', shortSql(step.sql)));
           const summary = node('span', 'command-summary');
@@ -232,6 +247,7 @@ function updateLedger(): void {
           else if (evidenceLabels.waits) summary.append(node('span', 'command-wait', evidenceLabels.waits));
           else summary.append(node('span', undefined, evidenceLabels.completion));
           if (evidenceLabels.stage) summary.prepend(node('span', undefined, evidenceLabels.stage));
+          if (evidenceLabels.cancel) summary.prepend(node('span', 'cancel-tag', evidenceLabels.cancel));
           if (evidenceLabels.overlap) summary.prepend(node('span', 'overlap-tag', evidenceLabels.overlap));
           // The column names the actor; the narrow layout shows the full label instead.
           if (laneActors.has(step.actor)) summary.prepend(node('span', 'lane-tag', `Connection #${step.connection}`));
@@ -330,7 +346,10 @@ function renderInspector(): void {
     addFact(facts, 'Released', formatMs(step.releasedAt)); if (step.completedAt !== undefined) addFact(facts, 'Completed', formatMs(step.completedAt));
     const other = partner(step);
     if (other) addFact(facts, 'Released with', `Step ${other.index + 1} · ${stepOwner(other)}`);
+    const cancel = cancelFor(step);
+    if (cancel) addFact(facts, 'Cancel request', `Arrived at ${formatMs(cancel.at)}, while this command ran`);
     completion.append(facts); if (step.completion?.error) completion.append(evidenceText('pre', 'error-message', step.completion.error.message, 'PostgreSQL error message'));
+    if (cancel) completion.append(node('p', 'detail-note', 'The application asked PostgreSQL to cancel this command. PostgreSQL stops a running statement with error 57014. The application’s own timers decide when a request arrives, so a replay can find a different command running.'));
     if (other) {
       completion.append(node('p', 'detail-note', 'Both commands were sent to PostgreSQL in the same instant. PostgreSQL chose how they interleaved; a replay sends them together again but cannot force the same interleaving.'),
         button(`Select step ${other.index + 1}`, () => revealStep(other.index), 'text-button partner-step'));

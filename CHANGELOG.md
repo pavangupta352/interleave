@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Route PostgreSQL cancel requests. A driver's CancelRequest for one of the
+  actor's own connections is forwarded to PostgreSQL unchanged, over the run's
+  plaintext or verified TLS transport, so `query.cancel()` in Postgres.js,
+  `Client#cancel` in node-postgres and `cancel_safe()` in psycopg stop a running
+  statement with SQLSTATE 57014. No scheduling decision is made while a request
+  is outstanding, so a request reaches only the command that was running when it
+  arrived. Requests that name any other backend are not forwarded; one that names
+  another actor's live connection makes the run `inconclusive`.
+- Runs that receive cancel requests record them in schema version 5: each request
+  in arrival order with its actor, arrival time, backend, whether it was
+  forwarded and the step it reached. Secret keys are never recorded. Exact replay
+  requires each request to reach the same step, or find its backend idle. The
+  report tags the command a request reached and lists every request.
+
 ## 0.2.0 — 25 October 2026
 
 Interleave can now schedule actors that use several connections at once,
