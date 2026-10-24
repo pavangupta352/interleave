@@ -29,6 +29,10 @@ each change.
 | [pghybrid](../examples/pghybrid/README.md) | The pinned library's four public search adapters | PostgreSQL 17, pgvector 0.8.6, stated caller versions |
 | [TypeORM](../examples/typeorm/README.md) | A per-actor DataSource helper, transactions and whole-transaction 40001 retry (TypeORM 1.1.1 and [0.3.31](../examples/typeorm-0.3/README.md)) | Native PostgreSQL, node-postgres 8.23.0, Node.js 22.18 |
 | [Python actors](../examples/python/README.md) | Run programs in another language as actors with `processActor` | Native PostgreSQL, Python 3 with psycopg 3.3.6 |
+| [Ruby actors](../examples/ruby/README.md) | A Ruby program using the pg gem as an actor, with a locked bundle | Native PostgreSQL, Ruby with pg 1.6.3 |
+| [PHP actors](../examples/php/README.md) | A PHP program using PDO's server-side prepared statements as an actor | Native PostgreSQL, PHP 8 with `pdo_pgsql` |
+| [Go actors](../examples/go/README.md) | A compiled Go program using pgx's statement cache as an actor | Native PostgreSQL, Go 1.25+ with pgx 5.11.0 |
+| [Java actors](../examples/java/README.md) | A Java program using JDBC, run from source, as an actor | Native PostgreSQL, Java 21 with pgjdbc 42.7.13 |
 | [Historical cases](../examples/historical/README.md) | Knex, node-pg-migrate and Sequelize defects before and after their upstream fixes, with baselines | Native PostgreSQL, node-postgres 8.23.0 through each library |
 | [Prisma ORM](../examples/prisma/README.md) | A generated Prisma 7 client that oversells, its repairs, serializable retries and prepared statements | Native PostgreSQL, Prisma 7.10.0 with `@prisma/adapter-pg` |
 

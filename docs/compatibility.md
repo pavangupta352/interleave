@@ -155,23 +155,70 @@ the application's COMMIT/ROLLBACK order is correctly reported as incompatible.
 ## External programs as actors
 
 `processActor` runs a separate program per actor and gives it only that actor's
-loopback endpoint. Python with psycopg 3.3.6 (binary wheel, libpq 18) on Python
-3.14 is qualified against PostgreSQL 16 through an installed-package workflow:
-the unsafe [example](../examples/python/README.md) oversold, exact replay
-reproduced the failure, an edited program was rejected as changed source, and the
-repaired program passed a fully explored frontier of 47 schedules. That search
-starts two Python processes per schedule and needs more than the default 60-second
-search budget; the example and the `python` CI job give it ten minutes.
-Separate Node.js programs using node-postgres are covered by the integration suite
-in-process, including exact replay.
+loopback endpoint. Five language examples are qualified against PostgreSQL 16
+through the same installed-package workflow: the packed Interleave is installed
+in a new application, the example folder is copied in, and its README commands
+run from the application root. In each, the unsafe program oversold (two orders
+for one unit), exact replay reproduced the same invariant failure, editing the
+included program made exact replay incompatible, and the repaired program passed
+a fully explored frontier with no violation. Every driver ran with its default
+statement handling.
 
-Other clients are expected to work when they read `DATABASE_URL` or the libpq
-`PG*` variables, hold one command-producing connection at a time per actor, and
-stay within the qualified protocol subset. Examples include libpq-based drivers,
-pgx, Npgsql and JDBC. That subset covers simple queries and ordinary extended
-cycles, including pipelined cycles that each end with Sync; it does not include
-COPY, cancel requests, or cursors and pipelines that wait on Flush. Those clients
-have not been qualified. Treat them as unverified until their own workflow runs.
+| Example | Driver and runtime | Repaired frontier |
+| --- | --- | ---: |
+| [Python](../examples/python/README.md) | psycopg 3.3.6 (binary wheel, libpq 18) on Python 3.14 | 47 schedules |
+| [Ruby](../examples/ruby/README.md) | pg gem 1.6.3 (arm64-darwin native gem, libpq 18.1) on Ruby 4.0.5 with Bundler 4.0.11 | 47 schedules |
+| [PHP](../examples/php/README.md) | PDO `pdo_pgsql` on PHP 8.5.0 (libpq 18.1) | 619 schedules |
+| [Go](../examples/go/README.md) | pgx 5.11.0 on Go 1.27.1 | 295 schedules |
+| [Java](../examples/java/README.md) | pgjdbc 42.7.13 on OpenJDK 21.0.11, single-file source launcher | 183 schedules |
+
+The Ruby, PHP, Go and Java rows ran on macOS (arm64) with Node.js 24.7.0 and
+22.18.0. The
+`python`, `ruby`, `php`, `go` and `java` CI jobs repeat the workflow on Ubuntu
+24.04 with Node.js 24.7.0 and PostgreSQL 16, using the runtimes their setup
+actions install (Python 3.13, Ruby 4.0.5, PHP 8.5, Go 1.27.1 and Temurin Java
+21). Separate Node.js programs using node-postgres are covered by the
+integration suite in-process, including exact replay.
+
+Interleave schedules every protocol cycle a driver sends, so a driver's default
+statement handling decides how many steps an actor takes:
+
+- psycopg and the pg gem's `exec_params` send one extended cycle per statement.
+- pgx prepares each new statement as a named prepared statement in its own
+  Parse/Describe/Sync cycle, then executes it in another cycle.
+- PDO prepares each statement in its own cycle, executes it in another, and
+  closes it in a third when the PHP statement object is released.
+- pgjdbc sets `application_name` with a simple query after connecting and, with
+  autocommit off, sends `BEGIN` as its own simple query.
+
+A cycle that only prepares or closes a statement executes nothing: it completes
+without a command tag and is recorded with that statement's text. Each extra
+step can interleave with the other actor, so the same repaired checkout has 47
+schedules with the pg gem and 619 with PDO. Searches that large need budgets
+beyond the defaults (`--max-runs`, and for PDO also `--max-search-bytes`); each
+example's README gives the budget it was verified with. A single search's
+`totalTimeoutMs` is at most one hour.
+
+Startup parameters are part of exact replay identity. The pg gem sends the
+program's path, shortened to its first and last 30 characters, as
+`application_name` unless the connection sets one, so the Ruby recording
+reported `incompatible` when replayed from a copy of the application in another
+directory. The PHP, Go and Java recordings replayed the same failure from such a
+copy. pgjdbc sends the JVM's time zone, and replaying the Java recording with a
+different `TZ` reported `incompatible`. pgjdbc's default `sslmode=prefer` first
+requests TLS; the actor endpoint declines, and the driver continues in
+plaintext.
+
+Not qualified: these examples on PostgreSQL 17 and 18,
+Windows, other driver modes (pgx's other query execution modes and pools,
+pgjdbc after `prepareThreshold` switches to server-prepared statements, PDO
+emulated prepares, `pdo_pgsql` built against libpq older than 17), ORMs on these
+drivers, programs that open more than one command-producing connection per
+actor, and regression exports of language actors. Other clients, such as Npgsql,
+are expected to work when they read `DATABASE_URL` or the libpq `PG*` variables
+and stay within the qualified protocol subset, which includes pipelined cycles
+that each end with Sync but not COPY, cancel requests, or cursors and pipelines
+that wait on Flush. Treat them as unverified until their own workflow runs.
 
 ## TypeORM
 

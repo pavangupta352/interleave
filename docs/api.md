@@ -77,6 +77,13 @@ protocol subset. Bind program files into file recordings with `--include` (or
 interpreter, runtime and packages the program loads are not part of Interleave's
 identity: pin them and replay in the same environment.
 
+Each protocol cycle the program's driver sends is a scheduling step, including a
+cycle that only prepares or closes a statement, and the startup parameters it
+sends are part of exact replay identity. JDBC does not read the `PG*` variables;
+build its URL from `PGHOST`, `PGPORT` and `PGDATABASE`. The
+[compatibility guide](compatibility.md#external-programs-as-actors) lists the
+qualified Python, Ruby, PHP, Go and Java examples and what their drivers send.
+
 ## Run and search
 
 `runScenarioFile(file, options)` imports an explicitly selected, trusted local scenario in a disposable worker. Its parent owns database cleanup even if the worker exits or crashes. Prefer file targets for the complete workflow:

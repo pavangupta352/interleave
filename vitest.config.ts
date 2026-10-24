@@ -13,6 +13,11 @@ export default defineConfig({
       ...(process.env.INTERLEAVE_TEST_MANAGED_POSTGRES !== '1' ? ['test/**/*.managed.integration.test.ts'] : []),
       // Python process actors need an interpreter with the example's pinned requirements.
       ...(!process.env.INTERLEAVE_TEST_PYTHON ? ['test/**/*.python.integration.test.ts'] : []),
+      // Other language examples need their interpreter or toolchain: ruby, php, go, java.
+      ...(!process.env.INTERLEAVE_TEST_RUBY ? ['test/**/*.ruby.integration.test.ts'] : []),
+      ...(!process.env.INTERLEAVE_TEST_PHP ? ['test/**/*.php.integration.test.ts'] : []),
+      ...(!process.env.INTERLEAVE_TEST_GO ? ['test/**/*.go.integration.test.ts'] : []),
+      ...(!process.env.INTERLEAVE_TEST_JAVA ? ['test/**/*.java.integration.test.ts'] : []),
     ],
     testTimeout: 20_000,
     hookTimeout: 20_000,

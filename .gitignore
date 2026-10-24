@@ -17,3 +17,7 @@ test-results/
 
 .impeccable/
 .playwright-mcp/
+# Language example build outputs and downloads
+examples/ruby/vendor/
+examples/go/bin/
+examples/java/lib/

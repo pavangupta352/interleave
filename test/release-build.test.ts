@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { afterEach, expect, test } from 'vitest';
 // @ts-expect-error Release tooling is a native Node ESM script.
-import { prepareRelease, resolveReleaseSource, verifyPreparedAssets } from '../scripts/prepare-release.mjs';
+import { prepareRelease, requiredJobFamilies, resolveReleaseSource, verifyPreparedAssets } from '../scripts/prepare-release.mjs';
 const execFile = promisify(execute);
 const temporary: string[] = [];
 const required = ['dist/index.d.ts', 'dist/cli/options.js', 'dist/cli/status.js', 'dist/cli/init.js', 'dist/cli/demo.js', 'dist/cli/doctor.js', 'dist/worker.js', 'dist/report/browser.bundle.js', 'dist/report/styles.css',
@@ -114,7 +114,8 @@ test.each([undefined, 'failure', 'cancelled', 'skipped'])('rejects a tagged CI r
   const qualificationEnvironment = {
     GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'pavangupta352/interleave', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2',
     GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: f.ref,
-    INTERLEAVE_RELEASE_NEEDS: JSON.stringify({ postgres: { result: 'success' }, pgvector: { result: 'success' }, tls: { result: 'success' }, python: { result: 'success' }, typeorm: { result: 'success' }, prisma: { result: 'success' }, browser: { result: 'success' },
+    INTERLEAVE_RELEASE_NEEDS: JSON.stringify({ postgres: { result: 'success' }, pgvector: { result: 'success' }, tls: { result: 'success' }, python: { result: 'success' },
+      ruby: { result: 'success' }, php: { result: 'success' }, go: { result: 'success' }, java: { result: 'success' }, typeorm: { result: 'success' }, prisma: { result: 'success' }, browser: { result: 'success' },
       ...(result === undefined ? {} : { managed: { result } }) }),
   };
   await expect(prepareRelease({ repository: f.repository, tag, out, archive, qualificationEnvironment }))
@@ -122,11 +123,18 @@ test.each([undefined, 'failure', 'cancelled', 'skipped'])('rejects a tagged CI r
   await expect(fs.lstat(out)).rejects.toMatchObject({ code: 'ENOENT' });
 }, 10_000);
 
+test('the release-candidate CI job needs exactly the job families that release preparation requires', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const needs = /\n {2}release-candidate:\n(?: {4}.*\n)*? {4}needs: \[([^\]\n]*)\]\n/.exec(workflow)?.[1]?.split(',').map(job => job.trim());
+  expect(needs?.toSorted()).toEqual(requiredJobFamilies.toSorted());
+  for (const job of requiredJobFamilies) expect(workflow).toContain(`\n  ${job}:\n`);
+});
+
 test('records all required CI job families in the verified tagged release manifest', async () => {
   const f = await fixture(); const tag = `v${f.version}`;
   await execFile('git', ['-C', f.repository, 'tag', tag]);
   const out = join(f.root, 'qualified candidate');
-  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', tls: 'success', python: 'success', typeorm: 'success', prisma: 'success', browser: 'success' };
+  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', tls: 'success', python: 'success', ruby: 'success', php: 'success', go: 'success', java: 'success', typeorm: 'success', prisma: 'success', browser: 'success' };
   const qualificationEnvironment = {
     GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'pavangupta352/interleave', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2',
     GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: f.ref,

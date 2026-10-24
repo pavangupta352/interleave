@@ -1,1 +1,5 @@
 node_modules/
+# Built or downloaded by the language examples' README commands.
+ruby/vendor/
+go/bin/
+java/lib/
