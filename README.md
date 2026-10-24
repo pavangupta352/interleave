@@ -155,8 +155,9 @@ isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize
   released pair interleaves, so replaying such a failure can succeed only some of
   the time.
 - By default each actor holds one command-producing connection at a time; the
-  `multi-producer-v1` profile schedules several. COPY, pipelining and cancel
-  requests are not supported and fail explicitly.
+  `multi-producer-v1` profile schedules several. COPY, cancel requests, and
+  cursors or pipelines that wait on Flush are not supported and fail explicitly.
+  Pipelined queries that end each cycle with Sync are scheduled one cycle at a time.
 - Clocks, randomness and external services are not controlled.
 
 ## Install

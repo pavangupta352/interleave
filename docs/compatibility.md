@@ -169,7 +169,8 @@ Other clients are expected to work when they read `DATABASE_URL` or the libpq
 `PG*` variables, hold one command-producing connection at a time per actor, and
 stay within the qualified protocol subset. Examples include libpq-based drivers,
 pgx, Npgsql and JDBC. That subset covers simple queries and ordinary extended
-cycles; it does not include COPY, pipeline mode or cancel requests. Those clients
+cycles, including pipelined cycles that each end with Sync; it does not include
+COPY, cancel requests, or cursors and pipelines that wait on Flush. Those clients
 have not been qualified. Treat them as unverified until their own workflow runs.
 
 ## TypeORM
