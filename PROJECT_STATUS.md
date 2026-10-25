@@ -1,6 +1,6 @@
 # Interleave — project status and roadmap
 
-**Checkpoint: 27 September 2026 · 0.1.0 released · Active development**
+**Checkpoint: 25 October 2026 · 0.2.1 released · Active development**
 
 This page is the starting point for anyone picking the project up. It explains
 what Interleave is, what works and how that was verified, what is in progress,
@@ -17,9 +17,9 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Owner | Pavan Gupta, GitHub `pavangupta352`; commits use `pavan.gupta.352@gmail.com`. |
 | Repository | [pavangupta352/interleave](https://github.com/pavangupta352/interleave) |
 | Package / executable | `@pavangupta352/interleave` / `interleave` |
-| Version | `0.1.0` |
-| Qualified source | `2e0aeed`, tag `v0.1.0`; [tag CI run 36329864744](https://github.com/pavangupta352/interleave/actions/runs/36329864744) passed all 25 jobs, and the exact archive passed consumer acceptance on Node.js 22.18.0 and 24.7.0 ([validation](docs/validation.md)) |
-| Release state | [v0.1.0 on GitHub](https://github.com/pavangupta352/interleave/releases/tag/v0.1.0) with the npm archive, source archive, manifest and `SHA256SUMS` (27 September 2026). npm publication of the same archive is pending the owner's `npm login`. |
+| Version | `0.2.1` |
+| Qualified source | `5b54b50`, tag `v0.2.1`; [tag CI run 40151506663](https://github.com/pavangupta352/interleave/actions/runs/40151506663) passed all 31 jobs, and the exact archive passed consumer acceptance on Node.js 22.18.0 and 24.7.0 ([validation](docs/validation.md)) |
+| Release state | [v0.2.1 on GitHub](https://github.com/pavangupta352/interleave/releases/tag/v0.2.1) with the npm archive, source archive, manifest and `SHA256SUMS` (25 October 2026), after [v0.1.0](https://github.com/pavangupta352/interleave/releases/tag/v0.1.0) (27 September 2026). The `v0.2.0` tag was never released. npm publication is pending the owner's `npm login`. |
 
 ## What works
 
@@ -36,9 +36,9 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | TypeORM 1.1.1 and 0.3.31 | Integrated | Functional (11 cases) and lifecycle (14 checks) gates on PostgreSQL 16/17/18 with Node 22.18 |
 | Other languages | Integrated | `processActor`; Python with psycopg 3.3.6 qualified through an installed-package workflow |
 | Historical case studies | Integrated | Knex #4694, node-pg-migrate #830, Sequelize #13482 with ordinary-concurrency, barrier and isolation-tester baselines; [case studies](docs/case-studies.md) |
-| Prisma 7 | Next release | Prisma ORM 7.10.0 checkout example and installed gate, 13 checks on PostgreSQL 16/17/18 × Node 22.18/24.7; on the 0.2.0 branch (`feature/overlap`) |
-| Multi-connection actors | Next release | Connection lanes for pools and ORM side queries, lane-binding replay, schema 4; on the 0.2.0 branch |
-| Statement overlap | Next release | `--overlap pairs` releases two commands together; finds the Knex 0.95.12 case-study miss; on the 0.2.0 branch |
+| Prisma 7 | Released in 0.2.1 | Prisma ORM 7.10.0 checkout example and installed gate, 13 checks on PostgreSQL 16/17/18 × Node 22.18/24.7 |
+| Multi-connection actors | Released in 0.2.1 | Connection lanes for pools and ORM side queries, lane-binding replay, schema 4 |
+| Statement overlap | Released in 0.2.1 | `--overlap pairs` releases two commands together; finds the Knex 0.95.12 case-study miss |
 | More languages | In progress | Ruby, PHP, Go and Java through `processActor`, on `feature/languages` |
 
 ## Known limits
@@ -53,7 +53,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Workstream | Next deliverable |
 | --- | --- |
 | Release 0.1.0 | Released on GitHub with checksums; npm publication of the same archive after the owner's `npm login` |
-| Release 0.2.1 | Multi-connection actors, statement overlap, Prisma 7, pool and overlap examples; tag CI, then consumer acceptance of the exact archive. The `v0.2.0` tag stays unreleased after its release-asset check failed |
+| Release 0.2.1 | Released on GitHub with checksums after tag CI and consumer acceptance of the exact archive; npm publication after the owner's `npm login` |
 | Multi-connection actors | Lanes per connection, lazy lane binding for replay, schema 4, pool and ORM qualification |
 | Statement overlap | An exploration mode that releases two commands together, to reach races like the Knex 0.95.12 miss |
 | Prisma and more ORMs | Prisma 7 export packaging; Sequelize, Knex and MikroORM ordinary workloads |

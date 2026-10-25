@@ -203,7 +203,8 @@ repair. See the [qualification record](qualification/prisma-orm-7.10.0-2026-09-2
 Boundaries of this profile:
 
 - `@prisma/client` 7.10.0 alone installs 74,458,946 bytes; the example's recorded
-  source identity is 82,478,406 bytes in 602 files, within the 128 MiB default
+  source identity was 82,478,406 bytes in 602 files with a 0.1.0 development
+  build and 82,568,411 bytes in 605 files with 0.2.1, within the 128 MiB default
   budget. Builds with the earlier 64 MiB default, including the `3785d49`
   candidate and the 0.1.0 package prepared at `ebbadbc`, stop every Prisma
   7.10.0 recording as `inconclusive` with `Source identity byte limit exceeded`
