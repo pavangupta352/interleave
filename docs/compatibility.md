@@ -14,7 +14,7 @@ The qualification covers Interleave's native, extension-free fixture profile and
 
 The native fixture profile permits the built-in `plpgsql` extension. Other extensions, foreign relations, custom casts/operators, custom range/base types, temporary fixture state, logical replication configuration, and the other explicitly unsupported catalog features fail closed. Drivers other than node-postgres have separate qualification gates and are not covered by this matrix.
 
-At tag `v0.3.0` (commit `b803e65`), [tag CI run 40160347133](https://github.com/pavangupta352/interleave/actions/runs/40160347133) passed all 60 jobs. Each of the six PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0 jobs passed 1,304 unit and integration tests, the two Windows jobs 738 unit and 336 integration tests, and the two macOS jobs 956 and 348. The browser job passed 81 report checks at each desktop and mobile size in Chromium, Firefox and WebKit, and the pgvector, managed CLI, verified TLS, language, TypeORM, Prisma and ORM jobs passed their gates. The release-asset job built the package twice from the tagged source and installed the candidate in a fresh consumer.
+At tag `v0.3.1` (commit `6bb23b1`), [tag CI run 40177590284](https://github.com/pavangupta352/interleave/actions/runs/40177590284) passed all 82 jobs. Each of the nine PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0/26.12.1 jobs passed 1,304 unit and integration tests, the three Windows jobs 738 unit and 336 integration tests, and the three macOS jobs 956 and 348; the Node.js 26.12.1 jobs ran with npm 12.2.1. The browser job passed 81 report checks at each desktop and mobile size in Chromium, Firefox and WebKit, and the pgvector, managed CLI, verified TLS, language, TypeORM, Prisma and ORM jobs passed their gates. The release-asset job built the package twice from the tagged source and installed the candidate in a fresh consumer.
 
 PostgreSQL 17 renamed the catalog locale fields used by fixture capture from `daticulocale`/`colliculocale` to `datlocale`/`colllocale`. Interleave selects the fields by verified server major and retains a stable semantic `locale` field in its canonical input. It also includes ICU tailoring rules because they can change comparison behavior. See the official [PostgreSQL 17 release notes](https://www.postgresql.org/docs/17/release-17.html), [PostgreSQL 16 collation catalog](https://www.postgresql.org/docs/16/catalog-pg-collation.html), and [PostgreSQL 18 database catalog](https://www.postgresql.org/docs/18/catalog-pg-database.html).
 
@@ -133,8 +133,8 @@ connection labels in Chromium, Firefox and WebKit at desktop and mobile sizes.
 Keep each actor's pool within the per-actor cap (eight in this profile). Other
 drivers, ORMs and pool implementations and larger pools have not been checked
 with this profile. Its integration tests run in every PostgreSQL 16, 17 and 18
-× Node.js 22.18.0 and 24.7.0 job of the CI matrix, and CI run 40150994903 passed
-them all. One
+× Node.js 22.18.0, 24.7.0 and 26.12.1 job of the CI matrix, and tag CI run
+40177590284 passed them all. One
 [cancel request](#cancel-requests) case uses two connections of one actor in
 this profile.
 
@@ -166,8 +166,8 @@ chooses how a pair interleaves; replay cannot force it. On the unchanged Knex
 run and 30 of 30 exact replays repeated it, while 17 of the 46 explored runs that
 paired the two inserts raced; see the
 [case studies](case-studies.md#what-the-fix-left-open). The overlap integration
-tests run in every PostgreSQL 16, 17 and 18 × Node.js 22.18.0 and 24.7.0 job of
-the CI matrix, and CI run 40150994903 passed them all.
+tests run in every PostgreSQL 16, 17 and 18 × Node.js 22.18.0, 24.7.0 and 26.12.1
+job of the CI matrix, and tag CI run 40177590284 passed them all.
 
 ## Cancel requests
 
@@ -571,7 +571,11 @@ All 18 rows passed on 25 October 2026 on macOS arm64, against the official
 and 18.6), with an archive of Interleave built from commit `d572265` (a 0.2 development build, before the cancel, COPY and Flush-stage work). Each
 cell gives the passing checks and the gate's duration. The rows ran one at a
 time, and other work on the machine slowed some of them. The `orms` CI job runs
-the same gate for each row on Ubuntu 24.04.
+the same gate for each row on Ubuntu 24.04, and from 0.3.1 also for each ORM and
+PostgreSQL major on Node.js 26.12.1 with npm 12.2.1; tag CI run 40177590284 passed
+all 27 rows. On 25 October 2026 the Knex, Sequelize and MikroORM gates also passed
+on macOS arm64 with Node.js 26.12.1 and npm 12.2.1 against PostgreSQL 16.15, in 37,
+49 and 57 seconds.
 
 | ORM | Node.js / npm | PostgreSQL 16.15 | PostgreSQL 17.11 | PostgreSQL 18.6 |
 | --- | --- | --- | --- | --- |
@@ -633,6 +637,10 @@ import, byte-identical regeneration, serializable `40001`/`P2034` retry and the
 unhandled actor error, `23505` rollback with CRUD on the same connection, named
 statement reuse, and a guided rerun plus exhaustive fresh exploration after a
 repair. See the [qualification record](qualification/prisma-orm-7.10.0-2026-09-27.md).
+Tag CI run 40177590284 repeated the gate on PostgreSQL 16, 17 and 18 with Node.js
+22.18.0, 24.7.0 and 26.12.1, the last with npm 12.2.1, and on 25 October 2026 it
+passed all 13 checks on macOS arm64 with Node.js 26.12.1 and npm 12.2.1 against
+PostgreSQL 16.15 in 365 seconds.
 
 Boundaries of this profile:
 

@@ -2,6 +2,87 @@
 
 Newest evidence first. Each section keeps its original date and results.
 
+## 0.3.1 release qualification (25 October 2026)
+
+The [v0.3.1 release](https://github.com/pavangupta352/interleave/releases/tag/v0.3.1)
+comes from annotated tag object `ea97b78c80d24a73b0477fa62c4fb72a2b475f55` on commit
+`6bb23b1d046cfbff66c71884c11c6506f3c18fd7`.
+[Tag CI run 40177590284](https://github.com/pavangupta352/interleave/actions/runs/40177590284)
+passed all 82 jobs. Every job with a Node.js matrix ran on 22.18.0, 24.7.0 and
+26.12.1, and the Node.js 26.12.1 jobs used npm 12.2.1:
+
+- nine native PostgreSQL 16/17/18 × Node.js jobs, 1,304 tests each
+- nine verified upstream TLS jobs over the same matrix
+- three Windows Server 2025 jobs (738 unit and 336 integration tests each) and
+  three macOS 15 jobs (956 and 348), with PostgreSQL 17
+- six TypeORM jobs on Node.js 22.18.0, nine Prisma ORM 7.10.0 jobs and twenty-seven
+  Sequelize, Knex and MikroORM rows
+- the Python (four legs), Ruby, PHP, Go and Java actor jobs on Node.js 24.7.0, three
+  PostgreSQL 17 + pgvector 0.8.6 jobs and three managed CLI jobs
+- the offline report job, 81 checks at each desktop and mobile size in Chromium,
+  Firefox and WebKit
+- the release-asset job, which built the package twice from the tagged source,
+  compared the archives, inspected their contents and installed the candidate in a
+  fresh consumer
+
+The release assets are that run's artifact (ID 12593865975). Fresh downloads from
+the release page match `SHA256SUMS`:
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `pavangupta352-interleave-0.3.1.tgz` | 2,103,316 | `b1b26b38e0500094b650aab9ec74106990baac229823d09141c5cf1b94492ae1` |
+| `interleave-0.3.1-source.tar.gz` | 1,125,669 | `fc8355ee48bb73f567b055a3d0b4728bbfbc07f1b3a23908e7fe7558a5eccba2` |
+| `release-manifest.json` | 97,166 | `aa2c395999f48dd3483e4c2490dea186e58bf6e8ac443eab7cf9fede7ddd6b41` |
+| `consumer-package-lock.json` | 6,137 | `344d2d2d81f44a0635f981c777c550986327ac4bcb724e57691d90a0007afa9c` |
+
+The npm archive's integrity is
+`sha512-52JQzep5QO7bQSaEhEUNCFpM+YMcyjrrWJcmguGsnP1bs2s+Jy84jeJ62BW5UyZyLFeePv12LF/QlJ7SdOH5iA==`.
+The release script, run on Apple silicon for the same commit, produced the same tar
+stream as this archive; the gzip bytes differ because Node.js's bundled zlib picks
+CPU-specific code (see [preparing a release](releasing.md)).
+
+### Consumer acceptance
+
+The documented workflows were run against the CI-built archive on macOS arm64 with
+Node.js 22.18.0 (npm 10.9.3), 24.7.0 (npm 11.5.1) and 26.12.1 (npm 12.2.1), against
+PostgreSQL 16.15, in fresh directories with their own npm caches. The gate recorded
+464 steps (84 on Node.js 22.18.0, 116 on 24.7.0 and 264 on 26.12.1), and every
+command that comes from a README or guide returned its documented exit code on the
+first attempt:
+
+- On all three toolchains: the README install and `doctor`, the getting-started
+  workflow (`init`, install, `doctor`, the scaffold race and report), the README
+  counter commands, an export with `--runtime-archive` that installed offline and
+  replayed exactly, and the cursor example.
+- On Node.js 26.12.1: a fresh build of the tag recorded the Knex migration-lock case
+  in an application without Interleave and exported it without
+  `--runtime-archive`, so export packed the runtime with npm 12; the export installed
+  and replayed the failure. The Sequelize, Knex and MikroORM gates passed 14 of 14
+  checks each, and the Prisma example ran as documented, its repaired search
+  covering 363 of 363 schedules.
+- On Node.js 24.7.0: the Python and Go examples, with 47 and 295 repaired schedules.
+- The 0.3.0 gate's finding about replays that stop mid-run: with the scaffold's new
+  `'error'` listener, a changed COPY input made exact replay report `incompatible`
+  (exit 3); without the listener it reported `harness-error` (exit 2).
+- The existing-output refusals name `--force`.
+
+The installed package matched the manifest in all 501 files (path, SHA-256, size
+and mode). The gate's findings were documentation notes, fixed after the release:
+the API reference and the application example now give their clients an `'error'`
+listener, the README pins node-postgres 8.23.0, and the export guide and ORM
+examples name the qualified npm and Node.js versions. The gate did not cover the
+npm registry route, PostgreSQL 17 and 18, verified TLS, or hosts other than macOS
+arm64; CI covers those it can.
+
+After publication, fresh downloads from the release page matched `SHA256SUMS`, and
+the README and getting-started commands ran as written against the release with
+Node.js 26.12.1 and npm 12.2.1. Publishing the release started
+[publish run 40183139172](https://github.com/pavangupta352/interleave/actions/runs/40183139172):
+it found the tag's successful CI run, rebuilt the tagged source on GitHub's runner,
+matched the release archive's package contents and skipped the npm publish because
+the package is not on npm yet. npm publication of this archive is pending the
+owner's registry login.
+
 ## 0.3.0 release qualification (25 October 2026)
 
 The [v0.3.0 release](https://github.com/pavangupta352/interleave/releases/tag/v0.3.0)
