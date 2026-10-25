@@ -23,7 +23,8 @@ export async function withTlsTestServer({ image = 'postgres:16', leaf = 'valid',
     const owner = randomUUID(), name = `interleave-tls-test-${owner}`, password = randomBytes(24).toString('hex');
     let id, imageId, proposed = false, creationUncertain = false, failed = false, failure, result;
     const event = (type, fields = {}) => onEvent({ type, at: new Date().toISOString(), name, ...fields });
-    const docker = async (args, timeout = 15_000, extraEnv = {}) => {
+    // A busy CI runner's Docker daemon has taken more than 15 seconds to answer.
+    const docker = async (args, timeout = 60_000, extraEnv = {}) => {
       // Detached children also survive a signal delivered to the fixture owner's group.
       // AbortSignal is intentionally not passed to execFile: create may already be accepted.
       return (await tlsTestCommand('docker', args, { timeout,
