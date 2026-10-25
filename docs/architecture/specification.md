@@ -12,7 +12,7 @@ The complete release includes a library, CLI, isolated database lifecycle, real 
 
 Use a transparent PostgreSQL protocol proxy implemented in TypeScript. A driver wrapper would be easier but would constrain application integrations and risk changing query semantics. A simulated database would offer stronger determinism but would test a different execution engine. The proxy keeps real queries and results while explicitly limiting scheduling to protocol boundaries.
 
-Node.js 22.18+ and 24 are release qualification targets. PostgreSQL 16, 17 and 18 are database qualification targets; any version untested at publication remains unsupported. The primary driver is node-postgres. Postgres.js and ORM paths using the qualified drivers are expansion acceptance targets, with their exact versions recorded.
+Node.js 22.18+, 24 and 26 are release qualification targets. PostgreSQL 16, 17 and 18 are database qualification targets; any version untested at publication remains unsupported. The primary driver is node-postgres. Postgres.js and ORM paths using the qualified drivers are expansion acceptance targets, with their exact versions recorded.
 
 ## Scenario contract
 

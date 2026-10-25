@@ -42,7 +42,7 @@ Query-builder statements with values use the extended query protocol with `$n` p
 
 ## Qualification gate
 
-Run the gate from the repository root on Node.js 22.18.0 or 24.7.0. It installs this example's lock and the Interleave archive under test into a new application under the evidence directory; the example's own `node_modules` is not used. The install needs npm registry access or a warm npm cache, and the export check downloads the locked archives from `registry.npmjs.org`.
+Run the gate from the repository root on Node.js 22.18.0, 24.7.0 or 26.12.1. It installs this example's lock and the Interleave archive under test into a new application under the evidence directory; the example's own `node_modules` is not used. The install needs npm registry access or a warm npm cache, and the export check downloads the locked archives from `registry.npmjs.org`.
 
 ```sh
 npm ci --ignore-scripts

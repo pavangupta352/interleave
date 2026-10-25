@@ -27,7 +27,7 @@ historical Prisma defect.
 | `scenario.ts` | `createCheckoutScenario(behavior, options)`; the default export tests `checkout` |
 
 The generator is configured with `generatedFileExtension = "ts"` and
-`importFileExtension = "ts"`. Node.js 22.18+ and 24 load the generated
+`importFileExtension = "ts"`. Node.js 22.18+, 24 and 26 load the generated
 TypeScript directly, so Interleave records the generated client files as part of
 the scenario's source, with no separate build step. The application code uses
 only erasable TypeScript syntax, which `tsconfig.json` enforces.
@@ -201,7 +201,7 @@ stops at its one-run budget and the CLI exits 4. The gate requires
 An exhausted frontier describes the schedules that Interleave's search modeled,
 not every possible execution.
 
-Run the gate from the repository root with Node.js 22.18.0 or 24.7.0 selected.
+Run the gate from the repository root with Node.js 22.18.0, 24.7.0 or 26.12.1 selected.
 It needs registry access (or a warm npm cache) and Prisma's binary host for the
 schema engine:
 

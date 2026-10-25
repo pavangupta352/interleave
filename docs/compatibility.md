@@ -24,7 +24,7 @@ PostgreSQL 18 virtual generated columns are covered by schema and logical row id
 
 The qualification above and every CI job not named here run on Linux (Ubuntu
 24.04). The `macos`
-CI job runs the unit and integration suites with Node.js 22.18.0 and 24.7.0 on
+CI job runs the unit and integration suites with Node.js 22.18.0, 24.7.0 and 26.12.1 on
 GitHub's macOS 15 arm64 image against PostgreSQL 17 from Homebrew. The `windows`
 job runs the same suites on GitHub's Windows Server 2025 image against the
 image's PostgreSQL 17 service. Both servers were PostgreSQL 17.11 at the time of
@@ -61,6 +61,34 @@ run on Windows. What differs from Linux and macOS:
   from one does not replay exactly from the other. Keep line endings consistent,
   for example with `* text=auto eol=lf` in `.gitattributes`.
 - `--docker` has not been checked on Windows.
+
+## Node.js and npm
+
+Interleave needs Node.js 22.18 or later. Every CI job with a Node.js matrix runs on
+22.18.0 with its bundled npm 10.9.3, on 24.7.0 with npm 11.5.1, and on 26.12.1,
+where it switches to npm 12.2.1 after installing the repository's dependencies, so
+the installed-package, export, Prisma and ORM gates also run with npm 12. The
+language, TypeORM and browser jobs each use a single Node.js version.
+
+npm 12 changed two things Interleave relies on:
+
+- It refuses to install a package from a URL (`EALLOWREMOTE`). Install a release
+  archive from a downloaded file, as the README and
+  [getting started](getting-started.md#install-a-release) do.
+- `npm pack --json` prints an object keyed by package name instead of an array.
+  Export reads both forms from 0.3.1 on. In 0.3.0, an export that packs the
+  installed runtime itself, rather than bundling the archive given with
+  `--runtime-archive`, stops under npm 12 with "npm pack returned unexpected
+  package metadata".
+
+On 25 October 2026, with Node.js 26.12.1 and npm 12.2.1 on macOS (arm64), the 0.3.0
+release archive installed from the downloaded file, and the getting-started
+workflow ran as documented: the scaffold's race failed (exit 1), exact replay
+repeated it, export with `--runtime-archive` completed, and the exported folder
+installed offline with `node install.mjs` and repeated the failure on replay.
+npm 12 also skips dependency install scripts unless they are approved;
+node-postgres 8.23.0, Interleave's only runtime dependency, and its dependencies
+have none.
 
 ## Verified upstream TLS
 
@@ -590,7 +618,7 @@ Windows, and exact replay across Node.js or PostgreSQL versions.
 Prisma ORM 7.10.0 is qualified through its node-postgres driver adapter:
 `@prisma/client` 7.10.0 and `@prisma/adapter-pg` 7.10.0 over `pg` 8.23.0, using
 the default `sync-cycle-v1` profile. The `prisma-client` generator writes the
-client into the application as TypeScript that Node.js 22.18.0 and 24.7.0 load
+client into the application as TypeScript that Node.js 22.18.0, 24.7.0 and 26.12.1 load
 directly, so the generated files are recorded as scenario source. Each actor owns
 one `PrismaClient` whose adapter pool has `max: 1`. Prisma sends BEGIN, COMMIT
 and ROLLBACK as simple queries and model operations as parameterized extended

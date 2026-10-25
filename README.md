@@ -129,14 +129,14 @@ The same workflow is available from JavaScript: `explore`, `runOnce`,
 
 | | Tested scope |
 | --- | --- |
-| PostgreSQL | 16, 17 and 18, on Node.js 22.18 and 24.7 |
+| PostgreSQL | 16, 17 and 18, on Node.js 22.18, 24.7 and 26.12 |
 | Operating systems | Linux, macOS and Windows; portable export needs Linux or macOS ([details](docs/compatibility.md#operating-systems)) |
 | node-postgres 8.23.0 | The primary driver; [counter](examples/application/README.md) and [neveroversell](examples/neveroversell/README.md) examples |
 | Postgres.js 3.4.9 | Parameterized queries and transactions with the [`describe-flush-v1` profile](examples/postgresjs/README.md) |
 | Drizzle 0.45.2, Kysely 0.29.5 | Ordinary query-builder CRUD and transactions over node-postgres, each actor with its own pool |
 | TypeORM 1.1.1 and 0.3.31 | A per-actor DataSource helper with transactions and serialization-failure retry, on Node.js 22.18; [example](examples/typeorm/README.md) |
-| Prisma ORM 7.10.0 | `@prisma/adapter-pg` over node-postgres 8.23.0 with the generated client recorded as source, on Node.js 22.18 and 24.7; [example](examples/prisma/README.md). Portable export is not supported for this client |
-| Sequelize 6.37.8, Knex 3.3.0, MikroORM 6.6.17 | Per-actor helpers over node-postgres 8.23.0 with each ORM's own transactions and startup commands, serialization-failure retry and portable export, on Node.js 22.18 and 24.7; [Sequelize](examples/sequelize/README.md), [Knex](examples/knex/README.md) and [MikroORM](examples/mikro-orm/README.md) examples |
+| Prisma ORM 7.10.0 | `@prisma/adapter-pg` over node-postgres 8.23.0 with the generated client recorded as source, on Node.js 22.18, 24.7 and 26.12; [example](examples/prisma/README.md). Portable export is not supported for this client |
+| Sequelize 6.37.8, Knex 3.3.0, MikroORM 6.6.17 | Per-actor helpers over node-postgres 8.23.0 with each ORM's own transactions and startup commands, serialization-failure retry and portable export, on Node.js 22.18, 24.7 and 26.12; [Sequelize](examples/sequelize/README.md), [Knex](examples/knex/README.md) and [MikroORM](examples/mikro-orm/README.md) examples |
 | Any language | `processActor` runs a separate program as an actor; qualified on PostgreSQL 16 with [Python](examples/python/README.md) (psycopg 3.3.6, [asyncpg](examples/asyncpg/README.md) 0.32.0, and the [SQLAlchemy](examples/sqlalchemy/README.md) 2.1 and [Django](examples/django/README.md) 6.1 ORMs), [Ruby](examples/ruby/README.md) (pg 1.6.3 and [Active Record](examples/activerecord/README.md) 8.1), [PHP](examples/php/README.md) (PDO `pdo_pgsql`), [Go](examples/go/README.md) (pgx 5.11.0 and [GORM](examples/gorm/README.md) 1.31) and [Java](examples/java/README.md) (pgjdbc 42.7.13) |
 | Connection pools | `--connection-profile multi-producer-v1` schedules each connection of an actor: `pg.Pool` with `max: 2`, a Kysely side query beside a transaction, Postgres.js with `max: 2` ([details](docs/compatibility.md#multi-connection-actors)) |
 | Races inside one statement | `--overlap pairs` releases two commands together and lets PostgreSQL interleave them ([details](docs/compatibility.md#statement-overlap)) |
@@ -187,8 +187,8 @@ The package is not on npm yet. Download the archive attached to the
 and install the file:
 
 ```sh
-curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.3.0/pavangupta352-interleave-0.3.0.tgz
-npm install --save-dev "$PWD/pavangupta352-interleave-0.3.0.tgz" pg
+curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.3.1/pavangupta352-interleave-0.3.1.tgz
+npm install --save-dev "$PWD/pavangupta352-interleave-0.3.1.tgz" pg
 npx --no-install interleave doctor --docker
 ```
 

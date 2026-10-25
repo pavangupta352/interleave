@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 25 October 2026
+
+Interleave runs and is tested on Node.js 26 with npm 12, the current npm. Export
+reads npm 12's `npm pack` output, the README installs the release archive in a way
+npm 12 accepts, and a publish workflow can send verified release archives to npm.
 
 ### Changes
 
@@ -9,15 +13,22 @@
 - The refusals to replace an existing artifact or report name `--force` as well
   as `{ overwrite: true }`.
 
+### Fixes
+
+- Export reads `npm pack --json` output from npm 12, which prints an object keyed
+  by package name instead of an array. In 0.3.0, an export that packs the installed
+  runtime itself stopped under npm 12 with "npm pack returned unexpected package
+  metadata"; exports given `--runtime-archive` were not affected.
+
 ### Testing and release
 
-- CI runs every Node.js job on 26.12.1 as well as 22.18.0 and 24.7.0, and the
-  Node.js 26 jobs use npm 12.2.1, so the installed-package workflows run with the
-  current npm.
+- Every CI job with a Node.js matrix also runs Node.js 26.12.1, with npm 12.2.1,
+  so the installed-package, export, Prisma and ORM workflows run with the current
+  npm. The Prisma and ORM gates and their examples accept Node.js 26.12.1.
 - A publish workflow sends a GitHub release's npm archive to npm with trusted
-  publishing once the archive holds exactly the package that two fresh builds of
-  the tagged source produce, and then checks the registry's integrity hash against
-  it.
+  publishing once the tag's CI run has passed and the archive holds exactly the
+  package that two fresh builds of the tagged source produce, and then checks the
+  registry's integrity hash against it.
 
 ### Documentation
 
