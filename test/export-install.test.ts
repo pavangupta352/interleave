@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { sharedInstallerSource, type SharedInstallerConfig } from '../src/export-install.js';
+import { packedPackage } from './helpers/npm.js';
 
 const temporary: string[] = [];
 const fingerprint = 'a'.repeat(64);
@@ -40,7 +41,7 @@ async function fixture(identity = fingerprint, identitySideEffect = '') {
     cwd: packageRoot, encoding: 'utf8', timeout: 30_000,
   });
   expect(packed.status, packed.stderr).toBe(0);
-  const filename = (JSON.parse(packed.stdout) as Array<{ filename: string }>)[0]!.filename;
+  const { filename } = packedPackage(packed.stdout);
   const archive = `archives/${filename}`;
   const archiveBytes = await fs.readFile(join(bundle, archive));
   const spec = 'file:../../absent-original-runtime.tgz';

@@ -7,6 +7,7 @@ import { expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact-schema.js';
 import { verifyRegressionExport } from '../src/export.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
+import { packedPackage } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
@@ -21,7 +22,7 @@ test('installed Postgres.js records staged evidence, exports original bytes and 
   const root = await mkdtemp(join(await realpath(tmpdir()), 'interleave postgresjs export '));
   try {
     const archives = join(root, 'archives'); await mkdir(archives);
-    const packed = JSON.parse(execute(['pack', '--ignore-scripts', '--json', '--pack-destination', archives], repository, 0, 'npm'))[0];
+    const packed = packedPackage(execute(['pack', '--ignore-scripts', '--json', '--pack-destination', archives], repository, 0, 'npm'));
     const archive = join(archives, packed.filename);
     const app = join(root, 'app'); await mkdir(app);
     await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'postgresjs-qualification', private: true, type: 'module', dependencies: { postgres: '3.4.9' } }, null, 2) + '\n');

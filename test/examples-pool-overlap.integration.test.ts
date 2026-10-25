@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
-import { npm } from './helpers/npm.js';
+import { npm, packedPackage } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
@@ -24,7 +24,7 @@ test('the pool and overlap examples behave as their READMEs state', { timeout: 9
     return result.stdout;
   }
   try {
-    const packed = JSON.parse(execute(npm('pack', '--ignore-scripts', '--json', '--pack-destination', root), repository, 0))[0];
+    const packed = packedPackage(execute(npm('pack', '--ignore-scripts', '--json', '--pack-destination', root), repository, 0));
     const app = join(root, 'shop'); await mkdir(app);
     await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'examples-shop', private: true, type: 'module' }, null, 2) + '\n');
     execute(npm('install', '--save-dev', '--save-exact', join(root, packed.filename), 'pg@8.23.0', '--ignore-scripts'), app, 0);

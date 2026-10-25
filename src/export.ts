@@ -601,10 +601,12 @@ async function packRuntime(runtimeRoot: string, staging: string): Promise<Runtim
   let packed: unknown;
   try { packed = JSON.parse(result.stdout); }
   catch { throw new Error(`npm pack did not return JSON metadata${result.stderr ? `: ${result.stderr.trim()}` : ''}`); }
-  if (!Array.isArray(packed) || packed.length !== 1 || typeof packed[0] !== 'object' || packed[0] === null) {
+  // npm 11 and earlier print an array of packed packages; npm 12 prints an object keyed by package name.
+  const records = typeof packed === 'object' && packed !== null ? Object.values(packed) : [];
+  if (records.length !== 1 || typeof records[0] !== 'object' || records[0] === null) {
     throw new Error('npm pack returned unexpected package metadata');
   }
-  const record = packed[0] as Record<string, unknown>;
+  const record = records[0] as Record<string, unknown>;
   if (record.name !== name || record.version !== version) throw new Error('Interleave runtime metadata changed during npm pack');
   const filename = requiredString(record.filename, 'npm pack filename');
   if (basename(filename) !== filename || !filename.endsWith('.tgz')) throw new Error('npm pack returned an unsafe filename');

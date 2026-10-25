@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
-import { npm } from './helpers/npm.js';
+import { npm, packedPackage } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
@@ -24,7 +24,7 @@ test('the cursor example behaves as its README states', { timeout: 900_000 }, as
     return result.stdout;
   }
   try {
-    const packed = JSON.parse(execute(npm('pack', '--ignore-scripts', '--json', '--pack-destination', root), repository, 0))[0];
+    const packed = packedPackage(execute(npm('pack', '--ignore-scripts', '--json', '--pack-destination', root), repository, 0));
     const app = join(root, 'bank'); await mkdir(app);
     await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'cursor-bank', private: true, type: 'module' }, null, 2) + '\n');
     execute(npm('install', '--save-dev', '--save-exact', join(root, packed.filename), 'pg@8.23.0', 'pg-cursor@2.22.1', '--ignore-scripts'), app, 0);

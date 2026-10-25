@@ -9,6 +9,7 @@ import { expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact.js';
 import { verifyRegressionExport } from '../src/export.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
+import { packedPackage } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
@@ -47,7 +48,7 @@ test('ordinary ORM failures survive installed exact replay, reduction and offlin
     return result.stdout;
   }
   try {
-    const packed = JSON.parse(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], repository))[0];
+    const packed = packedPackage(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], repository));
     const archive = join(root, packed.filename);
     const app = join(root, 'application'); await mkdir(app);
     await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'ordinary-orm-qualification', private: true, type: 'module', dependencies: pins }, null, 2) + '\n');

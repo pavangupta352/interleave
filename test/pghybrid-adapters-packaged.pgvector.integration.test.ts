@@ -7,6 +7,7 @@ import { Client } from 'pg';
 import { expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact-schema.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
+import { packedPackage } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
@@ -27,7 +28,7 @@ test('all four public adapters and the supplemental pg Client replay from a clea
     return result.stdout;
   }
   try {
-    const packed = JSON.parse(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], repository))[0];
+    const packed = packedPackage(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], repository));
     const app = join(root, 'app'); await mkdir(app);
     // The aggregate example imports every caller at module load, so every row
     // deliberately installs/binds the complete optional dependency set.

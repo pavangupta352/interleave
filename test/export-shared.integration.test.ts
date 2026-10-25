@@ -7,6 +7,7 @@ import { afterEach, expect, test } from 'vitest';
 import { verifyRegressionExport } from '../src/export.js';
 import { initializeProject } from '../src/cli/init.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
+import { packedPackage } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const temporary: string[] = [];
@@ -22,7 +23,7 @@ afterEach(async () => { await Promise.all(temporary.splice(0).map(path => rm(pat
 test.each(['8.23.0', '8.11.5'])('init workload exports and clean-replays with original npm graph, app pg %s', async appPg => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'interleave shared install ')); temporary.push(root);
   const archives = join(root, 'original archives'); await mkdir(archives);
-  const pack = JSON.parse(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', archives], repository))[0];
+  const pack = packedPackage(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', archives], repository));
   const archive = join(archives, pack.filename);
   const app = join(root, 'original app');
   await initializeProject(app, pack.version);
@@ -76,7 +77,7 @@ test.each(['8.23.0', '8.11.5'])('init workload exports and clean-replays with or
 test('an app sharing no package instance with its local-archive runtime exports through the original app installation', async () => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'interleave unshared install ')); temporary.push(root);
   const archives = join(root, 'original archives'); await mkdir(archives);
-  const pack = JSON.parse(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', archives], repository))[0];
+  const pack = packedPackage(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', archives], repository));
   const archive = join(archives, pack.filename);
   // Postgres.js has no dependencies, so nothing the scenario loads is also an
   // installed instance of Interleave's runtime graph.

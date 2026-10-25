@@ -56,9 +56,13 @@ does not replace execution or source review.
 
 Publishing the GitHub release starts the [publish workflow](../.github/workflows/publish.yml).
 It downloads the release's npm archive and `SHA256SUMS`, checks the hash, the
-package name and that the version matches the tag, and publishes that file with
-npm trusted publishing, so no npm token is stored. It then checks that the
-registry's integrity hash matches the archive. To publish an existing release, run
+package name and that the version matches the tag, and then runs the release script
+with `--tag` and `--archive`: the archive must be byte-identical to two fresh builds
+of the tagged source, because a checksum file from the same release cannot vouch for
+it. A separate job, the only one with npm's OIDC permission, downloads the archive
+again, checks it against the verified hash and publishes it with npm trusted
+publishing, so no npm token is stored. It then checks that the registry's integrity
+hash matches the archive. To publish an existing release, run
 `gh workflow run publish.yml -f tag=vX.Y.Z`.
 
 npm accepts a trusted publisher only for a package that already exists. A

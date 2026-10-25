@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
 import { parseRunArtifact } from '../../src/artifact.js';
 import { testDatabaseUrl } from './postgres.js';
-import { npm } from './npm.js';
+import { npm, packedPackage } from './npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../../package.json', import.meta.url)));
 
@@ -68,7 +68,7 @@ export async function qualifyLanguageExample(example: LanguageExample): Promise<
     return result.stdout;
   }
   try {
-    const packed = JSON.parse(execute(npm('pack', '--ignore-scripts', '--json', '--pack-destination', root), repository, 0))[0];
+    const packed = packedPackage(execute(npm('pack', '--ignore-scripts', '--json', '--pack-destination', root), repository, 0));
     const app = join(root, 'shop'); await mkdir(app);
     await writeFile(join(app, 'package.json'), JSON.stringify({ name: `${example.folder}-shop`, private: true, type: 'module' }, null, 2) + '\n');
     execute(npm('install', join(root, packed.filename), '--ignore-scripts'), app, 0);

@@ -121,7 +121,8 @@ async function buildPackage(context, label) {
   assert((await readOrdinaryFile(join(cwd, 'package-lock.json'))).equals(lockBytes), 'Locked install changed the source lockfile');
   await command('npm', ['run', 'build'], { cwd, env, signal });
   assert((await readOrdinaryFile(join(cwd, 'package-lock.json'))).equals(lockBytes), 'Build changed the source lockfile');
-  const pack = JSON.parse((await command('npm', ['pack', '--ignore-scripts', '--json'], { cwd, env, signal })).toString('utf8'));
+  // npm 11 and earlier print an array of packed packages; npm 12 prints an object keyed by package name.
+  const pack = Object.values(JSON.parse((await command('npm', ['pack', '--ignore-scripts', '--json'], { cwd, env, signal })).toString('utf8')) ?? {});
   const filename = `pavangupta352-interleave-${metadata.version}.tgz`;
   assert(pack.length === 1 && pack[0].filename === filename, 'npm returned an unexpected package filename');
   const path = join(cwd, filename), bytes = await readOrdinaryFile(path, MAX_ARCHIVE, cwd);

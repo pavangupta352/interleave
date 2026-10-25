@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact-schema.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
+import { packedPackage } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
@@ -18,7 +19,7 @@ function execute(command: string, args: string[], cwd: string, expected = 0) {
 test('the installed package ships a runnable pghybrid scenario with source-bound CLI replay', async () => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'interleave packaged pghybrid '));
   try {
-    const packed = JSON.parse(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], repository))[0];
+    const packed = packedPackage(execute('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], repository));
     const app = join(root, 'app'); await mkdir(app);
     await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'pghybrid-packaged-qualification', private: true, type: 'module', dependencies: { pg: '8.23.0' } }, null, 2) + '\n');
     execute('npm', ['install', join(root, packed.filename), '--ignore-scripts'], app);
