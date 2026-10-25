@@ -26,6 +26,8 @@ npx --no-install interleave run pool/scenario.mjs --docker
 npx --no-install interleave run pool/scenario.mjs --connection-profile multi-producer-v1 --docker --out pool-failure.json
 
 # Replay binds each recorded connection to a live one and repeats the failure (exit 1).
+# If the pool hands a later query to the other connection than it did when
+# recording, replay reports incompatible (exit 3) instead; run it again.
 npx --no-install interleave replay pool/scenario.mjs pool-failure.json --docker
 
 # Keep only the ordering choices the failure needs (exit 1), then write a report.

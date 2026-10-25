@@ -1,7 +1,7 @@
 # Interleave documentation
 
 Start with the task you want to complete. The setup guide covers installing a
-release and building from source. Interleave is at 0.2: before 1.0, a minor
+release and building from source. Interleave is at 0.3: before 1.0, a minor
 release may change the API, CLI or artifact format, and the changelog records
 each change.
 
@@ -35,6 +35,11 @@ each change.
 | [Java actors](../examples/java/README.md) | A Java program using JDBC, run from source, as an actor | Native PostgreSQL, Java 21 with pgjdbc 42.7.13 |
 | [Historical cases](../examples/historical/README.md) | Knex, node-pg-migrate and Sequelize defects before and after their upstream fixes, with baselines | Native PostgreSQL, node-postgres 8.23.0 through each library |
 | [Prisma ORM](../examples/prisma/README.md) | A generated Prisma 7 client that oversells, its repairs, serializable retries and prepared statements | Native PostgreSQL, Prisma 7.10.0 with `@prisma/adapter-pg` |
+| [Sequelize](../examples/sequelize/README.md), [Knex](../examples/knex/README.md), [MikroORM](../examples/mikro-orm/README.md) | Per-actor ORM helpers with transactions, retry and portable export | Native PostgreSQL, node-postgres 8.23.0 |
+| [Pool](../examples/pool/README.md) and [overlap](../examples/overlap/README.md) | A pool using two connections at once, and two claims in one statement each | `multi-producer-v1`, `--overlap pairs` |
+| [Cursor](../examples/cursor/README.md) | A batch job that reads through pg-cursor and loses a deposit between batches | `flush-stages-v1`, `multi-producer-v1` |
+| [asyncpg](../examples/asyncpg/README.md), [SQLAlchemy](../examples/sqlalchemy/README.md), [Django](../examples/django/README.md) | Python's asyncio driver and two ORMs as actors | asyncpg with `flush-stages-v1`; psycopg 3 |
+| [Active Record](../examples/activerecord/README.md), [GORM](../examples/gorm/README.md) | The Ruby and Go ORMs as actors, with seeded repair searches | pg gem 1.6.3; pgx 5.10.0 |
 
 The counter, neveroversell and Prisma checkout are constructed race examples.
 pghybrid is a compatibility workload, with no claimed library defect. The

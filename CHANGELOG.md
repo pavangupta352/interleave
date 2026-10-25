@@ -27,10 +27,10 @@
   command, with backpressure in both directions, and a copy that waits on
   another actor's lock is observed like any other wait. Version 5 completions
   record each COPY's direction, byte count and SHA-256 digest, never the rows;
-  exact replay requires the same COPY FROM STDIN data. A COPY that waits on its
-  own client lets the actor's other connections run, so a pipeline between two
-  connections' COPY commands works in either order. COPY BOTH, used only by
-  replication, is still refused.
+  exact replay requires the same COPY FROM STDIN data. In the multi-producer
+  profile, a COPY that waits on its own client lets only the same actor's other
+  connections run, so a pipeline between two connections' COPY commands works in
+  either order. COPY BOTH, used only by replication, is still refused.
 - Schedule cursors and other clients that wait on Flush with the opt-in
   `flush-stages-v1` profile (`--protocol-profile flush-stages-v1`). Every group
   of extended-protocol messages that ends in Flush is its own release, so another
@@ -66,7 +66,7 @@
   [Sequelize](examples/sequelize/README.md), [Knex](examples/knex/README.md) and
   [MikroORM](examples/mikro-orm/README.md) examples with per-actor helpers. The
   installed-package gate `npm run test:orms` runs 14 checks per row, including
-  exact replay, minimization, guided replay of a repair, retry, cancellation and
+  exact replay, minimization, guided replay of a repair, retry, interruption at a deadline and
   portable export. The MikroORM helper turns off `ensureDatabase`, whose SQL
   contains the generated database name. See
   [compatibility](docs/compatibility.md#sequelize-knex-and-mikroorm).
@@ -101,8 +101,8 @@
   its database. On Windows, Node.js raises SIGHUP when the console window closes,
   and Ctrl+Break's SIGBREAK now stops a run too (exit 149).
 - When an uncaught exception or unhandled promise rejection ends the scenario
-  worker, the run's reason says which, and names a client or pool without an
-  `'error'` listener as the usual cause. It used to say only that the worker
+  worker, the run's reason says which. For an uncaught exception it names a
+  client or pool without an `'error'` listener as the usual cause. It used to say only that the worker
   exited before completing. The error's own text is still never recorded.
 - A protocol cycle that prepares, describes or closes a statement without
   executing it records that statement's SQL once. pgx's Parse/Describe/Sync
@@ -116,8 +116,9 @@
   when the application had installed Interleave from a local archive: export
   rejected the archive options, and the separate installation rejected the local
   runtime entry in the application lock. A Knex 3.3.0 application is one such
-  case. Export also selects that installation by itself when the app installed
-  Interleave from an archive in the project and export runs from that copy. An
+  case. Export also selects that installation by itself when the app's lock
+  installs Interleave from a local archive and export runs from that installed
+  copy, and asks for `--runtime-archive` when that archive is outside the project. An
   empty `dependencyArchives` list selects nothing, and the error for another
   local archive dependency names `dependencyArchives` (`--dependency-archive`)
   only when supplying it can work.

@@ -1,6 +1,6 @@
 # Command-line interface
 
-This page describes the 0.2 command-line interface. Before 1.0, a minor release
+This page describes the 0.3 command-line interface. Before 1.0, a minor release
 may change commands or options; the [changelog](../CHANGELOG.md) records every
 change and the [compatibility guide](compatibility.md) lists what each release was
 qualified against.
@@ -206,8 +206,10 @@ execute the copied project. Neither command requires a database URL.
 <original.tgz>` arguments supply original archives whose integrity must match the
 recorded npm lock, and select the export that restores the original app
 installation. Export selects that installation by itself when the recording
-shares packages between the app and Interleave, or when the app installed
-Interleave from an archive in the project and export runs from that copy. The shared installer restores
+shares packages between the app and Interleave, or when the app's lock installs
+Interleave from a local archive (a `file:` entry) and export runs from that
+installed copy. An archive inside the project is used directly; for one outside
+it, export asks for `--runtime-archive`. The shared installer restores
 that original graph from bundled archives in a fresh private offline cache.
 An arbitrary repack does not substitute for the original archive.
 
@@ -271,6 +273,10 @@ keys, or raw application logs. Review evidence before sharing it.
 | 130 | SIGINT cancellation, after owned cleanup |
 | 143 | SIGTERM cancellation, after owned cleanup |
 | 149 | SIGBREAK cancellation on Windows (Ctrl+Break), after owned cleanup |
+
+`export`, `report` and `init` own no database or container and are not
+interrupted by these signals: they finish writing their files, then exit with
+the signal's code.
 
 A safety-budget stop returns 4 even when retained earlier runs include a
 violation. Its JSON result still records those observations. An actor/harness

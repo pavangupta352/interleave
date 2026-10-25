@@ -71,7 +71,7 @@ npm run test:orms
 
 `INTERLEAVE_ORM_EVIDENCE` must name a new directory with no `node_modules` directory in any parent, because Node.js would resolve optional peer drivers from there. Set `INTERLEAVE_ORM_RUNTIME_SHA256` to require an exact archive hash. The [compatibility guide](../../docs/compatibility.md#sequelize-knex-and-mikroorm) lists the 14 checks and the evidence files the gate keeps.
 
-Observed on 25 October 2026 on macOS arm64 with official Docker images and the Interleave 0.2.0 archive built from commit `d572265`, one row at a time:
+Observed on 25 October 2026 on macOS arm64 with official Docker images and an archive of Interleave built from commit `d572265` (a 0.2 development build, before the cancel, COPY and Flush-stage work), one row at a time:
 
 | Node.js / npm | PostgreSQL 16.15 | PostgreSQL 17.11 | PostgreSQL 18.6 |
 | --- | --- | --- | --- |

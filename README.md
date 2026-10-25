@@ -79,8 +79,10 @@ $ npx interleave report failure.json --out failure.html
 Wrote offline evidence report: failure.html
 ```
 
-Exit codes are meant for CI: `0` checked success, `1` invariant violation, `3`
-incompatible replay, `4` inconclusive or budget exhausted. `--docker` starts a
+Exit codes are meant for CI: `0` checked success, `1` invariant violation, `2`
+usage, actor or harness error, `3` incompatible replay, `4` inconclusive or
+budget exhausted, and 128 plus the signal number after an interrupted run cleans
+up (`130` for Ctrl+C). `--docker` starts a
 throwaway PostgreSQL container and removes it afterwards; you can point Interleave
 at a dedicated test server instead.
 
@@ -171,7 +173,8 @@ isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize
   timers decide when a request arrives, so replaying one can find a different
   command running.
 - Clocks, randomness and external services are not controlled.
-- On Windows, `export` is refused, and a run ended from outside skips cleanup.
+- On Windows, `export` is refused, and a run killed without a signal (such as
+  `taskkill /F`) skips cleanup.
 
 ## Install
 

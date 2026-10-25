@@ -1,6 +1,6 @@
 # Library API
 
-This page describes the 0.2 API. Before 1.0, a minor release may change it; the [changelog](../CHANGELOG.md) records every change and the [compatibility guide](compatibility.md) lists what each release was qualified against.
+This page describes the 0.3 API. Before 1.0, a minor release may change it; the [changelog](../CHANGELOG.md) records every change and the [compatibility guide](compatibility.md) lists what each release was qualified against.
 
 For a complete application example, start with the [application guide](application-guide.md).
 The [CI guide](ci.md) shows result checks and evidence retention. The API requires
@@ -40,7 +40,7 @@ async function increment({ connectionString }) {
 
 Each actor defaults to one admitted PostgreSQL connection. Set `maxConnectionsPerActor` from 2 through 8 to permit queryless auxiliary connections, such as an adapter monitor. Only one live connection may issue commands; it keeps that role until it closes, including while idle. Another live connection sending commands is an unsupported profile. Sequential reconnects receive a new connection generation. An operation that runs queries concurrently through a pool needs the explicit [multi-connection profile](#multi-connection-actors).
 
-A client can finish closing before the proxy receives both socket-close notifications. During confirmed shutdown, one prospective TCP client may wait with bounded, uninterpreted data. It receives no connection generation or startup identity, and opens no upstream connection, until the old frontend and backend sockets have both closed. A disconnected waiting client is discarded. Further waiting clients and connections beyond the cap while existing sessions are live remain unsupported.
+A client can finish closing before the proxy receives both socket-close notifications. During confirmed shutdown, one prospective TCP client may wait with bounded, uninterpreted data. It receives no connection generation or startup identity, and opens no upstream connection, until the old frontend and backend sockets have both closed. A disconnected waiting client is discarded. Further waiting clients and connections beyond the cap while existing sessions are live remain unsupported, except a CancelRequest: one that arrives as a connection beyond the cap is read and routed like any other [cancel request](compatibility.md#cancel-requests).
 
 Return a JSON value only when that observation belongs in the recorded evidence. An assertion failure in the invariant produces a violation; another exception is a harness error. Rejected application operations are actor errors and do not count as invariant violations.
 
@@ -68,7 +68,9 @@ programs that print other text. A nonzero exit rejects the actor with its status
 and the last 2 KiB of stderr, with the endpoint password redacted. Cancellation
 sends SIGTERM, then SIGKILL after `killGraceMs` (default 1000). stdout is bounded
 by `maxOutputBytes` (default 1 MiB). The program must not daemonize; it runs in
-the actor's process tree and is stopped with the run.
+the actor's process tree and is stopped with the run. On Windows, SIGTERM ends the
+program at once, without the grace period, and supervision ends only the worker,
+so processes the program started itself keep running.
 
 Every connection the program opens goes through its actor's proxy, so the usual
 limits apply: one live command-producing connection per actor, and the qualified
@@ -157,11 +159,11 @@ Exact replay and reduction compare it before creating a database.
 
 The default `protocolProfile: 'sync-cycle-v1'` schedules one Simple Query packet or one complete extended cycle ending in Sync. Select `protocolProfile: 'describe-flush-v1'` for the qualified Postgres.js flow that needs server metadata before sending parameter values.
 
+The describe-flush-v1 profile gives Parse/statement Describe/Flush its own release gate. Real metadata completes that stage; matching Bind/Execute/Sync requires a second release. A Parse error instead requires a separately released Sync recovery. Cached prepared queries and ordinary whole cycles remain single stages. Each release counts toward `maxSteps`, including metadata and recovery.
+
+Use Postgres.js 3.4.9 with `max: 1`, `ssl: false`, and prompt client closure on the actor's AbortSignal as well as in `finally`. Interrupted `sql.begin` calls need this lifecycle because the driver waits for ReadyForQuery before settling a protocol error. See the [measured profile and complete lifecycle example](qualification/postgresjs-describe-flush-2026-09-09.md). Selecting describe-flush-v1 does not enable arbitrary early-Flush pipelines or cursors; those need flush-stages-v1.
+
 Select `protocolProfile: 'flush-stages-v1'` for clients that wait on Flush in the middle of an extended-protocol cycle: cursors that read in batches, such as pg-cursor, pg-query-stream and Postgres.js `cursor()`, and pipelines that send a flush request. Every group of messages that ends in Flush is its own release. It completes once PostgreSQL has answered every message in it, or on an error. The cycle stays open between releases, so other actors' commands can run between two batches, and the release that ends in Sync closes it. After an error only a lone Sync may follow, because PostgreSQL discards everything until Sync. The profile also accepts the describe-flush-v1 prefix and ordinary whole cycles. Its records are schema version 5: a Flush release records its command tags, the rows it returned and whether the portal was suspended at its row limit, and each later release of a cycle names the one before it.
-
-The staged profile gives Parse/statement Describe/Flush its own release gate. Real metadata completes that stage; matching Bind/Execute/Sync requires a second release. A Parse error instead requires a separately released Sync recovery. Cached prepared queries and ordinary whole cycles remain single stages. Each release counts toward `maxSteps`, including metadata and recovery.
-
-Use Postgres.js 3.4.9 with `max: 1`, `ssl: false`, and prompt client closure on the actor's AbortSignal as well as in `finally`. Interrupted `sql.begin` calls need this lifecycle because the driver waits for ReadyForQuery before settling a protocol error. See the [measured profile and complete lifecycle example](qualification/postgresjs-describe-flush-2026-09-09.md). Selecting the profile does not enable arbitrary early-Flush pipelines or cursors.
 
 ## Multi-connection actors
 
@@ -181,7 +183,10 @@ Every lane releases its own units in order, one at a time. The global rule is
 unchanged: another unit is released only when every running unit, on any lane,
 has completed or is confirmed blocked by a PostgreSQL lock observation. Lanes of
 one actor can therefore wait for each other; the observed wait identifies the
-blocking connection's backend. An actor is ready for the next decision once it has settled or
+blocking connection's backend. One exception exists in this profile: while a
+unit is inside COPY and PostgreSQL reports it waiting on its own client, the
+same actor's other connections may start their next commands, and no other
+actor's command starts until the COPY completes or blocks. An actor is ready for the next decision once it has settled or
 any of its lanes has a queued or running unit; idle connections are not waited
 for. A connection that has just started or completed a command gets up to 25 ms
 to queue its next one before the scheduler decides without it. A command that
@@ -204,7 +209,7 @@ concurrently can be numbered differently in another run.
 Exact replay does not rely on accept order. It binds each recorded connection to
 a live connection when the recorded connection's first command is due: the live
 connection must have the same startup identity and a queued command identical to
-the recorded one (protocol, SQL, fingerprint and stage). The recorded generation
+the recorded one (protocol, fingerprint and stage). The recorded generation
 is preferred; another connection is used when the sockets arrived in a different
 order. A binding never changes during the run, and startup counts, waits and
 transaction states are compared through it. A queued command that no recorded
@@ -291,7 +296,7 @@ Run options require `databaseUrl`, an explicit administrator URL for a dedicated
 | `maxEvidenceBytes` | 8 MiB | Recorded evidence budget per run |
 | `maxConnectionsPerActor` | 1 (8 with `multi-producer-v1`) | Admitted PostgreSQL connection cap per actor; in the default profile additional live connections must remain queryless |
 | `connectionProfile` | `single-producer-v1` | One live command connection per actor, or explicit `multi-producer-v1` connection lanes |
-| `protocolProfile` | `sync-cycle-v1` | Whole cycles, or explicit `describe-flush-v1` metadata and continuation stages |
+| `protocolProfile` | `sync-cycle-v1` | Whole cycles, explicit `describe-flush-v1` metadata and continuation stages, or `flush-stages-v1` releases that each end in Flush or Sync |
 | `fixtureProfile` | `native` | Native PostgreSQL 16/17/18 capture, or explicit `postgresql17-pgvector0.8.6-v1` on its qualified server and extension |
 | `source` | Automatic local module graph | File targets: `{ projectRoot?, include? }` selects the portable root and additional data paths |
 | `signal` | — | Caller cancellation |
@@ -385,7 +390,7 @@ Completed legacy records without fixture or connection identities return
 `incompatible` before creating a database or importing a scenario. A guided run
 can create new bound evidence from them.
 
-New runs are schema version 3: `limits.protocolProfile` is always explicit and `environment.transport` is always present. Multi-producer runs and runs with overlap pairs are schema version 4, which adds a required `limits.connectionProfile` and `limits.maxConnectionsPerActor`. Multi-producer records allow `actor#n` plan entries and list available lanes rather than actors in each step; overlap records add `limits.overlap: 'pairs'`, allow `alice+bob` plan entries and mark both steps of a pair with `overlap`, the index of the pair's first step. A single-producer version 4 record must use overlap pairs. Runs that receive a cancel request or run COPY are schema version 5: version 4's rules, with `limits.connectionProfile` and `limits.maxConnectionsPerActor` explicit for every profile. A `cancels` array lists each request in arrival order with `at` (milliseconds after the run started), `actor`, `backendPid`, `forwarded`, and, for a forwarded request, `connection` and the `step` it reached, if one was running. The secret key is never recorded. A completion's `copy` array lists each COPY in the command with its `direction` (`in` or `out`), `bytes` and `sha256`. Exact replay of a version 5 record requires each request to reach the same step or find its backend idle, and requires the same COPY FROM STDIN data; see [cancel requests](compatibility.md#cancel-requests) and [streaming COPY](compatibility.md#streaming-copy). The staged profile's steps carry explicit stage, cycle, and continuation links. Version 1 and 2 records remain readable and renderable with their original meanings (version 2 implies the staged profile). Because they predate transport identity, exact replay of a version 1 or 2 record on this runtime returns `incompatible` before database work; a guided run creates new version 3 evidence, and an exported bundle keeps its own original runtime for original replay. Exact staged replay checks SQL and Parse inputs before releasing metadata, then checks actual Bind inputs before releasing execution. Metadata records parameter and column counts or the real error; it does not claim row values, affected rows, transaction state, or equality of backend object identifiers. A completed describe-flush-v1 run must close every staged cycle; under flush-stages-v1 a cycle may stay open once its stages have completed, as when an application abandons a cursor.
+New runs are schema version 3: `limits.protocolProfile` is always explicit and `environment.transport` is always present. Multi-producer runs and runs with overlap pairs are schema version 4, which adds a required `limits.connectionProfile` and `limits.maxConnectionsPerActor`. Multi-producer records allow `actor#n` plan entries and list available lanes rather than actors in each step; overlap records add `limits.overlap: 'pairs'`, allow `alice+bob` plan entries and mark both steps of a pair with `overlap`, the index of the pair's first step. A single-producer version 4 record must use overlap pairs. Runs that receive a cancel request or run COPY, and every `flush-stages-v1` run, are schema version 5: version 4's rules, with `limits.connectionProfile` and `limits.maxConnectionsPerActor` explicit for every profile. A `cancels` array lists each request in arrival order with `at` (milliseconds after the run started), `actor`, `backendPid`, `forwarded`, and, for a forwarded request, `connection` and the `step` it reached, if one was running. The secret key is never recorded. A completion's `copy` array lists each COPY in the command with its `direction` (`in` or `out`), `bytes` and `sha256`. Exact replay of a version 5 record requires each request to reach the same step or find its backend idle, and requires the same COPY FROM STDIN data; see [cancel requests](compatibility.md#cancel-requests) and [streaming COPY](compatibility.md#streaming-copy). The staged profile's steps carry explicit stage, cycle, and continuation links. Version 1 and 2 records remain readable and renderable with their original meanings (version 2 implies the staged profile). Because they predate transport identity, exact replay of a version 1 or 2 record on this runtime returns `incompatible` before database work; a guided run creates new version 3 evidence, and an exported bundle keeps its own original runtime for original replay. Exact staged replay checks SQL and Parse inputs before releasing metadata, then checks actual Bind inputs before releasing execution. Metadata records parameter and column counts or the real error; it does not claim row values, affected rows, transaction state, or equality of backend object identifiers. A completed describe-flush-v1 run must close every staged cycle; under flush-stages-v1 a cycle may stay open once its stages have completed, as when an application abandons a cursor.
 
 Replay returns the actual new command summaries, selected actor observations and
 invariant outcome. It does not require row counts, SQLSTATEs, return values or

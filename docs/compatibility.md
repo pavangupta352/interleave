@@ -38,12 +38,17 @@ run on Windows. What differs from Linux and macOS:
 
 - Portable regression export (`interleave export`, `exportRegression`) and
   release preparation need a POSIX npm, Git and tar toolchain. Both refuse
-  Windows with an explicit error, and their tests do not run there.
+  Windows with an explicit error, and their tests do not run there. Verifying
+  an exported bundle (`verifyRegressionExport`) and the shared installation's
+  installer refuse Windows too, so a bundle made on Linux or macOS is verified
+  and installed there.
 - Windows has no `O_NOFOLLOW`. Before reading a source file or artifact,
   Interleave checks with `lstat` that the path is not a symbolic link, then
   compares the opened file's device and inode with that check, so a link or a
   file swapped in between is refused as on other platforms.
-- Supervision ends the worker process itself rather than a process group.
+- Supervision ends the worker process itself rather than a process group, and
+  `processActor` ends a program at once, without its SIGTERM grace period;
+  processes that a program started itself keep running.
 - Windows cannot send a signal to another process, so the test that interrupts
   a run and checks that its database is removed runs only on Linux and macOS.
   The CLI handles Ctrl+C, Ctrl+Break and the SIGHUP that Node.js raises when the
@@ -90,7 +95,11 @@ second, which reverses accept order), reduced and explored lane-qualified
 plans, and observed a real lock wait between two connections of one actor. A
 connection blocked by an unscheduled session is `inconclusive`. The CLI path
 covers supervised file runs, exact and guided replay, reduction, and an exported
-bundle that installs offline and replays the recording exactly. The report shows
+bundle that installs offline and replays the recording exactly. A pool can hand
+a later statement to a different connection than in the recording; exact replay
+then reports `incompatible` rather than a false match (see
+[multi-connection actors](api.md#multi-connection-actors)), and a rerun usually
+repeats the failure. The report shows
 connection labels in Chromium, Firefox and WebKit at desktop and mobile sizes.
 
 Keep each actor's pool within the per-actor cap (eight in this profile). Other
@@ -208,11 +217,13 @@ application input, so exact replay requires the same bytes and reports
 count is what the client had sent before Interleave saw the error, which depends
 on timing, so replay does not compare it.
 
-A COPY that PostgreSQL reports waiting on its own client, for data the
-application has not produced yet or for a client that has stopped reading, lets
-the scheduler release the actor's other connections. A pipeline from one
-connection's COPY TO STDOUT into another's COPY FROM STDIN therefore runs in
-either release order. Copied-out data is a result, like rows, and is
+In the `multi-producer-v1` connection profile, a COPY that PostgreSQL reports
+waiting on its own client, for data the application has not produced yet or for
+a client that has stopped reading, lets the scheduler release the same actor's
+other connections, and only those, until the COPY completes or blocks. A
+pipeline from one connection's COPY TO STDOUT into another's COPY FROM STDIN
+therefore runs in either release order. The default profile refuses the second
+connection's command. Copied-out data is a result, like rows, and is
 not compared. Replication's COPY BOTH is refused.
 
 Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
@@ -526,7 +537,7 @@ bundle.
 
 All 18 rows passed on 25 October 2026 on macOS arm64, against the official
 `postgres:16`, `postgres:17` and `postgres:18` images (PostgreSQL 16.15, 17.11
-and 18.6), with the Interleave 0.2.0 archive built from commit `d572265`. Each
+and 18.6), with an archive of Interleave built from commit `d572265` (a 0.2 development build, before the cancel, COPY and Flush-stage work). Each
 cell gives the passing checks and the gate's duration. The rows ran one at a
 time, and other work on the machine slowed some of them. The `orms` CI job runs
 the same gate for each row on Ubuntu 24.04.
@@ -560,7 +571,7 @@ not its installed files.
 
 The Knex application shares no installed package with Interleave's runtime,
 because Knex pins pg-connection-string 2.6.2 while pg 8.23.0 uses its own 2.14.0.
-Interleave 0.2.0 could not export such a recording when the application had
+Interleave 0.2.1 could not export such a recording when the application had
 installed Interleave from a local archive. Supplying `--runtime-archive` now
 exports it as an offline installation of the original application lock.
 

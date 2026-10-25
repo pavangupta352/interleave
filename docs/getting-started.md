@@ -4,8 +4,10 @@ This guide gets you from an installed release, or from a source checkout, to a
 real failure and an offline report. Use the scoped package name
 `@pavangupta352/interleave`; the unscoped npm name belongs to an unrelated package.
 
-The commands below use a POSIX shell, Git, Node.js 22.18+ and npm. Docker is needed
-for `--docker`; you can instead supply a dedicated PostgreSQL test server.
+The commands below use a POSIX shell, Git, Node.js 22.18+ and npm. On Windows, run
+them in Git Bash or adapt them for PowerShell; `export` needs Linux or macOS.
+Docker is needed for `--docker`; you can instead supply a dedicated PostgreSQL
+test server.
 The [compatibility guide](compatibility.md) records the exact qualified versions
 and platform limits.
 
