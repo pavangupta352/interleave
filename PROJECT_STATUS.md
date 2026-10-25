@@ -61,7 +61,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Release 0.2.1 | Tag CI on `v0.2.1`, consumer acceptance of the exact archive, then the GitHub release. The `v0.2.0` tag stays unreleased after its release-asset check failed |
 | Release 0.3.0 | More languages, Sequelize/Knex/MikroORM, cancel requests, streaming COPY and Flush stages; full CI on `feature/0.3.0`, then the same release gate |
 | Prisma export | Portable export for Prisma's generated client |
-| Pool replay | Let exact replay swap the bindings of an actor's connections while their histories are still identical, so a pool that routes later statements differently replays more often instead of reporting `incompatible` |
+| Pool replay | Exact replay of a pool that routes a later statement to a different connection stays `incompatible`. Exchanging two connections' bindings when their recorded commands match was built and rejected in review: matching commands and result summaries do not show that two sessions hold the same state (sequence `currval`, advisory locks, temporary tables), so it could turn a mismatch into a false match. Supporting it needs evidence of session state |
 | Hosted databases | Restricted roles, provider allocation, mutual TLS, channel binding, host-name overrides |
 | Protocol features | Qualify more drivers' cancel, COPY and cursor paths as users report them; replication stays out of scope |
 | Platforms | Native Windows process ownership and interruption; automated macOS CI |
