@@ -62,6 +62,10 @@ node dist/cli.js run $case/after-fix/scenario.mjs --keep-going --max-runs 100 \
   --total-timeout-ms 900000 --timeout-ms 30000
 ```
 
+In an application that installed a release instead of a checkout, copy the case
+from `node_modules/@pavangupta352/interleave/examples/historical/knex-migration-lock`
+and run `npx --no-install interleave` in place of `node dist/cli.js`.
+
 Expected: the first run finds a violation (exit 1) with two lock rows, and exact
 replay repeats it. Minimization reaches zero explicit choices: Interleave's
 default fair rotation already produces the failing order. The guided run of

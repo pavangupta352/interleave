@@ -11,30 +11,29 @@ and platform limits.
 
 ## Install a release
 
-Scaffold a scenario in a new directory, then install Interleave and the
-node-postgres driver the scaffold uses:
+The package is not on npm yet. Every
+[GitHub release](https://github.com/pavangupta352/interleave/releases) carries the
+npm archive and `SHA256SUMS`. Download both and check the hash, then scaffold a
+scenario in a new directory and install Interleave and the node-postgres driver
+the scaffold uses from the file:
 
 ```sh
-npx --yes @pavangupta352/interleave init interleave-race
+curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.2.1/pavangupta352-interleave-0.2.1.tgz
+curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.2.1/SHA256SUMS
+shasum -a 256 -c SHA256SUMS --ignore-missing
+interleave_archive="$PWD/pavangupta352-interleave-0.2.1.tgz"
+npx --yes --package "$interleave_archive" interleave init interleave-race
 cd interleave-race
-npm install --save-dev --save-exact @pavangupta352/interleave pg@8.23.0
+npm install --save-dev --save-exact "$interleave_archive" pg@8.23.0
 unset TEST_DATABASE_URL
 npx --no-install interleave doctor --docker
 npm run race -- --docker        # exits 1: the scaffold deliberately loses an increment
 npx --no-install interleave report failure.interleave.json --out report.html
 ```
 
-Every [GitHub release](https://github.com/pavangupta352/interleave/releases) also
-carries the npm archive and `SHA256SUMS`. To install from the archive instead,
-download both, check the hash, then scaffold and install from the file:
-
-```sh
-shasum -a 256 -c SHA256SUMS --ignore-missing
-interleave_archive="$PWD/pavangupta352-interleave-0.2.1.tgz"
-npx --yes --package "$interleave_archive" interleave init interleave-race
-cd interleave-race
-npm install --save-dev --save-exact "$interleave_archive" pg@8.23.0
-```
+Once the package is on npm, `npx --yes @pavangupta352/interleave init` and
+`npm install --save-dev --save-exact @pavangupta352/interleave pg@8.23.0` replace
+the download and the archive path.
 
 Use an absolute path: npm resolves a relative file path against the nearest
 enclosing project, not the current directory. `npx` also needs `--package` for a

@@ -97,8 +97,9 @@ orders remain and each actor observed P2002 and the expected CRUD values.
 
 ## Try it
 
-Install Interleave from a package archive (see the
-[getting-started guide](../../docs/getting-started.md#install-a-source-build-into-an-application)),
+Install Interleave from a package archive, either a
+[release](../../docs/getting-started.md#install-a-release) or a
+[source build](../../docs/getting-started.md#install-a-source-build-into-an-application),
 then, from a copy of this directory that has no `node_modules` in any parent
 directory:
 
@@ -243,8 +244,9 @@ and `results.json`. Prisma's engine cache is kept in `prisma-cache/`.
   accepting the retried commands.
 - Inside an interactive transaction, send every query through the transaction
   client `tx`: with `max: 1`, the open transaction holds the actor's only
-  connection. Interleave's actor profile allows one command-producing connection
-  per actor, so a larger pool is not a substitute.
+  connection. Interleave's default actor profile allows one command-producing
+  connection per actor, so a larger pool is not a substitute; the
+  `multi-producer-v1` profile has not been checked with Prisma.
 - Observed on macOS arm64 only.
 
 Public references: [Prisma 7 driver adapters](https://www.prisma.io/docs/orm/v7/core-concepts/supported-databases/database-drivers),

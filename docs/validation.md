@@ -2,6 +2,78 @@
 
 Newest evidence first. Each section keeps its original date and results.
 
+## 0.2.1 release qualification (25 October 2026)
+
+The [v0.2.1 release](https://github.com/pavangupta352/interleave/releases/tag/v0.2.1)
+comes from annotated tag object `2016eb87d21f7e54747bbd9890ec1d7d80bf30e0` on commit
+`5b54b508eb0541d98c09b5f152143dc7f516b017`.
+[Tag CI run 40151506663](https://github.com/pavangupta352/interleave/actions/runs/40151506663)
+passed all 31 jobs on Ubuntu 24.04:
+
+- six native PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0 jobs
+- six verified upstream TLS jobs over the same matrix
+- six TypeORM jobs (1.1.1 and 0.3.31 × PostgreSQL 16/17/18, Node.js 22.18.0)
+- six Prisma ORM 7.10.0 jobs (PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0)
+- two PostgreSQL 17 + pgvector 0.8.6 jobs and two managed CLI jobs
+- the Python actor job and the offline report job (Chromium, Firefox, WebKit)
+- the release-asset job, which built the package twice from the tagged source,
+  compared the archives, inspected their contents and installed the candidate in a
+  fresh consumer
+
+The release assets are that run's artifact. Fresh downloads from the release page
+match `SHA256SUMS`:
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `pavangupta352-interleave-0.2.1.tgz` | 2,014,329 | `75240e2e428f2ad9c0c3a7bb90e8a4dea0e1358e26c15c4b89e3a6f5813896d7` |
+| `interleave-0.2.1-source.tar.gz` | 978,993 | `4c859de379b16fc8002d609dfc966cf04cbdfc47dc47a870870bf4fd5e9e589c` |
+| `release-manifest.json` | 79,449 | `f5e9ad48ca9b5aa5a8d5c316ef629f845f47f9085ac5e78c716c357ae90ed54a` |
+| `consumer-package-lock.json` | 6,137 | `3ae5e088438dae0aa0f713aa3c325f3eab47725746aa76273ef7775464d3a390` |
+
+The npm archive's integrity is
+`sha512-l00kMjubOgsgVxb6BFuP82HSbfUvFWkrvACQDKnLWEvSqHH7z7PTx3ObJcWOjKiT/4dX/xEgpzvLjpnSvs1X1A==`.
+Installing the release URL with npm records that integrity.
+
+### Consumer acceptance
+
+The documented workflows were run against the CI-built archive on macOS arm64 with
+Node.js 24.7.0 (npm 11.5.1) and 22.18.0 (npm 10.9.3), one toolchain after the
+other, in fresh directories with their own npm caches, against PostgreSQL 16.15.
+They covered the release-archive install route, `init`, `doctor`, the scaffold
+race and its report, the README counter commands, an export with
+`--runtime-archive` that installed offline with outbound network denied and
+replayed exactly, the pool, overlap, Python and Prisma examples, and the Knex
+0.95.12 case study with `--overlap pairs`. All 266 recorded commands (133 per
+toolchain) returned their documented exit codes on the first attempt:
+
+- The pool example's repaired search exhausted 41 schedules.
+- All 12 paired searches of the overlap example found the double claim on their
+  third run, and 20 of 20 exact replays repeated it.
+- The Python example's repaired search exhausted 47 schedules.
+- The Prisma example's repaired search exhausted 363 schedules.
+- The Knex case's paired search found the duplicate lock row on its seventh run
+  with both toolchains, and 10 of 10 exact replays per toolchain repeated it.
+
+The installed package matched the manifest in all 406 files (path, SHA-256, size
+and mode). The six findings were documentation notes, fixed in the commit that
+records this release. The gate did not cover the npm registry route (the package
+is unpublished), PostgreSQL 17 and 18 (CI covers them), or hosts other than
+macOS arm64.
+
+### How the tag got here
+
+The `v0.2.0` tag on commit `201f3b7` was never released. Its
+[tag CI run 40139424454](https://github.com/pavangupta352/interleave/actions/runs/40139424454)
+passed every test job, but the release-asset job stopped because npm leaves nested
+`.gitignore` files out of a package and the Prisma example kept one, so the packed
+archive differed from the tagged source. `6aaba40` moved that rule to the
+repository root, and `6a6e67b` made a pgvector test wait for the driver's query
+before interrupting it. The line was released as 0.2.1 rather than by moving the
+`v0.2.0` tag.
+
+npm publication of this archive is pending the owner's registry login. Until then,
+install from the release page.
+
 ## 0.1.0 release qualification (27 September 2026)
 
 The [v0.1.0 release](https://github.com/pavangupta352/interleave/releases/tag/v0.1.0)
