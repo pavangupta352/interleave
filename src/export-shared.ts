@@ -199,10 +199,10 @@ export async function prepareSharedArchives(options: { projectRoot: string; runt
     let bytes = provided.get(node.integrity);
     if (!bytes && node.resolved.startsWith('file:')) {
       const path = node.resolved.slice(5);
-      if (isAbsolute(path) || !path.endsWith('.tgz')) throw new Error('Original local archive unavailable; supply runtimeArchive or dependencyArchives explicitly');
+      if (isAbsolute(path) || !path.endsWith('.tgz')) throw new Error('Original local archive unavailable; supply runtimeArchive or dependencyArchives (--runtime-archive or --dependency-archive) explicitly');
       const absolute = resolve(options.projectRoot, path);
       try { assertInside(options.projectRoot, absolute, 'Locked local archive'); bytes = await readOrdinaryFile(absolute, LIMIT, options.projectRoot); }
-      catch (error) { throw new Error('Original local archive unavailable; supply runtimeArchive or dependencyArchives explicitly', { cause: error }); }
+      catch (error) { throw new Error('Original local archive unavailable; supply runtimeArchive or dependencyArchives (--runtime-archive or --dependency-archive) explicitly', { cause: error }); }
     }
     if (!bytes) bytes = await fetchRegistryArchive(node.resolved, deadline - Date.now());
     if (!provided.has(node.integrity)) add(bytes);

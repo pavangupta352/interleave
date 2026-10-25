@@ -90,10 +90,11 @@ test('an app sharing no package instance with its local-archive runtime exports 
   const recorded = JSON.parse(await readFile(artifact, 'utf8'));
   expect(recorded.outcome).toBe('violation'); expect(recorded.cleanup.complete).toBe(true);
   expect(recorded.environment.source.sharedPackages).toEqual([]);
-  // The separate installation cannot install the app lock's local runtime archive.
-  const separate = join(root, 'separate regression');
+  // The app installed this runtime from a local archive, so export restores the original
+  // app installation; the archive lies outside the project, so it must be supplied.
+  const separate = join(root, 'unsupplied regression');
   const refused = JSON.parse(execute(process.execPath, [cli, 'export', 'scenario.mjs', artifact, '--project-root', app, '--out', separate, '--json'], app, 2));
-  expect(refused.error.message).toMatch(/^Only integrity-pinned registry\/tarball dependencies are supported in portable locks: node_modules\/@pavangupta352\/interleave; supply the original archive with --runtime-archive/);
+  expect(refused.error.message).toBe('Original local archive unavailable; supply runtimeArchive or dependencyArchives (--runtime-archive or --dependency-archive) explicitly');
   const destination = join(root, 'portable unshared regression');
   const result = JSON.parse(execute(process.execPath, [cli, 'export', 'scenario.mjs', artifact, '--project-root', app, '--runtime-archive', archive, '--out', destination, '--json'], app));
   const manifest = await verifyRegressionExport(destination);
