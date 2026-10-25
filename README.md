@@ -194,7 +194,9 @@ Start with [getting started](docs/getting-started.md), then read the
 [concepts](docs/concepts.md) and the [application guide](docs/application-guide.md).
 The [CLI](docs/cli.md) and [API](docs/api.md) references cover every option;
 [regression checks and CI](docs/ci.md) shows how to keep a failure and check a
-repair; [troubleshooting](docs/troubleshooting.md) explains stopped runs. Report
+repair; [troubleshooting](docs/troubleshooting.md) explains stopped runs. The
+[examples](examples/README.md) pair a real race with its repair for each
+supported driver, ORM and language. Report
 problems through [issues](https://github.com/pavangupta352/interleave/issues) and
 vulnerabilities through the [security policy](SECURITY.md).
 
