@@ -50,7 +50,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 - A passing bounded search is evidence about the explored orders, not proof of race freedom.
 - Interleave releases one command at a time unless PostgreSQL reports a lock wait. Races that need two statements executing at the same instant can be missed; the Knex 0.95.12 case study measured such a miss.
 - By default an actor holds one command-producing connection at a time; `multi-producer-v1` schedules several. Clients that wait on Flush need `flush-stages-v1`. Replication and COPY BOTH are unsupported.
-- Cancel requests and COPY passed the full CI matrix on `feature/protocol` (run 40141761205). Flush stages and the merged 0.3.0 branch were checked locally on PostgreSQL 16 with Node.js 24.7 and await their CI run.
+- The merged 0.3.0 branch, with cancel requests, COPY and Flush stages, passed all 52 CI jobs (run 40146537748) after an independent review's seven findings were fixed. It has not yet been tagged or put through release acceptance.
 - Clocks, randomness and external services are not controlled.
 
 ## Roadmap
