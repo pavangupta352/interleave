@@ -27,7 +27,7 @@ describe('flush-stages-v1 frontend boundaries and identity', () => {
     open.forEach(frame => midCycle.accept(frame));
     expect(() => midCycle.accept(packet('Q', str('SELECT 1')))).toThrow(/Simple Query inside an unfinished extended cycle/);
     expect(() => new FrontendCycleBuffer(flushProfile).accept(flush)).toThrow(/Flush without pending extended messages/);
-    expect(() => new FrontendCycleBuffer().accept(flush)).toThrow(/select flush-stages-v1/);
+    expect(() => new FrontendCycleBuffer().accept(flush)).toThrow(/select protocol profile flush-stages-v1 \(protocolProfile, or --protocol-profile on the CLI\)/);
   });
 
   test('a Flush cycle bounds each stage rather than the whole cycle', () => {
@@ -55,7 +55,7 @@ describe('flush-stages-v1 frontend boundaries and identity', () => {
     const recover = acknowledged.fork().flushContinuation([sync], second, { code: '22012', message: 'division by zero' });
     expect([recover.stage, recover.sql]).toEqual(['recover', 'SELECT id FROM items']);
     expect(() => acknowledged.fork().flushContinuation(close, second, { code: '22012', message: 'division by zero' })).toThrow(/only Sync may follow/);
-    expect(() => new FrontendAssembler().accept(flush)).toThrow(/select flush-stages-v1/);
+    expect(() => new FrontendAssembler().accept(flush)).toThrow(/select protocol profile flush-stages-v1 \(protocolProfile, or --protocol-profile on the CLI\)/);
   });
 
   test('the describe-flush-v1 prefix is recognized exactly', () => {

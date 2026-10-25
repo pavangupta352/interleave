@@ -74,7 +74,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
   }
   // Name the way forward: a pool that opens several connections needs the lane profile.
   const connectionLimitError = () => new Error(maxConnections === 1
-    ? `Unsupported profile: one simultaneous physical connection per actor is supported${multiProducer ? '' : '; for pools or side queries that use several at once, select connectionProfile multi-producer-v1'}`
+    ? `Unsupported profile: one simultaneous physical connection per actor is supported${multiProducer ? '' : '; for pools or side queries that use several at once, select connection profile multi-producer-v1 (connectionProfile, or --connection-profile on the CLI)'}`
     : `Unsupported profile: physical connection limit per actor is ${maxConnections}`);
   /**
    * Forward a CancelRequest for one of this actor's own backends, byte for byte,

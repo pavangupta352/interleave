@@ -78,6 +78,9 @@
 
 ### Fixes
 
+- The refusals for a second simultaneous connection and for a Flush-dependent
+  query name the CLI flag (`--connection-profile`, `--protocol-profile`) as well
+  as the API option, so a CLI user sees which flag selects the profile.
 - The CLI stops and cleans up on SIGHUP (exit 129) as it does on SIGINT and
   SIGTERM. A terminal that closed during a run used to end it without removing
   its database. On Windows, Node.js raises SIGHUP when the console window closes,

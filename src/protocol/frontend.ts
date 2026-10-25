@@ -196,7 +196,7 @@ export class FrontendAssembler {
   }
   accept(frame: Buffer): FrontendUnit | undefined {
     const type = String.fromCharCode(frame[0]!); const reader = new Reader(frame);
-    if (type === 'H' && !this.flushStages) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync, or select flush-stages-v1');
+    if (type === 'H' && !this.flushStages) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync, or select protocol profile flush-stages-v1 (protocolProfile, or --protocol-profile on the CLI)');
     if ('dcf'.includes(type)) throw new Error('Unsupported profile: COPY data outside COPY FROM STDIN');
     if (type === 'Q') {
       if (this.bytes) throw new Error('Unsupported profile: Simple Query inside an unfinished extended cycle');
@@ -285,7 +285,7 @@ export class FrontendCycleBuffer {
     if (type === 'H' && this.flushStages) {
       if (!this.frames.length || frame.length !== 5) throw new Error('Unsupported profile: Flush without pending extended messages');
     } else if (type === 'H') {
-      if (!this.staged) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync, or select flush-stages-v1');
+      if (!this.staged) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync, or select protocol profile flush-stages-v1 (protocolProfile, or --protocol-profile on the CLI)');
       if (this.hasPrefix || this.frames.length !== 2 || this.frames[0]![0] !== 80 || this.frames[1]![0] !== 68 || frame.length !== 5) throw new Error('Unsupported profile: early Flush requires one Parse/Describe prefix; select flush-stages-v1 for other Flush stages');
     }
     if ('dcf'.includes(type)) throw new Error('Unsupported profile: COPY data outside COPY FROM STDIN');
