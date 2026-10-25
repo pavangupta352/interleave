@@ -33,7 +33,7 @@ test('a libpq pipeline with a flush request holds its implicit transaction open 
   try {
     const refused = await runOnce(scenario, { databaseUrl });
     expect(refused.outcome).toBe('inconclusive');
-    expect(refused.reason).toMatch(/select flush-stages-v1/);
+    expect(refused.reason).toMatch(/select protocol profile flush-stages-v1/);
     const first = await runOnce(scenario, { databaseUrl, protocolProfile: 'flush-stages-v1', plan: ['alice', 'bob', 'alice'] });
     expect(first.outcome, first.reason).toBe('passed');
     expect(parseRunArtifact(first)).toEqual(first);

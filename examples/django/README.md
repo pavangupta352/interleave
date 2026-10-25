@@ -37,10 +37,10 @@ npx --no-install interleave replay django/scenario.mjs oversell.json --docker
 
 # The repaired program passes every explored order (exit 0). Its 295 schedules
 # exceed the default 100-run budget, and each starts two Python processes, so
-# raise the run budget and give the search ten minutes.
+# raise the run budget and give the search twenty minutes.
 npx --no-install interleave run django/safe-scenario.mjs --include django/checkout_safe.py \
   --include django/shop_settings.py --include django/shop/__init__.py --include django/shop/models.py \
-  --docker --max-runs 5000 --total-timeout-ms 600000
+  --docker --max-runs 5000 --total-timeout-ms 1200000
 ```
 
 The `--include` paths bind the Python source into the recording:

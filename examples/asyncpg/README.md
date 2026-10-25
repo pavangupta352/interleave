@@ -39,9 +39,9 @@ npx --no-install interleave replay asyncpg/scenario.mjs oversell.json --docker
 
 # The repaired program passes every explored order (exit 0). Its 295 schedules
 # exceed the default 100-run budget, and each starts two Python processes, so
-# raise the run budget and give the search ten minutes.
+# raise the run budget and give the search twenty minutes.
 npx --no-install interleave run asyncpg/safe-scenario.mjs --include asyncpg/checkout_safe.py \
-  --protocol-profile flush-stages-v1 --docker --max-runs 5000 --total-timeout-ms 600000
+  --protocol-profile flush-stages-v1 --docker --max-runs 5000 --total-timeout-ms 1200000
 ```
 
 `--include asyncpg/checkout.py` binds the Python source into the recording: after

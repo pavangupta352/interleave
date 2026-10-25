@@ -36,7 +36,7 @@ npx --no-install interleave replay sqlalchemy/scenario.mjs oversell.json --docke
 # Search 200 orders of the repaired program (exit 4: the run budget, not a
 # violation, ended the search; the summary reports violations: 0).
 npx --no-install interleave run sqlalchemy/safe-scenario.mjs --include sqlalchemy/checkout_safe.py --include sqlalchemy/models.py \
-  --docker --seed 1 --max-runs 200 --total-timeout-ms 600000
+  --docker --seed 1 --max-runs 200 --total-timeout-ms 1200000
 ```
 
 SQLAlchemy sends nine setup commands on each new connection before the

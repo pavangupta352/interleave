@@ -110,9 +110,22 @@ jobs:
         run: npm run test:tls
 
   python:
-    name: Python actors (psycopg, asyncpg, SQLAlchemy, Django) / PostgreSQL 16 / Node 24.7.0
+    name: Python actors (${{ matrix.examples }}) / PostgreSQL 16 / Node 24.7.0
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each ORM example's repair search runs for many minutes, so each gets a job.
+        include:
+          - examples: psycopg
+            tests: process-actor.python cancel.python copy.python flush-stages.python
+          - examples: asyncpg
+            tests: python-orms.python -t asyncpg
+          - examples: SQLAlchemy
+            tests: python-orms.python -t SQLAlchemy
+          - examples: Django
+            tests: python-orms.python -t Django
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -131,7 +144,7 @@ jobs:
           "$RUNNER_TEMP/python-actors/bin/pip" install -r examples/python/requirements.txt -r examples/asyncpg/requirements.txt \
             -r examples/sqlalchemy/requirements.txt -r examples/django/requirements.txt
       - name: Record, replay and repair the Python examples from an installed package
-        run: INTERLEAVE_TEST_PYTHON="$RUNNER_TEMP/python-actors/bin/python" npm run test:integration -- python
+        run: INTERLEAVE_TEST_PYTHON="$RUNNER_TEMP/python-actors/bin/python" npm run test:integration -- ${{ matrix.tests }}
 
   ruby:
     name: Ruby actors (pg, Active Record) / PostgreSQL 16 / Node 24.7.0
