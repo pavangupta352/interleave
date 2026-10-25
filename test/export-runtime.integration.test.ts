@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -41,7 +42,7 @@ test.each([false, true])('clean install preserves app pg 8.11.5 and bundled runt
   await writeFile(scenarioFile, existingRuntimeName
     ? "import * as runtime from '@pavangupta352/interleave';import 'pg';export default runtime;export const runtimeUrl=import.meta.resolve('@pavangupta352/interleave');"
     : "import pg from 'pg';export default pg;export const runtimeUrl=import.meta.resolve('pg');");
-  const runtimeRoot = new URL('../', import.meta.url).pathname;
+  const runtimeRoot = fileURLToPath(new URL('../', import.meta.url));
   const bound = await bindExportFixture(inertRun, { projectRoot, scenarioFile, runtimeRoot });
   const exported = await exportRegression(bound, { projectRoot, scenarioFile, destination: join(root, 'ready'), runtimeRoot });
   // The runtime lock keeps every runtime dependency at the version the recording had

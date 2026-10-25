@@ -1,0 +1,3 @@
+# Keep LF line endings on every platform: source identity hashes file bytes, and
+# release packaging compares packed files with the checkout.
+* text=auto eol=lf

@@ -99,6 +99,11 @@ interface RuntimePackage {
   bytes: Buffer;
 }
 
+// Bundles install through the POSIX npm installer, install.mjs.
+function assertExportPlatform(): void {
+  if (process.platform === 'win32') throw new Error('Portable regression exports currently require Linux or macOS; record and replay work on Windows');
+}
+
 /**
  * Export a completed violation and explicitly selected trusted local source as
  * a self-contained regression folder. This function copies source; it never
@@ -108,6 +113,7 @@ export async function exportRegression(
   run: RunResult,
   options: ExportRegressionOptions,
 ): Promise<ExportRegressionResult> {
+  assertExportPlatform();
   const validatedRun = parseRunArtifact(run);
   const artifactPath = options.artifactFile === undefined ? undefined : resolveRequired(options.artifactFile, 'artifactFile');
   const originalArtifact = artifactPath === undefined ? undefined : await readOrdinaryFile(artifactPath);
@@ -265,6 +271,7 @@ export async function exportRegression(
 
 /** Verify every declared byte without loading or executing scenario code. */
 export async function verifyRegressionExport(directory: string): Promise<RegressionManifest> {
+  assertExportPlatform();
   const root = await ordinaryDirectory(directory, 'regression directory');
   const manifestBytes = await readOrdinaryFile(join(root, 'manifest.json'), MAX_MANIFEST_BYTES, root);
   const manifest = parseManifest(manifestBytes);

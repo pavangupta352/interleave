@@ -96,6 +96,8 @@ export async function writeRunArtifact(
 }
 
 async function syncDirectory(path: string): Promise<void> {
+  // Windows cannot flush a directory handle; its file system commits the rename itself.
+  if (process.platform === 'win32') return;
   const directory = await open(path, constants.O_RDONLY);
   try {
     await directory.sync();

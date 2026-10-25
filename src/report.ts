@@ -60,8 +60,11 @@ export async function writeReport(path: string, run: RunResult, options: WriteRe
       }
       await unlink(temporary); exists = false;
     }
-    const parent = await open(directory, constants.O_RDONLY);
-    try { await parent.sync(); } finally { await parent.close(); }
+    // Windows cannot flush a directory handle; its file system commits the rename itself.
+    if (process.platform !== 'win32') {
+      const parent = await open(directory, constants.O_RDONLY);
+      try { await parent.sync(); } finally { await parent.close(); }
+    }
   } finally { if (exists) await unlink(temporary).catch(() => undefined); }
 }
 function validateOptions(options: ReportOptions, allowOverwrite = false): string | null {
