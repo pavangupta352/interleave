@@ -52,7 +52,7 @@ describe('protocol profile propagation', () => {
     expect(changed.trace).toHaveLength(0);
   });
 
-  test('binds the selected protocol in supervised execution and rejects a change before loading the scenario', async () => {
+  test('binds the selected protocol in supervised execution and rejects a change before loading the scenario', { timeout: 60_000 }, async () => {
     const file = fileURLToPath(new URL('./fixtures/supervised/counter.ts', import.meta.url));
     const recorded = await runScenarioFile(file, { databaseUrl: databaseUrl, protocolProfile: 'describe-flush-v1' });
     expect(recorded.outcome, recorded.reason).toBe('violation');

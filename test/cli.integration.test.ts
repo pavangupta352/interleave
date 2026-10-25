@@ -176,7 +176,8 @@ describe('CLI real PostgreSQL integration', () => {
     expect(JSON.parse(safe.stdout).environment.source).toBeDefined();
     expect(JSON.parse(safe.stdout).actors.map((actor: { value: string }) => actor.value).sort()).toEqual(['held', 'insufficient']);
   });
-  test('SIGINT returns 130 after removing the exact owned database', async () => {
+  // Windows cannot deliver SIGINT to a child process: kill() ends it without running handlers.
+  test.skipIf(process.platform === 'win32')('SIGINT returns 130 after removing the exact owned database', async () => {
     const marker = join(await directory(), 'owned-db');
     const running = start(['run', fixture('hung')], { INTERLEAVE_CLI_TEST_MARKER: marker });
     let name = '';

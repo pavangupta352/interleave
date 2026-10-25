@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
+import { npm } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
@@ -23,10 +24,10 @@ test('the cursor example behaves as its README states', { timeout: 900_000 }, as
     return result.stdout;
   }
   try {
-    const packed = JSON.parse(execute(['npm', 'pack', '--ignore-scripts', '--json', '--pack-destination', root], repository, 0))[0];
+    const packed = JSON.parse(execute(npm('pack', '--ignore-scripts', '--json', '--pack-destination', root), repository, 0))[0];
     const app = join(root, 'bank'); await mkdir(app);
     await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'cursor-bank', private: true, type: 'module' }, null, 2) + '\n');
-    execute(['npm', 'install', '--save-dev', '--save-exact', join(root, packed.filename), 'pg@8.23.0', 'pg-cursor@2.22.1', '--ignore-scripts'], app, 0);
+    execute(npm('install', '--save-dev', '--save-exact', join(root, packed.filename), 'pg@8.23.0', 'pg-cursor@2.22.1', '--ignore-scripts'), app, 0);
     await cp(join(repository, 'examples/cursor'), join(app, 'cursor'), { recursive: true, filter: source => !source.endsWith('README.md') });
     const cli = join(app, 'node_modules/@pavangupta352/interleave/dist/cli.js');
     const profiles = ['--protocol-profile', 'flush-stages-v1', '--connection-profile', 'multi-producer-v1'];

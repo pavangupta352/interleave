@@ -19,8 +19,8 @@ export default defineConfig({
       ...(!process.env.INTERLEAVE_TEST_GO ? ['test/**/*.go.integration.test.ts'] : []),
       ...(!process.env.INTERLEAVE_TEST_JAVA ? ['test/**/*.java.integration.test.ts'] : []),
       // Portable exports and release preparation need a POSIX npm, Git and tar toolchain;
-      // both refuse Windows with an explicit error.
-      ...(process.platform === 'win32' ? ['test/**/export*.test.ts', 'test/**/release-*.test.ts'] : []),
+      // both refuse Windows with an explicit error. The packaged ORM test ends in an export.
+      ...(process.platform === 'win32' ? ['test/**/*export*.test.ts', 'test/**/release-*.test.ts', 'test/ordinary-orm-packaged.integration.test.ts'] : []),
     ],
     testTimeout: 20_000,
     hookTimeout: 20_000,

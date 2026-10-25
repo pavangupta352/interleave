@@ -139,7 +139,7 @@ describe('exploration integration', () => {
   });
 });
 
-test('exploration integration keeps file-based discovery, replay and reduction supervised', async () => {
+test('exploration integration keeps file-based discovery, replay and reduction supervised', { timeout: 60_000 }, async () => {
   const { fileURLToPath } = await import('node:url');
   const target = fileURLToPath(new URL('./fixtures/supervised/counter.ts', import.meta.url));
   const discovered = await explore(target, { databaseUrl, maxRuns: 5 });

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
+import { npm } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
@@ -26,10 +27,10 @@ test('Python psycopg actors oversell, replay exactly, reject changed source and 
     return result.stdout;
   }
   try {
-    const packed = JSON.parse(execute(['npm', 'pack', '--ignore-scripts', '--json', '--pack-destination', root], repository, 0))[0];
+    const packed = JSON.parse(execute(npm('pack', '--ignore-scripts', '--json', '--pack-destination', root), repository, 0))[0];
     const app = join(root, 'shop'); await mkdir(app);
     await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'python-shop', private: true, type: 'module' }, null, 2) + '\n');
-    execute(['npm', 'install', join(root, packed.filename), '--ignore-scripts'], app, 0);
+    execute(npm('install', join(root, packed.filename), '--ignore-scripts'), app, 0);
     await cp(join(repository, 'examples/python'), join(app, 'python'), { recursive: true, filter: source => !source.endsWith('README.md') });
     const cli = join(app, 'node_modules/@pavangupta352/interleave/dist/cli.js');
     const artifact = join(root, 'oversell.json');
