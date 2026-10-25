@@ -14,7 +14,7 @@ The qualification covers Interleave's native, extension-free fixture profile and
 
 The native fixture profile permits the built-in `plpgsql` extension. Other extensions, foreign relations, custom casts/operators, custom range/base types, temporary fixture state, logical replication configuration, and the other explicitly unsupported catalog features fail closed. Drivers other than node-postgres have separate qualification gates and are not covered by this matrix.
 
-At commit `4b589dbac81eeef7bdabf461b105dc9bb29113b6`, all six PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0 jobs passed 758 tests each. Both PostgreSQL 17 / pgvector 0.8.6 jobs passed their ten checks, and the browser job passed 20 checks at each desktop/mobile size in Chromium, Firefox and WebKit. This includes seeded search, the Postgres.js protocol, installed pghybrid replay, and the [replay and release hardening](qualification/replay-release-hardening-2026-09-09.md). See the [completed nine-job CI run](https://github.com/pavangupta352/interleave/actions/runs/34322912399). The tag-only assets job was correctly skipped for this main-branch run.
+At tag `v0.3.0` (commit `b803e65`), [tag CI run 40160347133](https://github.com/pavangupta352/interleave/actions/runs/40160347133) passed all 60 jobs. Each of the six PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0 jobs passed 1,304 unit and integration tests, the two Windows jobs 738 unit and 336 integration tests, and the two macOS jobs 956 and 348. The browser job passed 81 report checks at each desktop and mobile size in Chromium, Firefox and WebKit, and the pgvector, managed CLI, verified TLS, language, TypeORM, Prisma and ORM jobs passed their gates. The release-asset job built the package twice from the tagged source and installed the candidate in a fresh consumer.
 
 PostgreSQL 17 renamed the catalog locale fields used by fixture capture from `daticulocale`/`colliculocale` to `datlocale`/`colllocale`. Interleave selects the fields by verified server major and retains a stable semantic `locale` field in its canonical input. It also includes ICU tailoring rules because they can change comparison behavior. See the official [PostgreSQL 17 release notes](https://www.postgresql.org/docs/17/release-17.html), [PostgreSQL 16 collation catalog](https://www.postgresql.org/docs/16/catalog-pg-collation.html), and [PostgreSQL 18 database catalog](https://www.postgresql.org/docs/18/catalog-pg-database.html).
 
@@ -213,7 +213,10 @@ Records that contain COPY use schema version 5. Each COPY in a command's
 completion lists its direction, byte count and the SHA-256 digest of the copied
 data; the rows themselves are not recorded. Data sent with COPY FROM STDIN is
 application input, so exact replay requires the same bytes and reports
-`incompatible` when they change. When PostgreSQL rejects a copy partway, the
+`incompatible` when they change. Replay then closes the actor's connections; a
+node-postgres client without an `'error'` listener turns that into an uncaught
+error, and the run ends as a harness error naming the missing listener instead
+of `incompatible`. When PostgreSQL rejects a copy partway, the
 count is what the client had sent before Interleave saw the error, which depends
 on timing, so replay does not compare it.
 

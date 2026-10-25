@@ -30,10 +30,10 @@ export INTERLEAVE_PYTHON=django/.venv/bin/python
 # Find the oversell and keep it (exit 1 means the invariant failed).
 npx --no-install interleave run django/scenario.mjs --include django/checkout.py \
   --include django/shop_settings.py --include django/shop/__init__.py --include django/shop/models.py \
-  --docker --out oversell.json
+  --docker --out django-oversell.json
 
 # Replay the same order against the same source (exit 1 again).
-npx --no-install interleave replay django/scenario.mjs oversell.json --docker
+npx --no-install interleave replay django/scenario.mjs django-oversell.json --docker
 
 # The repaired program passes every explored order (exit 0). Its 295 schedules
 # exceed the default 100-run budget, and each starts two Python processes, so

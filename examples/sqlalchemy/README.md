@@ -28,10 +28,10 @@ python3 -m venv sqlalchemy/.venv && sqlalchemy/.venv/bin/pip install -r sqlalche
 export INTERLEAVE_PYTHON=sqlalchemy/.venv/bin/python
 
 # Find the oversell and keep it (exit 1 means the invariant failed).
-npx --no-install interleave run sqlalchemy/scenario.mjs --include sqlalchemy/checkout.py --include sqlalchemy/models.py --docker --out oversell.json
+npx --no-install interleave run sqlalchemy/scenario.mjs --include sqlalchemy/checkout.py --include sqlalchemy/models.py --docker --out sqlalchemy-oversell.json
 
 # Replay the same order against the same source (exit 1 again).
-npx --no-install interleave replay sqlalchemy/scenario.mjs oversell.json --docker
+npx --no-install interleave replay sqlalchemy/scenario.mjs sqlalchemy-oversell.json --docker
 
 # Search 200 orders of the repaired program (exit 4: the run budget, not a
 # violation, ended the search; the summary reports violations: 0).

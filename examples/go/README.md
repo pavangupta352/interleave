@@ -25,10 +25,10 @@ paths are relative to that project root:
 go build -C go -o bin/ ./...
 
 # Find the oversell and keep it (exit 1 means the invariant failed).
-npx --no-install interleave run go/scenario.mjs --include go/checkout/main.go --docker --out oversell.json
+npx --no-install interleave run go/scenario.mjs --include go/checkout/main.go --docker --out go-oversell.json
 
 # Replay the same order against the same source (exit 1 again).
-npx --no-install interleave replay go/scenario.mjs oversell.json --docker
+npx --no-install interleave replay go/scenario.mjs go-oversell.json --docker
 
 # The repaired program passes every explored order (exit 0). Its frontier has
 # 295 schedules, more than the default 100 runs, and each schedule starts two

@@ -2,6 +2,76 @@
 
 Newest evidence first. Each section keeps its original date and results.
 
+## 0.3.0 release qualification (25 October 2026)
+
+The [v0.3.0 release](https://github.com/pavangupta352/interleave/releases/tag/v0.3.0)
+comes from annotated tag object `65eb1c8c455b576aed7a2ab2e7bcc9e29774c529` on commit
+`b803e65a3723dcb1ab41df8516e8101338c966db`.
+[Tag CI run 40160347133](https://github.com/pavangupta352/interleave/actions/runs/40160347133)
+passed all 60 jobs:
+
+- six native PostgreSQL 16/17/18 × Node.js 22.18.0/24.7.0 jobs, 1,304 tests each
+- six verified upstream TLS jobs over the same matrix
+- two Windows Server 2025 jobs (738 unit and 336 integration tests each) and two
+  macOS 15 jobs (956 and 348), on Node.js 22.18.0 and 24.7.0 with PostgreSQL 17
+- six TypeORM jobs, six Prisma ORM 7.10.0 jobs and eighteen Sequelize, Knex and
+  MikroORM rows
+- the Python (four legs), Ruby, PHP, Go and Java actor jobs, two PostgreSQL 17 +
+  pgvector 0.8.6 jobs and two managed CLI jobs
+- the offline report job, 81 checks at each desktop and mobile size in Chromium,
+  Firefox and WebKit
+- the release-asset job, which built the package twice from the tagged source,
+  compared the archives, inspected their contents and installed the candidate in a
+  fresh consumer
+
+The release assets are that run's artifact. Fresh downloads from the release page
+match `SHA256SUMS`:
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `pavangupta352-interleave-0.3.0.tgz` | 2,099,090 | `cd598f66915553b93b8ec7a3f4477cd89b3c7bfbef0f2e1b03ebf6c5d2f8d17d` |
+| `interleave-0.3.0-source.tar.gz` | 1,119,208 | `0a66e1b91522aa8cd7adf678ab29e4b8f3574c72ddebb493a35bb505ff0b3452` |
+| `release-manifest.json` | 97,166 | `807a8bf6c7d03cebecde47eb601111ed4299237fa1d91152d236983293a2a8ab` |
+| `consumer-package-lock.json` | 6,137 | `79ec553f1d857be546e0b874054759cff05e7096c0b24c51adbbfb6cc0ada588` |
+
+The npm archive's integrity is
+`sha512-O3DAXDX7KmRGci5i7qVnnZimFTZCGrKFFOtIIgmU82J0XpcHw10+qDpuZrVBaD1NBAh+z2X1MSAwVYocaFvWVQ==`.
+Installing the release URL with npm records that integrity, and the getting-started
+commands ran as written against the published release.
+
+### Consumer acceptance
+
+The documented workflows were run against the CI-built archive on macOS arm64 with
+Node.js 24.7.0 (npm 11.5.1) and 22.18.0 (npm 10.9.3), against PostgreSQL 16, in
+fresh directories with their own npm caches. All 446 recorded commands (355 on
+Node.js 24.7.0 and 91 on 22.18.0) that come from a README or guide returned their
+documented exit codes on the first attempt:
+
+- The core workflow on both toolchains: release install, `init`, `doctor`, the
+  scaffold race and report, the README counter commands, and an export that
+  installed offline and replayed exactly.
+- The cursor example on both toolchains, and the pool and overlap examples. All
+  10 exact replays of the pool recording repeated the violation.
+- The ten language examples. The repaired searches matched their READMEs: Python
+  47, Ruby 47, PHP 619, Go 295, Java 183, asyncpg 295 and Django 295 schedules.
+  SQLAlchemy, Active Record and GORM each ran 200 seeded orders with no violation.
+- The Sequelize, Knex and MikroORM gates, 14 of 14 checks each, including export.
+- The Prisma example on Node.js 22.18.0; its repaired search covered 363 schedules.
+- New scenarios written against the installed package: a Postgres.js
+  `query.cancel()` and a pg-copy-streams COPY FROM STDIN both recorded, replayed
+  and showed the cancel request and the COPY transfer in their reports.
+- Interrupting a run: SIGHUP exited 129 and SIGINT 130, with a dedicated server and
+  with `--docker`, and the run's database or managed container was gone each time.
+
+The installed package matched the manifest in all 501 files (path, SHA-256, size
+and mode). The gate's findings were documentation notes and one message wording,
+fixed after the release. It did not cover the npm registry route (the package is
+unpublished), PostgreSQL 17 and 18 or Windows (CI covers them), or hosts other
+than macOS arm64.
+
+npm publication of this archive is pending the owner's registry login. Until then,
+install from the release page.
+
 ## 0.2.1 release qualification (25 October 2026)
 
 The [v0.2.1 release](https://github.com/pavangupta352/interleave/releases/tag/v0.2.1)

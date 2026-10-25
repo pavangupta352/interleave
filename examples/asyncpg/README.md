@@ -31,11 +31,11 @@ export INTERLEAVE_PYTHON=asyncpg/.venv/bin/python
 
 # Find the oversell and keep it (exit 1 means the invariant failed).
 npx --no-install interleave run asyncpg/scenario.mjs --include asyncpg/checkout.py \
-  --protocol-profile flush-stages-v1 --docker --out oversell.json
+  --protocol-profile flush-stages-v1 --docker --out asyncpg-oversell.json
 
 # Replay the same order against the same source (exit 1 again). Replay uses the
 # recorded protocol profile.
-npx --no-install interleave replay asyncpg/scenario.mjs oversell.json --docker
+npx --no-install interleave replay asyncpg/scenario.mjs asyncpg-oversell.json --docker
 
 # The repaired program passes every explored order (exit 0). Its 295 schedules
 # exceed the default 100-run budget, and each starts two Python processes, so

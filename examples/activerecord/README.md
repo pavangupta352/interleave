@@ -29,10 +29,10 @@ BUNDLE_GEMFILE=activerecord/Gemfile bundle install
 
 # Find the oversell and keep it (exit 1 means the invariant failed).
 npx --no-install interleave run activerecord/scenario.mjs --include activerecord/checkout.rb \
-  --include activerecord/shop.rb --docker --out oversell.json
+  --include activerecord/shop.rb --docker --out activerecord-oversell.json
 
 # Replay the same order against the same source (exit 1 again).
-npx --no-install interleave replay activerecord/scenario.mjs oversell.json --docker
+npx --no-install interleave replay activerecord/scenario.mjs activerecord-oversell.json --docker
 
 # Search 200 orders of the repaired program (exit 4: the run budget, not a
 # violation, ended the search; the summary reports violations: 0).

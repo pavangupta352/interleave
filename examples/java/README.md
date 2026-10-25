@@ -25,10 +25,10 @@ because `--include` paths are relative to that project root:
 node java/fetch-driver.mjs
 
 # Find the oversell and keep it (exit 1 means the invariant failed).
-npx --no-install interleave run java/scenario.mjs --include java/Checkout.java --docker --out oversell.json
+npx --no-install interleave run java/scenario.mjs --include java/Checkout.java --docker --out java-oversell.json
 
 # Replay the same order against the same source (exit 1 again).
-npx --no-install interleave replay java/scenario.mjs oversell.json --docker
+npx --no-install interleave replay java/scenario.mjs java-oversell.json --docker
 
 # The repaired program passes every explored order (exit 0). Its frontier has
 # 183 schedules, more than the default 100 runs, and each schedule starts two

@@ -24,10 +24,10 @@ because `--include` paths are relative to that project root:
 BUNDLE_GEMFILE=ruby/Gemfile bundle install
 
 # Find the oversell and keep it (exit 1 means the invariant failed).
-npx --no-install interleave run ruby/scenario.mjs --include ruby/checkout.rb --docker --out oversell.json
+npx --no-install interleave run ruby/scenario.mjs --include ruby/checkout.rb --docker --out ruby-oversell.json
 
 # Replay the same order against the same source (exit 1 again).
-npx --no-install interleave replay ruby/scenario.mjs oversell.json --docker
+npx --no-install interleave replay ruby/scenario.mjs ruby-oversell.json --docker
 
 # The repaired program passes every explored order (exit 0). The search starts
 # two Ruby processes for each of its 47 schedules, which can take longer than

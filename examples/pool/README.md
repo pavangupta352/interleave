@@ -39,8 +39,9 @@ npx --no-install interleave run pool/safe-scenario.mjs --connection-profile mult
 ```
 
 Replay and minimize take the connection profile from the recording. The report
-labels each command with its connection, `alice #1`, and names the connection a
-lock wait was blocked by.
+labels each command with its connection, `alice #1`. When a recording has a lock
+wait, the report also names the connection it was blocked by; this example's
+lost update happens without one.
 
 ## What was verified
 

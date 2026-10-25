@@ -21,10 +21,10 @@ because `--include` paths are relative to that project root:
 
 ```sh
 # Find the oversell and keep it (exit 1 means the invariant failed).
-npx --no-install interleave run php/scenario.mjs --include php/checkout.php --docker --out oversell.json
+npx --no-install interleave run php/scenario.mjs --include php/checkout.php --docker --out php-oversell.json
 
 # Replay the same order against the same source (exit 1 again).
-npx --no-install interleave replay php/scenario.mjs oversell.json --docker
+npx --no-install interleave replay php/scenario.mjs php-oversell.json --docker
 
 # The repaired program passes every explored order (exit 0). Its frontier has
 # 619 schedules, beyond the default 100 runs and 64 MiB of retained results,

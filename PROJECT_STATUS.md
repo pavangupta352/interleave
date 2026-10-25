@@ -1,6 +1,6 @@
 # Interleave — project status and roadmap
 
-**Checkpoint: 25 October 2026 · 0.2.1 released · 0.3.0 on `feature/0.3.0` · Active development**
+**Checkpoint: 25 October 2026 · 0.3.0 released · Active development**
 
 This page is the starting point for anyone picking the project up. It explains
 what Interleave is, what works and how that was verified, what is in progress,
@@ -17,9 +17,9 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Owner | Pavan Gupta, GitHub `pavangupta352`; commits use `pavan.gupta.352@gmail.com`. |
 | Repository | [pavangupta352/interleave](https://github.com/pavangupta352/interleave) |
 | Package / executable | `@pavangupta352/interleave` / `interleave` |
-| Version | `0.2.1` released; `0.3.0` on `feature/0.3.0` |
-| Qualified source | `5b54b50`, tag `v0.2.1`; [tag CI run 40151506663](https://github.com/pavangupta352/interleave/actions/runs/40151506663) passed all 31 jobs, and the exact archive passed consumer acceptance on Node.js 22.18.0 and 24.7.0 ([validation](docs/validation.md)) |
-| Release state | [v0.2.1 on GitHub](https://github.com/pavangupta352/interleave/releases/tag/v0.2.1) with the npm archive, source archive, manifest and `SHA256SUMS` (25 October 2026), after [v0.1.0](https://github.com/pavangupta352/interleave/releases/tag/v0.1.0) (27 September 2026). The `v0.2.0` tag was never released. npm publication is pending the owner's `npm login`. |
+| Version | `0.3.0` |
+| Qualified source | `b803e65`, tag `v0.3.0`; [tag CI run 40160347133](https://github.com/pavangupta352/interleave/actions/runs/40160347133) passed all 60 jobs, and the exact archive passed consumer acceptance on Node.js 22.18.0 and 24.7.0 ([validation](docs/validation.md)) |
+| Release state | [v0.3.0 on GitHub](https://github.com/pavangupta352/interleave/releases/tag/v0.3.0) with the npm archive, source archive, manifest and `SHA256SUMS` (25 October 2026), after [v0.2.1](https://github.com/pavangupta352/interleave/releases/tag/v0.2.1) and [v0.1.0](https://github.com/pavangupta352/interleave/releases/tag/v0.1.0). The `v0.2.0` tag was never released. npm publication is pending the owner's `npm login`. |
 
 ## What works
 
@@ -39,11 +39,13 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Prisma 7 | Released in 0.2.1 | Prisma ORM 7.10.0 checkout example and installed gate, 13 checks on PostgreSQL 16/17/18 × Node 22.18/24.7 |
 | Multi-connection actors | Released in 0.2.1 | Connection lanes for pools and ORM side queries, lane-binding replay, schema 4 |
 | Statement overlap | Released in 0.2.1 | `--overlap pairs` releases two commands together; finds the Knex 0.95.12 case-study miss |
-| More languages | 0.3.0 | Ruby, PHP, Go and Java through `processActor`, each with an installed-package workflow and CI job |
-| Sequelize, Knex, MikroORM | 0.3.0 | Per-actor helpers and a 14-check installed gate on PostgreSQL 16/17/18 × Node 22.18/24.7 (18 rows checked locally) |
-| Cancel requests | 0.3.0 | Forwarded only to the sending actor's own backend, over plaintext or verified TLS; recorded in schema 5 with the step each request reached |
-| Streaming COPY | 0.3.0 | COPY FROM STDIN / TO STDOUT inside one scheduled command with backpressure; byte counts and digests in schema 5 |
-| Cursors and Flush stages | 0.3.0 | `flush-stages-v1` releases each Flush-terminated batch separately; pg-cursor, pg-query-stream, Postgres.js `cursor()` |
+| More languages | Released in 0.3.0 | Ruby, PHP, Go and Java through `processActor`, each with an installed-package workflow and CI job |
+| Sequelize, Knex, MikroORM | Released in 0.3.0 | Per-actor helpers and a 14-check installed gate on PostgreSQL 16/17/18 × Node 22.18/24.7 (18 rows checked locally) |
+| Cancel requests | Released in 0.3.0 | Forwarded only to the sending actor's own backend, over plaintext or verified TLS; recorded in schema 5 with the step each request reached |
+| Streaming COPY | Released in 0.3.0 | COPY FROM STDIN / TO STDOUT inside one scheduled command with backpressure; byte counts and digests in schema 5 |
+| Windows and macOS | Released in 0.3.0 | Record, replay, exploration, reduction and reports on Windows Server 2025 and macOS 15 CI jobs, required for release; export needs Linux or macOS |
+| Python, Ruby and Go ORMs | Released in 0.3.0 | asyncpg, SQLAlchemy, Django, Active Record and GORM examples with installed-package workflows in CI |
+| Cursors and Flush stages | Released in 0.3.0 | `flush-stages-v1` releases each Flush-terminated batch separately; pg-cursor, pg-query-stream, Postgres.js `cursor()` |
 
 ## Known limits
 
@@ -59,7 +61,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | --- | --- |
 | Release 0.1.0 | Released on GitHub with checksums; npm publication of the same archive after the owner's `npm login` |
 | Release 0.2.1 | Released on GitHub with checksums after tag CI and consumer acceptance of the exact archive; npm publication after the owner's `npm login` |
-| Release 0.3.0 | More languages, Sequelize/Knex/MikroORM, cancel requests, streaming COPY and Flush stages; full CI on `feature/0.3.0`, then the same release gate |
+| Release 0.3.0 | Released on GitHub with checksums after tag CI and consumer acceptance of the exact archive; npm publication after the owner's `npm login` |
 | Prisma export | Portable export for Prisma's generated client |
 | Pool replay | Exact replay of a pool that routes a later statement to a different connection stays `incompatible`. Exchanging two connections' bindings when their recorded commands match was built and rejected in review: matching commands and result summaries do not show that two sessions hold the same state (sequence `currval`, advisory locks, temporary tables), so it could turn a mismatch into a false match. Supporting it needs evidence of session state |
 | Hosted databases | Restricted roles, provider allocation, mutual TLS, channel binding, host-name overrides |
