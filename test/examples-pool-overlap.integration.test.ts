@@ -59,14 +59,18 @@ test('the pool and overlap examples behave as their READMEs state', { timeout: 9
     expect(sequential.violationCount).toBe(0);
     expect(sequential.stopReason).toBe('frontier-exhausted');
     const claimArtifact = join(root, 'claim-failure.json');
-    // PostgreSQL decides how a released pair interleaves; allow a second search if the first pair did not race.
+    // PostgreSQL decides how a released pair interleaves, and how often two claims overlap
+    // depends on the host and server, so allow up to five searches and log how many it took.
     let paired: { violationCount: number } | undefined;
-    for (let attempt = 0; attempt < 2 && !paired?.violationCount; attempt++) {
+    let searches = 0;
+    while (searches < 5 && !paired?.violationCount) {
+      searches++;
       const result = spawnSync(process.execPath, [cli, 'run', 'overlap/scenario.mjs', '--overlap', 'pairs', '--out', claimArtifact, '--force', '--json'],
         { cwd: app, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '', TEST_DATABASE_URL: databaseUrl } });
       expect([0, 1]).toContain(result.status);
       paired = JSON.parse(result.stdout);
     }
+    console.log(JSON.stringify({ overlapExample: { pairedSearches: searches } }));
     expect(paired!.violationCount).toBe(1);
     const claim = parseRunArtifact(JSON.parse(await readFile(claimArtifact, 'utf8')));
     expect(claim.plan).toContain('alice+bob');
