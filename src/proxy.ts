@@ -100,14 +100,15 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     connectPostgresUpstream(transport, { timeoutMs: 5_000 }).then(socket => {
       if (closing) { socket.destroy(); settle(); return; }
       track(socket);
-      // PostgreSQL closes the connection once it has signalled the backend. Like
-      // libpq, write the packet and wait for that close before closing this side.
-      let ended = false;
-      socket.once('end', () => { ended = true; socket.end(); });
-      const timer = setTimeout(() => socket.destroy(), 5_000); timer.unref();
+      // PostgreSQL closes the connection once it has signalled the backend. Like libpq,
+      // write the packet and take that close as the acknowledgement, orderly or not:
+      // on Windows the server's side of the socket is reset rather than ended.
+      let timedOut = false;
+      socket.once('end', () => socket.end());
+      const timer = setTimeout(() => { timedOut = true; socket.destroy(); }, 5_000); timer.unref();
       socket.once('close', () => {
         clearTimeout(timer);
-        settle(ended ? undefined : new Error(`PostgreSQL did not confirm the cancel request for backend ${backendPid}`));
+        settle(timedOut ? new Error(`PostgreSQL did not acknowledge the cancel request for backend ${backendPid} within 5 seconds`) : undefined);
       });
       socket.resume(); socket.write(packet);
     }, (error: unknown) => settle(error instanceof UpstreamConnectionError ? error : new Error('Cancel request could not reach PostgreSQL')));

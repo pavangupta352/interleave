@@ -152,8 +152,18 @@ describe('multi-producer actors against real PostgreSQL', () => {
     expect(search.runs[0]?.outcome, search.runs[0]?.reason).toBe('passed');
     expect(search.firstFailure?.outcome, JSON.stringify(search.runs.map(run => [run.outcome, run.reason, run.plan]))).toBe('violation');
     expect(search.runs.slice(1).some(run => run.plan.some(entry => /^alice#\d$/.test(entry)))).toBe(true);
-    const exact = await replay(poolLostUpdate(), search.firstFailure!, { databaseUrl });
-    expect(exact.outcome, exact.reason).toBe('violation');
+    // Each pool.query takes whichever connection is idle, so the two increments' UPDATEs can
+    // swap connections. Both connections begin with the same SELECT, so replay guesses the
+    // binding; a wrong guess is reported as incompatible, never as a false match.
+    const attempts: RunResult[] = [];
+    for (let attempt = 0; attempt < 3 && attempts.at(-1)?.outcome !== 'violation'; attempt++) {
+      attempts.push(await replay(poolLostUpdate(), search.firstFailure!, { databaseUrl }));
+    }
+    for (const attempt of attempts.slice(0, -1)) {
+      expect(attempt.outcome).toBe('incompatible');
+      expect(attempt.reason).toMatch(/^Replay query or actor startup identity changed for alice/);
+    }
+    expect(attempts.at(-1)!.outcome, attempts.at(-1)!.reason).toBe('violation');
   });
 
   test('Postgres.js with two pooled connections keeps staged cycles open on both lanes and replays exactly', async () => {

@@ -61,6 +61,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Release 0.2.0 | Re-create the tag on `main`, rerun tag CI and release preparation, consumer acceptance of the exact archive, then the GitHub release |
 | Release 0.3.0 | More languages, Sequelize/Knex/MikroORM, cancel requests, streaming COPY and Flush stages; full CI on `feature/0.3.0`, then the same release gate |
 | Prisma export | Portable export for Prisma's generated client |
+| Pool replay | Let exact replay swap the bindings of an actor's connections while their histories are still identical, so a pool that routes later statements differently replays more often instead of reporting `incompatible` |
 | Hosted databases | Restricted roles, provider allocation, mutual TLS, channel binding, host-name overrides |
 | Protocol features | Qualify more drivers' cancel, COPY and cursor paths as users report them; replication stays out of scope |
 | Platforms | Native Windows process ownership and interruption; automated macOS CI |
