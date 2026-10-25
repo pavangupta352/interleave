@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 25 October 2026
+
+Interleave now forwards cancel requests, streams COPY, schedules cursors one batch
+at a time, and runs on Windows. Ruby, PHP, Go and Java programs, the Sequelize,
+Knex and MikroORM ORMs, and Python, Ruby and Go ORMs are qualified as actors.
 
 ### Features
 

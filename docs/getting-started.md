@@ -20,10 +20,10 @@ scenario in a new directory and install Interleave and the node-postgres driver
 the scaffold uses from the file:
 
 ```sh
-curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.2.1/pavangupta352-interleave-0.2.1.tgz
-curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.2.1/SHA256SUMS
+curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.3.0/pavangupta352-interleave-0.3.0.tgz
+curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.3.0/SHA256SUMS
 shasum -a 256 -c SHA256SUMS --ignore-missing
-interleave_archive="$PWD/pavangupta352-interleave-0.2.1.tgz"
+interleave_archive="$PWD/pavangupta352-interleave-0.3.0.tgz"
 npx --yes --package "$interleave_archive" interleave init interleave-race
 cd interleave-race
 npm install --save-dev --save-exact "$interleave_archive" pg@8.23.0

@@ -185,7 +185,7 @@ The package is not on npm yet. Install the archive attached to the
 [latest GitHub release](https://github.com/pavangupta352/interleave/releases/latest):
 
 ```sh
-npm install --save-dev https://github.com/pavangupta352/interleave/releases/download/v0.2.1/pavangupta352-interleave-0.2.1.tgz pg
+npm install --save-dev https://github.com/pavangupta352/interleave/releases/download/v0.3.0/pavangupta352-interleave-0.3.0.tgz pg
 npx --no-install interleave doctor --docker
 ```
 
