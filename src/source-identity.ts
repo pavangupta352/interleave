@@ -5,6 +5,7 @@ import { isBuiltin } from 'node:module';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { SourceDependency } from './export-source.js';
+import { openNoFollow } from './no-follow.js';
 
 export interface CaptureSourceIdentityOptions {
   projectRoot?: string;
@@ -224,7 +225,7 @@ class CaptureState {
     if (previous) return previous.bytes;
     if (this.files.size >= this.maxFiles) throw new SourceIdentityError('budget', 'Source identity file limit exceeded');
     // NONBLOCK avoids waiting indefinitely if a file is replaced by a FIFO.
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const handle = await openNoFollow(path);
     try {
       this.check();
       const before = await handle.stat();
