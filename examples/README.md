@@ -29,7 +29,10 @@ verified.
 Programs in other languages run as actors through `processActor`:
 [python](python/README.md) (psycopg), [ruby](ruby/README.md) (pg gem),
 [php](php/README.md) (PDO), [go](go/README.md) (pgx) and [java](java/README.md)
-(pgjdbc).
+(pgjdbc). Python also has [asyncpg](asyncpg/README.md), with the
+`flush-stages-v1` profile its prepared statements need, and the
+[SQLAlchemy](sqlalchemy/README.md) and [Django](django/README.md) ORMs; Ruby has
+[Active Record](activerecord/README.md) and Go has [GORM](gorm/README.md).
 
 ## Connections, overlap and cursors
 

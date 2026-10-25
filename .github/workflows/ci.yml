@@ -110,9 +110,9 @@ jobs:
         run: npm run test:tls
 
   python:
-    name: Python actors (psycopg) / PostgreSQL 16 / Node 24.7.0
+    name: Python actors (psycopg, asyncpg, SQLAlchemy, Django) / PostgreSQL 16 / Node 24.7.0
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -128,14 +128,15 @@ jobs:
         run: |
           npm ci
           python -m venv "$RUNNER_TEMP/python-actors"
-          "$RUNNER_TEMP/python-actors/bin/pip" install -r examples/python/requirements.txt
-      - name: Record, replay and repair the Python psycopg example from an installed package
+          "$RUNNER_TEMP/python-actors/bin/pip" install -r examples/python/requirements.txt -r examples/asyncpg/requirements.txt \
+            -r examples/sqlalchemy/requirements.txt -r examples/django/requirements.txt
+      - name: Record, replay and repair the Python examples from an installed package
         run: INTERLEAVE_TEST_PYTHON="$RUNNER_TEMP/python-actors/bin/python" npm run test:integration -- python
 
   ruby:
-    name: Ruby actors (pg) / PostgreSQL 16 / Node 24.7.0
+    name: Ruby actors (pg, Active Record) / PostgreSQL 16 / Node 24.7.0
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -149,8 +150,8 @@ jobs:
           ruby-version: '4.0.5'
       - name: Install locked dependencies
         run: npm ci
-      - name: Record, replay and repair the Ruby pg example from an installed package
-        run: INTERLEAVE_TEST_RUBY="$(command -v ruby)" npm run test:integration -- process-actor.ruby
+      - name: Record, replay and repair the Ruby examples from an installed package
+        run: INTERLEAVE_TEST_RUBY="$(command -v ruby)" npm run test:integration -- ruby.integration
 
   php:
     name: PHP actors (PDO pgsql) / PostgreSQL 16 / Node 24.7.0
@@ -175,7 +176,7 @@ jobs:
         run: INTERLEAVE_TEST_PHP="$(command -v php)" npm run test:integration -- process-actor.php
 
   go:
-    name: Go actors (pgx) / PostgreSQL 16 / Node 24.7.0
+    name: Go actors (pgx, GORM) / PostgreSQL 16 / Node 24.7.0
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -192,8 +193,8 @@ jobs:
           cache: false
       - name: Install locked dependencies
         run: npm ci
-      - name: Record, replay and repair the Go pgx example from an installed package
-        run: INTERLEAVE_TEST_GO="$(command -v go)" npm run test:integration -- process-actor.go
+      - name: Record, replay and repair the Go examples from an installed package
+        run: INTERLEAVE_TEST_GO="$(command -v go)" npm run test:integration -- go.integration
 
   java:
     name: Java actors (pgjdbc) / PostgreSQL 16 / Node 24.7.0
