@@ -281,14 +281,20 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 - The report labeled Flush stages and the closing Sync, with rows returned and
   the suspended portal, in Chromium at desktop and mobile sizes.
 
+- libpq 18.0 pipeline mode through psycopg 3.3.6's `pq` module: two queued
+  statements and a flush request became one Flush stage, and `PQpipelineSync`
+  closed the cycle. Another actor's update of the same row waited on the
+  pipeline's uncommitted UPDATE until that Sync committed it. The default
+  profile refused the pipeline with a reason naming `flush-stages-v1`. Exact
+  replay.
 - The [cursor example](../examples/cursor/README.md), installed from the package:
   an interest job that reads accounts through pg-cursor and writes through a
   second pool connection lost a concurrent deposit on its second explored order,
   with both `flush-stages-v1` and `multi-producer-v1`; the atomic version passed
   all 19 orders.
 
-Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, libpq pipeline mode with
-flush requests, pgjdbc, and Firefox and WebKit for the report.
+Not yet checked: PostgreSQL 17 and 18, Node.js 22.18, pgjdbc, and Firefox and
+WebKit for the report.
 
 ## External programs as actors
 
