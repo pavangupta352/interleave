@@ -43,10 +43,13 @@ run on Windows. What differs from Linux and macOS:
   compares the opened file's device and inode with that check, so a link or a
   file swapped in between is refused as on other platforms.
 - Supervision ends the worker process itself rather than a process group.
-- Windows cannot send SIGINT to another process, so the test that interrupts a
-  run and checks that its database is removed runs only on Linux and macOS.
-  Ending a run's process from outside (`taskkill /F`, closing its window) skips
-  cleanup and leaves its `interleave_` database behind.
+- Windows cannot send a signal to another process, so the test that interrupts
+  a run and checks that its database is removed runs only on Linux and macOS.
+  The CLI handles Ctrl+C, Ctrl+Break and the SIGHUP that Node.js raises when the
+  console window closes; Windows ends the process about 10 seconds after the
+  window closes, and these paths are not tested in CI. Ending the process
+  without a signal, such as with `taskkill /F`, skips cleanup and leaves its
+  `interleave_` database behind.
 - Source identity hashes file bytes. A checkout with CRLF line endings has a
   different identity from an LF checkout of the same commit, so a recording made
   from one does not replay exactly from the other. Keep line endings consistent,

@@ -78,6 +78,10 @@
 
 ### Fixes
 
+- The CLI stops and cleans up on SIGHUP (exit 129) as it does on SIGINT and
+  SIGTERM. A terminal that closed during a run used to end it without removing
+  its database. On Windows, Node.js raises SIGHUP when the console window closes,
+  and Ctrl+Break's SIGBREAK now stops a run too (exit 149).
 - When an uncaught exception or unhandled promise rejection ends the scenario
   worker, the run's reason says which, and names a client or pool without an
   `'error'` listener as the usual cause. It used to say only that the worker

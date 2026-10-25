@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { constants as fsConstants } from 'node:fs';
 import { open, readFile } from 'node:fs/promises';
+import { constants as osConstants } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { explore } from './explore.js';
 import { replay } from './replay.js';
@@ -22,32 +23,33 @@ const metadata = JSON.parse(await readFile(new URL('../package.json', import.met
 const controller = new AbortController();
 let signal: NodeJS.Signals | undefined;
 let stderrFailed = false, stdoutFailed = false;
-const outputFailure = (): void => { controller.abort(); process.exitCode = signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 2; };
+// A signal's exit code is 128 plus its number: 129 SIGHUP, 130 SIGINT, 143 SIGTERM, 149 SIGBREAK.
+const signalCode = (): number | undefined => signal === undefined ? undefined : 128 + osConstants.signals[signal];
+const outputFailure = (): void => { controller.abort(); process.exitCode = signalCode() ?? 2; };
 // A pipe can fail asynchronously after write() returns. Keep these handlers for
 // the process lifetime so even a late progress failure cannot bypass cleanup.
 process.stderr.on('error', () => { stderrFailed = true; outputFailure(); });
 process.stdout.on('error', () => { stdoutFailed = true; outputFailure(); });
 const diagnostic = (message: string): void => { if (!stderrFailed) process.stderr.write(message); };
-const onInterrupt = (): void => { signal ??= 'SIGINT'; controller.abort(); };
-const onTerminate = (): void => { signal ??= 'SIGTERM'; controller.abort(); };
-process.on('SIGINT', onInterrupt);
-process.on('SIGTERM', onTerminate);
+// SIGHUP arrives when a terminal closes, and on Windows when the console window
+// closes; SIGBREAK is Windows' Ctrl+Break. Each stops the command and cleans up.
+const stopSignals = ['SIGINT', 'SIGTERM', 'SIGHUP', ...(process.platform === 'win32' ? ['SIGBREAK' as const] : [])] as const;
+const onSignal = (received: NodeJS.Signals): void => { signal ??= received; controller.abort(); };
+for (const name of stopSignals) process.on(name, onSignal);
 let json = process.argv.slice(2).includes('--json');
 try {
   const code = await main(process.argv.slice(2));
-  process.exitCode = signal ? signal === 'SIGINT' ? 130 : 143 : stderrFailed || stdoutFailed ? 2 : code;
+  process.exitCode = signalCode() ?? (stderrFailed || stdoutFailed ? 2 : code);
 } catch (error) {
   const message = error instanceof Error ? error.message : 'Command failed';
-  const code = signal ? signal === 'SIGINT' ? 130 : 143
-    : stderrFailed || stdoutFailed ? 2
+  const code = signalCode() ?? (stderrFailed || stdoutFailed ? 2
     : error instanceof MinimizationVerificationError && error.outcome === 'incompatible' ? 3
-    : error instanceof MinimizationVerificationError && error.outcome === 'inconclusive' ? 4 : 2;
+    : error instanceof MinimizationVerificationError && error.outcome === 'inconclusive' ? 4 : 2);
   if (json && !stdoutFailed) process.stdout.write(`${JSON.stringify({ error: { message }, exitCode: code })}\n`);
   else diagnostic(`interleave: ${message}\n`);
   process.exitCode = code;
 } finally {
-  process.removeListener('SIGINT', onInterrupt);
-  process.removeListener('SIGTERM', onTerminate);
+  for (const name of stopSignals) process.removeListener(name, onSignal);
 }
 
 async function main(args: string[]): Promise<number> {
@@ -108,7 +110,7 @@ async function main(args: string[]): Promise<number> {
   const details = command === 'doctor' && !('explored' in completed.result) && !('reducedChoices' in completed.result)
     ? `\nNode.js: ${completed.result.environment.nodeVersion}\nPostgreSQL: ${completed.result.environment.serverVersion}\nFixture: ${completed.result.environment.fixture?.profile ?? 'unavailable'}\nTransport: ${describeTransport(completed.result)}` : '';
   output(completed.result, describe(completed.result) + details);
-  return signal ? signal === 'SIGINT' ? 130 : 143 : completed.code;
+  return signalCode() ?? completed.code;
 
   async function executeDatabase(databaseUrl: string) {
     const options: RunOptions = {

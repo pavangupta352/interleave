@@ -142,6 +142,7 @@ Exact replay is default; --guided creates separately labeled new evidence.
 Artifacts preserve private SQL and selected observations, which may be sensitive.
 
 Exit codes: 0 checked success; 1 violation; 2 usage/actor/harness error;
-3 incompatible replay; 4 inconclusive or exhausted safety budget; 130 SIGINT; 143 SIGTERM.
+3 incompatible replay; 4 inconclusive or exhausted safety budget; 129 SIGHUP; 130 SIGINT;
+143 SIGTERM; 149 SIGBREAK (Windows).
 Reports are standalone offline HTML; opening or writing one does not execute a scenario.
 `;

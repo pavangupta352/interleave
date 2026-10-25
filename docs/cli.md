@@ -267,14 +267,19 @@ keys, or raw application logs. Review evidence before sharing it.
 | 2 | Invalid usage, actor failure, harness error, output error, or incomplete cleanup |
 | 3 | Incompatible replay, or exploration with no compatible completed execution |
 | 4 | Inconclusive execution or a search/reduction safety budget stopped work |
+| 129 | SIGHUP cancellation, after owned cleanup: a terminal closed, or on Windows the console window closed |
 | 130 | SIGINT cancellation, after owned cleanup |
 | 143 | SIGTERM cancellation, after owned cleanup |
+| 149 | SIGBREAK cancellation on Windows (Ctrl+Break), after owned cleanup |
 
 A safety-budget stop returns 4 even when retained earlier runs include a
 violation. Its JSON result still records those observations. An actor/harness
 failure or incomplete cleanup takes priority over a search budget status.
 
 Cancellation asks the supervised worker to stop and escalates to termination.
+On Windows, Node.js raises SIGHUP when the console window closes and ends the
+process about 10 seconds later, so cleanup must finish within that time. A
+process ended without a signal, such as by `taskkill /F`, cannot clean up.
 Database creation and cleanup have their own bounds and may extend beyond an
 execution deadline. POSIX cleanup owns the worker's process group; Windows
 cleanup owns the worker itself. Detached application processes and other
