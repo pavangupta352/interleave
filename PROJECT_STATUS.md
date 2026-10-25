@@ -53,7 +53,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Workstream | Next deliverable |
 | --- | --- |
 | Release 0.1.0 | Released on GitHub with checksums; npm publication of the same archive after the owner's `npm login` |
-| Release 0.2.0 | Multi-connection actors, statement overlap, Prisma 7, pool and overlap examples; full CI, then consumer acceptance of the exact archive |
+| Release 0.2.1 | Multi-connection actors, statement overlap, Prisma 7, pool and overlap examples; tag CI, then consumer acceptance of the exact archive. The `v0.2.0` tag stays unreleased after its release-asset check failed |
 | Multi-connection actors | Lanes per connection, lazy lane binding for replay, schema 4, pool and ORM qualification |
 | Statement overlap | An exploration mode that releases two commands together, to reach races like the Knex 0.95.12 miss |
 | Prisma and more ORMs | Prisma 7 export packaging; Sequelize, Knex and MikroORM ordinary workloads |
