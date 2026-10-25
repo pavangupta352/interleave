@@ -58,8 +58,9 @@ connection labels in Chromium, Firefox and WebKit at desktop and mobile sizes.
 
 Keep each actor's pool within the per-actor cap (eight in this profile). Other
 drivers, ORMs and pool implementations and larger pools have not been checked
-with this profile, and the complete release matrix (every suite on each
-PostgreSQL major and Node.js version) has not yet run with it. One
+with this profile. Its integration tests run in every PostgreSQL 16, 17 and 18
+× Node.js 22.18.0 and 24.7.0 job of the CI matrix, and CI run 40150994903 passed
+them all. One
 [cancel request](#cancel-requests) case uses two connections of one actor in
 this profile.
 
@@ -90,7 +91,9 @@ chooses how a pair interleaves; replay cannot force it. On the unchanged Knex
 0.95.12 case study, overlap exploration found the duplicate lock row on its seventh
 run and 30 of 30 exact replays repeated it, while 17 of the 46 explored runs that
 paired the two inserts raced; see the
-[case studies](case-studies.md#what-the-fix-left-open).
+[case studies](case-studies.md#what-the-fix-left-open). The overlap integration
+tests run in every PostgreSQL 16, 17 and 18 × Node.js 22.18.0 and 24.7.0 job of
+the CI matrix, and CI run 40150994903 passed them all.
 
 ## Cancel requests
 
