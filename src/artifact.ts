@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { RunResult } from './types.js';
 import { ARTIFACT_LIMITS, parseRunArtifact, validateArtifactWriteOptions } from './artifact-schema.js';
 import type { WriteRunArtifactOptions } from './artifact-schema.js';
-import { openNoFollow } from './no-follow.js';
+import { openNoFollow } from './source-identity.js';
 export { ARTIFACT_LIMITS, parseRunArtifact, validateJsonValue } from './artifact-schema.js';
 export type { WriteRunArtifactOptions, JsonValueValidationOptions } from './artifact-schema.js';
 const MAX_ARTIFACT_BYTES = ARTIFACT_LIMITS.maxBytes;
