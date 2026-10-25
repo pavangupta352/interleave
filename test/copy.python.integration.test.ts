@@ -24,19 +24,24 @@ test('psycopg copy() and libpq extended-protocol COPY stream through the actor e
       await db.query('CREATE TABLE items (id integer PRIMARY KEY, name text NOT NULL)');
     },
     actors: { alice: processActor(python, [program]), async bob() {} },
-    async invariant({ db }) { assert.equal((await db.query('SELECT count(*)::int AS rows FROM items')).rows[0].rows, 3); },
+    async invariant({ db }) { assert.equal((await db.query('SELECT count(*)::int AS rows FROM items')).rows[0].rows, 4); },
   };
   try {
     const first = await runOnce(scenario, { databaseUrl });
     expect(first.outcome, first.reason).toBe('passed');
     expect(parseRunArtifact(first)).toEqual(first);
-    expect(first.actors.find(actor => actor.actor === 'alice')?.value).toBe('1\tapple\n2\tpear\n3\tplum\n');
+    expect(first.actors.find(actor => actor.actor === 'alice')?.value).toBe('1\tapple\n2\tpear\n3\tplum\n4\tfig\n');
+    // PostgreSQL's binary copy format: signature, flags and header extension, one row of two fields, then the trailer.
+    const int16 = (value: number) => { const bytes = Buffer.alloc(2); bytes.writeInt16BE(value); return bytes; };
+    const int32 = (value: number) => { const bytes = Buffer.alloc(4); bytes.writeInt32BE(value); return bytes; };
+    const binary = Buffer.concat([Buffer.from('PGCOPY\n\xff\r\n\0', 'latin1'), int32(0), int32(0), int16(2), int32(4), int32(4), int32(3), Buffer.from('fig'), int16(-1)]);
     const copies = first.trace.map(step => ({ protocol: step.protocol, connection: step.connection, sql: step.sql,
       copy: step.completion?.kind !== 'metadata' ? step.completion?.copy : undefined }));
     expect(copies).toEqual([
       { protocol: 'simple', connection: 0, sql: 'COPY items (id, name) FROM STDIN', copy: [{ direction: 'in', bytes: 15, sha256: sha256('1\tapple\n2\tpear\n') }] },
       { protocol: 'extended', connection: 1, sql: 'COPY items (id, name) FROM STDIN', copy: [{ direction: 'in', bytes: 7, sha256: sha256('3\tplum\n') }] },
-      { protocol: 'simple', connection: 2, sql: 'COPY (SELECT id, name FROM items ORDER BY id) TO STDOUT', copy: [{ direction: 'out', bytes: 22, sha256: sha256('1\tapple\n2\tpear\n3\tplum\n') }] },
+      { protocol: 'simple', connection: 2, sql: 'COPY items (id, name) FROM STDIN (FORMAT BINARY)', copy: [{ direction: 'in', bytes: binary.length, sha256: createHash('sha256').update(binary).digest('hex') }] },
+      { protocol: 'simple', connection: 3, sql: 'COPY (SELECT id, name FROM items ORDER BY id) TO STDOUT', copy: [{ direction: 'out', bytes: 28, sha256: sha256('1\tapple\n2\tpear\n3\tplum\n4\tfig\n') }] },
     ]);
     const repeated = await replay(scenario, first, { databaseUrl });
     expect(repeated.outcome, repeated.reason).toBe('passed');

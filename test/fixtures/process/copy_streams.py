@@ -25,6 +25,13 @@ assert finished is not None and finished.status == pq.ExecStatus.COMMAND_OK, raw
 assert raw.get_result() is None
 raw.finish()
 
+# Binary COPY: the proxy moves and measures the bytes without reading them.
+with psycopg.connect(url, autocommit=True) as connection:
+    with connection.cursor() as cursor:
+        with cursor.copy("COPY items (id, name) FROM STDIN (FORMAT BINARY)") as copy:
+            copy.set_types(["int4", "text"])
+            copy.write_row((4, "fig"))
+
 with psycopg.connect(url, autocommit=True) as connection:
     with connection.cursor() as cursor:
         with cursor.copy("COPY (SELECT id, name FROM items ORDER BY id) TO STDOUT") as copy:

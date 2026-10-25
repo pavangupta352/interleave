@@ -128,8 +128,9 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
   replayed exactly.
 - Two node-postgres connections of one actor in `multi-producer-v1`: the request
   named the sleeping connection, and replay bound it to the recorded one.
-- psycopg 3.3.6 (binary, libpq 18.0) `cancel_safe()` from a Python process actor,
-  with exact replay.
+- psycopg 3.3.6 (binary, libpq 18.0) from a Python process actor: `cancel_safe()`,
+  which uses libpq's `PQcancelCreate`, and `cancel()`, which uses the older
+  `PQcancel`, each with exact replay.
 - Forwarding over verified TLS to a TLS-only server, with exact replay.
 - pgjdbc 42.7.13 on Java 21.0.11, from a Java process actor:
   `Statement.setQueryTimeout(1)` sent its cancel request from the driver's timer
@@ -146,7 +147,7 @@ CI run 40146537748 repeated these checks: the integration and verified-TLS
 suites on PostgreSQL 16, 17 and 18 with Node.js 22.18.0 and 24.7.0, the psycopg
 case on PostgreSQL 16 with Node.js 24.7.0, and the report in Chromium, Firefox
 and WebKit. The CI `java` job repeats the pgjdbc case on PostgreSQL 16 with
-Node.js 24.7.0. Not yet checked: libpq `PQcancel` called directly.
+Node.js 24.7.0.
 
 ## Streaming COPY
 
@@ -197,6 +198,8 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
   `multi-producer-v1`, with exact replay.
 - pgjdbc 42.7.13 `CopyManager` `copyIn` and `copyOut` from a Java process actor,
   with exact replay.
+- psycopg's binary COPY (`FORMAT BINARY`, `write_row`): the recorded bytes were
+  exactly PostgreSQL's binary copy format for the row, signature to trailer.
 - node-postgres without a copy stream: copied-out data was measured and
   discarded by the driver, and a copy in failed with the driver's own CopyFail.
 - The report listed each transfer's direction, byte count and digest in
@@ -205,7 +208,7 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 CI run 40146537748 repeated these checks on PostgreSQL 16, 17 and 18 with
 Node.js 22.18.0 and 24.7.0, the psycopg and libpq case on PostgreSQL 16 with
 Node.js 24.7.0, and the report in Chromium, Firefox and WebKit. The CI `java` job
-repeats the pgjdbc case. Not yet checked: binary-format COPY.
+repeats the pgjdbc case.
 
 ## PostgreSQL 17 with pgvector 0.8.6
 

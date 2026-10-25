@@ -62,7 +62,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Release 0.3.0 | More languages, Sequelize/Knex/MikroORM, cancel requests, streaming COPY and Flush stages; full CI on `feature/0.3.0`, then the same release gate |
 | Prisma export | Portable export for Prisma's generated client |
 | Hosted databases | Restricted roles, provider allocation, mutual TLS, channel binding, host-name overrides |
-| Protocol features | libpq `PQcancel` called directly, binary-format COPY |
+| Protocol features | Qualify more drivers' cancel, COPY and cursor paths as users report them; replication stays out of scope |
 | Platforms | Native Windows process ownership and interruption; automated macOS CI |
 | Other engines | Select a first non-PostgreSQL engine and design its own protocol, fixture and scheduling contract |
 | Usability | An unaided first-user exercise with real participants |

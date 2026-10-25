@@ -13,12 +13,12 @@ const databaseUrl = testDatabaseUrl();
 const python = process.env.INTERLEAVE_TEST_PYTHON!;
 const program = fileURLToPath(new URL('./fixtures/process/cancel.py', import.meta.url));
 
-test('psycopg cancel_safe() reaches its own backend through the actor endpoint and replays', { timeout: 120_000 }, async () => {
+test.each([['cancel_safe()', []], ['cancel() through PQcancel', ['legacy']]])('psycopg %s reaches its own backend through the actor endpoint and replays', { timeout: 120_000 }, async (_name, args) => {
   const owned: string[] = [];
   const scenario: Scenario = {
     name: 'psycopg cancel',
     async setup({ connectionString }) { owned.push(new URL(connectionString).pathname.slice(1)); },
-    actors: { alice: processActor(python, [program]), async bob() {} },
+    actors: { alice: processActor(python, [program, ...args]), async bob() {} },
     async invariant({ results }) { assert.equal(results.find(result => result.actor === 'alice')?.value, '57014'); },
   };
   try {
