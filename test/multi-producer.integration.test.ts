@@ -218,8 +218,8 @@ describe('multi-producer actors against real PostgreSQL', () => {
     // Connection events restart that bound, so leave room for slow startups on a loaded host.
     const waiting = await runOnce(poolLostUpdate(), { ...multi, plan: ['alice#5'], timeoutMs: 4000 });
     expect(waiting.outcome, waiting.reason).toBe('incompatible');
+    // As above, the reason shows the lane-wait limit, not the deadline, ended the run.
     expect(waiting.reason).toMatch(/Schedule asks for alice#5 at step 0, which has not queued its next command; nothing else could proceed for 2000 ms/);
-    expect(waiting.durationMs).toBeLessThan(4000);
     const settled: Scenario = { ...poolLostUpdate(), actors: {
       alice: context => withPool(context, async pool => (await pool.query('SELECT 1')).rowCount),
       bob: poolLostUpdate().actors.bob!,
@@ -234,8 +234,9 @@ describe('multi-producer actors against real PostgreSQL', () => {
     // alice#0's next command needs the result of its side query on alice#1, which the plan holds.
     const stuck = await runOnce(scenario, { ...multi, plan: ['alice#0', 'alice#0'], timeoutMs: 4000 });
     expect(stuck.outcome, stuck.reason).toBe('incompatible');
+    // The reason shows the lane-wait limit ended the run; the 4-second deadline would end it
+    // as inconclusive. Its duration also counts database setup, which is slower on Windows.
     expect(stuck.reason).toMatch(/Schedule asks for alice#0 at step 1, which has not queued its next command; nothing else could proceed for 2000 ms/);
-    expect(stuck.durationMs).toBeLessThan(4000);
     const first = await runOnce(scenario, { ...multi, plan: ['alice#0', 'bob#0', 'alice#1', 'bob#1'] });
     expect(first.outcome, first.reason).toBe('violation');
     const reduced = await minimize(scenario, first, { databaseUrl, maxAttempts: 30, timeoutMs: 4000 });
