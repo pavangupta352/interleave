@@ -9,6 +9,15 @@
 - The refusals to replace an existing artifact or report name `--force` as well
   as `{ overwrite: true }`.
 
+### Testing and release
+
+- CI runs every Node.js job on 26.12.1 as well as 22.18.0 and 24.7.0, and the
+  Node.js 26 jobs use npm 12.2.1, so the installed-package workflows run with the
+  current npm.
+- A publish workflow sends a GitHub release's accepted npm archive to npm with
+  trusted publishing after checking it against the release's `SHA256SUMS`, and
+  then checks the registry's integrity hash against the archive.
+
 ### Documentation
 
 - The README installs the release archive from a downloaded file. npm 12 refuses

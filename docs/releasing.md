@@ -1,7 +1,7 @@
 # Preparing a release
 
 A release is published only after its exact CI-built archive has passed consumer
-acceptance on both qualified Node.js versions. The
+acceptance on each qualified Node.js version. The
 [implementation plan](plans/implementation.md) tracks remaining qualification work.
 Preparing archives is one step in a release.
 
@@ -40,8 +40,10 @@ tag, replace `--ref` with `--tag vX.Y.Z`; the tag must match both package and lo
 versions. The tool does not create tags or publish packages.
 
 Version-tag CI runs the PostgreSQL, pgvector, managed CLI, verified TLS, Python, Ruby,
-PHP, Go and Java actor, TypeORM, Prisma, Sequelize/Knex/MikroORM, browser, Windows and macOS matrix from the tagged checkout. Only after every required job family succeeds can
-the separate assets job prepare and upload its candidate. Those matrix jobs use their own builds;
+PHP, Go and Java actor, TypeORM, Prisma, Sequelize/Knex/MikroORM, browser, Windows
+and macOS matrix from the tagged checkout. Each job with a Node.js matrix runs
+22.18.0, 24.7.0 and 26.12.1, the last with npm 12.2.1. Only after every required job
+family succeeds can the separate assets job prepare and upload its candidate. Those matrix jobs use their own builds;
 the candidate archive has the installed acceptance recorded in its manifest.
 
 Before distribution, complete the release checklist, verify the tagged source and
@@ -49,3 +51,19 @@ canonical archive's user workflow, and publish that exact archive. Verify fresh
 registry and GitHub downloads against the retained hashes, then run the public
 installation instructions. Checksum verification establishes byte agreement; it
 does not replace execution or source review.
+
+## Publishing to npm
+
+Publishing the GitHub release starts the [publish workflow](../.github/workflows/publish.yml).
+It downloads the release's npm archive and `SHA256SUMS`, checks the hash, the
+package name and that the version matches the tag, and publishes that file with
+npm trusted publishing, so no npm token is stored. It then checks that the
+registry's integrity hash matches the archive. To publish an existing release, run
+`gh workflow run publish.yml -f tag=vX.Y.Z`.
+
+npm accepts a trusted publisher only for a package that already exists. A
+maintainer therefore publishes the first version by hand (`npm login`, then
+`npm publish <archive> --access public` with the accepted archive) and then adds the
+trusted publisher in the package settings on npmjs.com: user `pavangupta352`,
+repository `interleave`, workflow `publish.yml`, environment `npm`. Until the
+package exists, the workflow checks the archive and skips the publish.

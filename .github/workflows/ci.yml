@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.18.0', '24.7.0']
+        node: ['22.18.0', '24.7.0', '26.12.1']
         postgres: ['16', '17', '18']
     env:
       INTERLEAVE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
@@ -36,6 +36,9 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Use npm 12 with Node.js 26
+        if: matrix.node == '26.12.1'
+        run: npm install --global npm@12.2.1 && npm --version
       - name: Typecheck, test real PostgreSQL and build the package
         run: npm run check
       - name: Inspect the publishable package
@@ -48,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.18.0', '24.7.0']
+        node: ['22.18.0', '24.7.0', '26.12.1']
     env:
       INTERLEAVE_TEST_POSTGRES_IMAGE: pgvector/pgvector:0.8.6-pg17-bookworm
     steps:
@@ -61,6 +64,9 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Use npm 12 with Node.js 26
+        if: matrix.node == '26.12.1'
+        run: npm install --global npm@12.2.1 && npm --version
       - name: Qualify the explicit pgvector fixture and application profile
         run: npm run test:integration -- pgvector
 
@@ -71,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.18.0', '24.7.0']
+        node: ['22.18.0', '24.7.0', '26.12.1']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -82,6 +88,9 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Use npm 12 with Node.js 26
+        if: matrix.node == '26.12.1'
+        run: npm install --global npm@12.2.1 && npm --version
       - name: Qualify managed setup, replay, reduction and interruption against real Docker
         run: npm run test:managed
 
@@ -92,7 +101,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.18.0', '24.7.0']
+        node: ['22.18.0', '24.7.0', '26.12.1']
         postgres: ['16', '17', '18']
     env:
       INTERLEAVE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
@@ -106,6 +115,9 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Use npm 12 with Node.js 26
+        if: matrix.node == '26.12.1'
+        run: npm install --global npm@12.2.1 && npm --version
       - name: Qualify verified TLS across every connection role with owned TLS-only servers
         run: npm run test:tls
 
@@ -306,7 +318,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.18.0', '24.7.0']
+        node: ['22.18.0', '24.7.0', '26.12.1']
         postgres: ['16', '17', '18']
     services:
       postgres:
@@ -333,6 +345,9 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Use npm 12 with Node.js 26
+        if: matrix.node == '26.12.1'
+        run: npm install --global npm@12.2.1 && npm --version
       - name: Pack the runtime under test before installing the example
         run: |
           mkdir -p "$RUNNER_TEMP/runtime"
@@ -363,7 +378,7 @@ jobs:
       fail-fast: false
       matrix:
         orm: [sequelize, knex, mikro-orm]
-        node: ['22.18.0', '24.7.0']
+        node: ['22.18.0', '24.7.0', '26.12.1']
         postgres: ['16', '17', '18']
         include:
           - orm: sequelize
@@ -399,6 +414,9 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Use npm 12 with Node.js 26
+        if: matrix.node == '26.12.1'
+        run: npm install --global npm@12.2.1 && npm --version
       - name: Pack the runtime under test before installing the example
         run: |
           mkdir -p "$RUNNER_TEMP/runtime"
@@ -446,7 +464,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.18.0', '24.7.0']
+        node: ['22.18.0', '24.7.0', '26.12.1']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -457,6 +475,9 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Use npm 12 with Node.js 26
+        if: matrix.node == '26.12.1'
+        run: npm install --global npm@12.2.1 && npm --version
       - name: Typecheck, build and run the unit suite
         run: |
           npm run typecheck
@@ -481,7 +502,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.18.0', '24.7.0']
+        node: ['22.18.0', '24.7.0', '26.12.1']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -492,6 +513,9 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Use npm 12 with Node.js 26
+        if: matrix.node == '26.12.1'
+        run: npm install --global npm@12.2.1 && npm --version
       - name: Typecheck, build and run the unit suite
         run: |
           npm run typecheck

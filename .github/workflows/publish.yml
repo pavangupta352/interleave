@@ -1,0 +1,96 @@
+name: Publish to npm
+
+# Publishes the npm archive attached to a GitHub release: the exact file the release
+# gate accepted, checked against the release's SHA256SUMS. npm trusted publishing
+# (OIDC) authenticates this workflow, so no npm token is stored anywhere.
+#
+# One-time owner setup: publish the first version by hand (npm login, then
+# npm publish <archive> --access public), then add a trusted publisher in the
+# package's settings on npmjs.com with user pavangupta352, repository interleave,
+# workflow publish.yml and environment npm. Until the package exists on npm, this
+# workflow checks the archive and skips the publish.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag whose archive to publish, such as v0.3.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the release archive to npm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      PACKAGE: '@pavangupta352/interleave'
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+      - name: Check that npm supports trusted publishing
+        run: test "$(npm --version)" = 11.5.1
+      - name: Download the release's npm archive and SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::not a version tag"; exit 1; }
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/release" \
+            --pattern 'pavangupta352-interleave-*.tgz' --pattern SHA256SUMS
+      - name: Check the archive against SHA256SUMS, the package name and the tag
+        working-directory: ${{ runner.temp }}/release
+        run: |
+          archives=(pavangupta352-interleave-*.tgz)
+          [ "${#archives[@]}" = 1 ] || { echo "::error::expected one npm archive, found ${#archives[@]}"; exit 1; }
+          archive="${archives[0]}"
+          awk -v file="$archive" '$2 == file' SHA256SUMS | sha256sum --check --strict
+          manifest=$(tar -xOzf "$archive" package/package.json)
+          name=$(node -p 'JSON.parse(process.argv[1]).name' "$manifest")
+          version=$(node -p 'JSON.parse(process.argv[1]).version' "$manifest")
+          [ "$name" = "$PACKAGE" ] || { echo "::error::the archive is $name, not $PACKAGE"; exit 1; }
+          [ "v$version" = "$RELEASE_TAG" ] || { echo "::error::archive version $version does not match $RELEASE_TAG"; exit 1; }
+          echo "ARCHIVE=$PWD/$archive" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Publish unless the package is missing or already has this version
+        run: |
+          if ! found=$(npm view "$PACKAGE" name 2>&1); then
+            if grep -q E404 <<<"$found"; then
+              echo "::notice::$PACKAGE is not on npm yet. The owner publishes the first version by hand; see the note at the top of publish.yml."
+              echo "SKIPPED=1" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "$found"
+            exit 1
+          fi
+          if [ "$(npm view "$PACKAGE@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "::notice::$PACKAGE@$VERSION is already on npm"
+          else
+            npm publish "$ARCHIVE" --access public --provenance
+          fi
+      - name: Check that the registry serves the same bytes
+        if: env.SKIPPED != '1'
+        run: |
+          want="sha512-$(openssl dgst -sha512 -binary "$ARCHIVE" | base64 --wrap=0)"
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            got=$(npm view "$PACKAGE@$VERSION" dist.integrity 2>/dev/null || true)
+            [ -n "$got" ] && break
+            sleep 10
+          done
+          echo "registry: $got"
+          echo "archive:  $want"
+          [ "$got" = "$want" ] || { echo "::error::the registry's integrity differs from the release archive"; exit 1; }
