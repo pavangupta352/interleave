@@ -69,7 +69,7 @@ Each row recorded, replayed, minimized and exported against its own server. The 
 
 ## Export
 
-Knex 3.3.0 pins pg-connection-string 2.6.2, while node-postgres 8.23.0 uses its own 2.14.0, so this application's packages share no installed instance with Interleave's runtime. Export it with the original Interleave archive, `--runtime-archive <original.tgz>`, which selects the offline installation of the original application lock. Without an archive, export chooses the separate installation, which cannot install an application lock that took Interleave from a local archive.
+Knex 3.3.0 pins pg-connection-string 2.6.2, while node-postgres 8.23.0 uses its own 2.14.0, so this application's packages share no installed instance with Interleave's runtime. Export it with the original Interleave archive, `--runtime-archive <original.tgz>`, which selects the offline installation of the original application lock. Without the option, export still selects that installation, because the application took Interleave from a local archive, and asks for the archive unless it lies inside the application folder.
 
 ## Limits
 

@@ -85,8 +85,11 @@
   when the application had installed Interleave from a local archive: export
   rejected the archive options, and the separate installation rejected the local
   runtime entry in the application lock. A Knex 3.3.0 application is one such
-  case. Without an archive option, export still uses the separate installation,
-  and its error for a local archive entry now names the two options.
+  case. Export also selects that installation by itself when the app installed
+  Interleave from an archive in the project and export runs from that copy. An
+  empty `dependencyArchives` list selects nothing, and the error for another
+  local archive dependency names `dependencyArchives` (`--dependency-archive`)
+  only when supplying it can work.
 
 ## 0.2.0 — 25 October 2026
 

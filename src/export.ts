@@ -149,17 +149,24 @@ export async function exportRegression(
     await addInclude(projectRoot, includePath, selected);
   }
   const recordedSource = requireRecordedSource(validatedRun);
-  // Shared package instances need the original app installation. Supplied
-  // original archives also select it: an app-installed runtime whose app shares
-  // no package instance with it still replays through the original app lock.
-  const shared = recordedSource.sharedPackages.length > 0
-    || options.runtimeArchive !== undefined || options.dependencyArchives !== undefined;
-  validatePackageLock(
-    selected.get('app/package.json')!.bytes,
-    selected.get('app/package-lock.json')!.bytes, undefined, shared,
-  );
   const runtimeRoot = await ordinaryDirectory(options.runtimeRoot ?? fileURLToPath(new URL('../', import.meta.url)), 'runtimeRoot');
   assertUnbundledRuntime(jsonObject(await readOrdinaryFile(join(runtimeRoot, 'package.json'), MAX_FILE_BYTES, runtimeRoot), 'Interleave runtime metadata'));
+  const lockBytes = selected.get('app/package-lock.json')!.bytes;
+  // The original app installation is needed when the recording shares package instances
+  // with the runtime. It is also used when archives are supplied, and when the app
+  // installed this runtime from a local archive: only that installation bundles it.
+  const appRuntime = await appInstalledRuntime(projectRoot, runtimeRoot, lockBytes);
+  const shared = recordedSource.sharedPackages.length > 0 || options.runtimeArchive !== undefined
+    || (options.dependencyArchives?.length ?? 0) > 0 || appRuntime === 'local-archive';
+  try {
+    validatePackageLock(selected.get('app/package.json')!.bytes, lockBytes, undefined, shared);
+  } catch (error) {
+    // Supplying the original archives helps only when export runs from the app's own runtime.
+    if (!shared && appRuntime !== undefined && error instanceof Error && error.message.startsWith('Only integrity-pinned')) {
+      throw new Error(`${error.message}; supply the original archives with dependencyArchives (--dependency-archive) to export the original app installation`, { cause: error });
+    }
+    throw error;
+  }
   const sourceOptions = { projectRoot, include: includes };
   const currentSource = await captureExportSourceIdentity(scenarioPath, sourceOptions, runtimeRoot);
   assertSameSourceIdentity(recordedSource, currentSource);
@@ -709,8 +716,7 @@ function validatePackageLock(packageBytes: Buffer, lockBytes: Buffer, runtimeTar
     if (!(runtimeTarball && path === 'node_modules/@pavangupta352/interleave' && resolved === `file:${runtimeTarball}`)
         && !(shared && resolved.startsWith('file:')) && !/^https?:\/\//.test(resolved)) {
       // The shared app installation bundles original local archives; the separate one cannot.
-      const hint = !shared && resolved.startsWith('file:') ? '; supply the original archive with --runtime-archive or --dependency-archive to export the original app installation' : '';
-      throw new Error(`Only integrity-pinned registry/tarball dependencies are supported in portable locks: ${path}${hint}`);
+      throw new Error(`Only integrity-pinned registry/tarball dependencies are supported in portable locks: ${path}`);
     }
     if (typeof dependency.integrity !== 'string' || !/^(?:sha512|sha384|sha256|sha1)-[A-Za-z0-9+/=]+(?:\s+(?:sha512|sha384|sha256|sha1)-[A-Za-z0-9+/=]+)*$/.test(dependency.integrity)) {
       throw new Error(`Locked dependency is missing a supported integrity digest: ${path}`);
@@ -916,6 +922,19 @@ function commandList(value: unknown, label: string): [string, ...string[]][] {
 function command(value: unknown, label: string): [string, ...string[]] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 32) throw new TypeError(`${label} must be a non-empty argument array`);
   return value.map((entry, index) => requiredString(entry, `${label}[${index}]`)) as [string, ...string[]];
+}
+
+/**
+ * Whether export runs from the runtime the application itself installed, and if so
+ * whether the app's lock took it from a local archive rather than a registry.
+ */
+async function appInstalledRuntime(projectRoot: string, runtimeRoot: string, lockBytes: Buffer): Promise<'registry' | 'local-archive' | undefined> {
+  const installed = join(projectRoot, 'node_modules', '@pavangupta352', 'interleave');
+  const [actual, expected] = await Promise.all([realpath(runtimeRoot), realpath(installed).catch(() => undefined)]);
+  if (expected === undefined || actual !== expected) return undefined;
+  const packages = (jsonObject(lockBytes, 'Application package lock').packages ?? {}) as Record<string, { resolved?: unknown } | undefined>;
+  const resolved = packages['node_modules/@pavangupta352/interleave']?.resolved;
+  return typeof resolved === 'string' && resolved.startsWith('file:') ? 'local-archive' : 'registry';
 }
 
 function npmExecutable(): string {

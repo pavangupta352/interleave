@@ -202,9 +202,12 @@ be declared when recording; export inherits that selection.
 Review the printed install and replay steps; export itself does not install or
 execute the copied project. Neither command requires a database URL.
 
-For a recorded shared app installation, `--runtime-archive <original.tgz>` and
-repeated `--dependency-archive <original.tgz>` arguments supply original archives
-whose integrity must match the recorded npm lock. The shared installer restores
+`--runtime-archive <original.tgz>` and repeated `--dependency-archive
+<original.tgz>` arguments supply original archives whose integrity must match the
+recorded npm lock, and select the export that restores the original app
+installation. Export selects that installation by itself when the recording
+shares packages between the app and Interleave, or when the app installed
+Interleave from an archive in the project and export runs from that copy. The shared installer restores
 that original graph from bundled archives in a fresh private offline cache.
 An arbitrary repack does not substitute for the original archive.
 
