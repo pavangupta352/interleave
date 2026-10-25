@@ -116,7 +116,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const settled = new Map<string, ActorResult>();
   // One lane per admitted connection generation. The single-producer proxy lets
   // only one lane of an actor hold commands at a time; multi-producer does not.
-  interface LaneState extends Lane { queue: PendingUnit[]; running?: { step: TraceStep; blocked: boolean; client?: boolean }; fingerprint?: string; closed: boolean; activityAt?: number }
+  interface LaneState extends Lane { queue: PendingUnit[]; running?: { step: TraceStep; unit: PendingUnit; blocked: boolean; client?: boolean }; fingerprint?: string; closed: boolean; activityAt?: number }
   const lanes = new Map<string, LaneState>();
   const laneState = (actor: string, connection: number): LaneState => {
     const key = laneLabel(actor, connection);
@@ -352,7 +352,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
         if (sampledEpoch !== runtimeEpoch) continue executionLoop;
         if (lane.running !== state) continue;
         state.blocked = false;
-        state.client = observation === 'client';
+        // PostgreSQL reports ClientRead both for a COPY waiting on data and for a backend
+        // between the messages of an open extended-protocol cycle; only the proxy knows COPY.
+        state.client = observation === 'client' && state.unit.copying?.() === true;
         if (observation && observation !== 'client') {
           const ownBlockers = observation.blockerPids.every(pid => livePids.has(pid));
           if (!ownBlockers) throw new Interrupted('inconclusive', `${describeLane(lane)} is waiting for a lock outside the scheduled actors`);
@@ -464,11 +466,11 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       if (!group.every(item => retain(item.step))) check();
       decisions++;
       if (group.length > 1) overlapped = true;
-      for (const { lane, step } of group) {
+      for (const { lane, unit, step } of group) {
         result.trace.push(step);
         lastActor = lane.actor;
         lastConnection.set(lane.actor, lane.connection);
-        lane.running = { step, blocked: false };
+        lane.running = { step, unit, blocked: false };
       }
       runtimeEpoch++;
       // Release in one synchronous pass: a pair's commands are written upstream together.

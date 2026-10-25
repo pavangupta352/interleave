@@ -109,6 +109,8 @@ export interface PendingUnit {
   cycle?: number;
   prefixOrdinal?: number;
   release(): Promise<UnitCompletion>;
+  /** True while this released unit is inside COPY FROM STDIN or COPY TO STDOUT. */
+  copying?(): boolean;
 }
 
 export interface ConnectionIdentity {

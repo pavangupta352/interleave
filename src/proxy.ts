@@ -292,6 +292,10 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
             guard(() => { checkRetained(); write(upstream, retained.bytes, client); });
           });
         },
+        copying(): boolean {
+          if (inFlight?.original !== retained) return false;
+          return copyOut !== undefined || (copyIn !== undefined && copyIn.unit === inFlight && !copyIn.ended);
+        },
       };
       entry.unit = unit;
       try { options.onUnit(unit); } catch { fail(new Error('Proxy scheduling callback failed')); }

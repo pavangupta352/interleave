@@ -65,12 +65,15 @@ test('the Sync after a Flush stage\'s CopyDone becomes the cycle\'s own Sync rel
     message('H'),
   ]));
   await until(() => completions.length === 0 && units.length === 1 && units[0]);
+  // The scheduler lets an actor's other connections run only while a unit is inside COPY.
+  await until(() => units[0]!.copying?.());
   // libpq ends an extended copy with CopyData, CopyDone and Sync in one write.
   await new Promise(resolve => setTimeout(resolve, 50));
   client.write(Buffer.concat([message('d', Buffer.from('1\n')), message('c'), message('S')]));
   await until(() => completions.length === 2);
   expect(errors).toEqual([]);
   expect(units.map(unit => unit.stage)).toEqual(['flush', 'sync']);
+  expect(units.map(unit => unit.copying?.())).toEqual([false, false]);
   expect(completions).toEqual([
     { kind: 'flush', commandTags: ['COPY 1'], rows: 0, copy: [{ direction: 'in', bytes: 2, sha256: createHash('sha256').update('1\n').digest('hex') }] },
     { kind: 'ready', transactionStatus: 'I', commandTags: [], rowCount: 0 },
