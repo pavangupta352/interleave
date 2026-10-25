@@ -490,12 +490,15 @@ jobs:
         run: |
           brew install postgresql@17
           bin="$(brew --prefix postgresql@17)/bin"
-          "$bin/initdb" --pgdata "$RUNNER_TEMP/postgres" --username postgres --auth trust --encoding UTF8 --locale C
+          # Password authentication over TCP, as on the Linux and Windows servers; tests check rejected passwords.
+          printf 'postgres\n' > "$RUNNER_TEMP/postgres-password"
+          "$bin/initdb" --pgdata "$RUNNER_TEMP/postgres" --username postgres --pwfile "$RUNNER_TEMP/postgres-password" \
+            --auth-host scram-sha-256 --auth-local trust --encoding UTF8 --locale C
           "$bin/pg_ctl" --pgdata "$RUNNER_TEMP/postgres" --log "$RUNNER_TEMP/postgres.log" --wait start
-          "$bin/psql" --username postgres --no-align --tuples-only --command 'SELECT version()'
+          PGPASSWORD=postgres "$bin/psql" --host localhost --username postgres --no-align --tuples-only --command 'SELECT version()'
       - name: Run the integration suite against it
         env:
-          TEST_DATABASE_URL: postgresql://postgres@localhost:5432/postgres
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
         run: npm run test:integration
 
   release-candidate:

@@ -27,7 +27,8 @@ The qualification above and every CI job not named here run on Linux (Ubuntu
 CI job runs the unit and integration suites with Node.js 22.18.0 and 24.7.0 on
 GitHub's macOS 15 arm64 image against PostgreSQL 17 from Homebrew. The `windows`
 job runs the same suites on GitHub's Windows Server 2025 image against the
-image's PostgreSQL 17 service (17.11 at the time of writing). Version-tag release
+image's PostgreSQL 17 service. Both servers were PostgreSQL 17.11 at the time of
+writing. Version-tag release
 preparation requires both jobs.
 
 Recording, exact and guided replay, exploration, reduction and reports run on
