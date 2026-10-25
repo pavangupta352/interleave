@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { explore, parseRunArtifact, replay, verifyRegressionExport, writeRunArtifact } from '@pavangupta352/interleave';
 
-assert(['v22.18.0', 'v24.7.0'].includes(process.version), 'ORM qualification requires Node.js 22.18.0 or 24.7.0');
+assert(['v22.18.0', 'v24.7.0', 'v26.12.1'].includes(process.version), 'ORM qualification requires Node.js 22.18.0, 24.7.0 or 26.12.1');
 const app = fileURLToPath(new URL('.', import.meta.url));
 const evidence = process.env.INTERLEAVE_ORM_EVIDENCE, databaseUrl = process.env.TEST_DATABASE_URL;
 const orm = process.env.INTERLEAVE_ORM, runtimeArchive = process.env.INTERLEAVE_ORM_RUNTIME_ARCHIVE;

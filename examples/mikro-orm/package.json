@@ -3,6 +3,6 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "engines": { "node": "22.18.0 || 24.7.0" },
+  "engines": { "node": "22.18.0 || 24.7.0 || 26.12.1" },
   "dependencies": { "@mikro-orm/core": "6.6.17", "@mikro-orm/postgresql": "6.6.17", "pg": "8.23.0" }
 }

@@ -6,7 +6,7 @@ import { delimiter, dirname, join, resolve, sep } from 'node:path';
 
 // Deliberately separate from the root dependency graph and default test suite.
 // An unqualified runtime is an explicit failure, never a skipped test row.
-assert(['v22.18.0', 'v24.7.0'].includes(process.version), 'ORM qualification requires Node.js 22.18.0 or 24.7.0');
+assert(['v22.18.0', 'v24.7.0', 'v26.12.1'].includes(process.version), 'ORM qualification requires Node.js 22.18.0, 24.7.0 or 26.12.1');
 const orms = ['sequelize', 'knex', 'mikro-orm'];
 const orm = process.env.INTERLEAVE_ORM;
 assert(orms.includes(orm), `Set INTERLEAVE_ORM to one of ${orms.join(', ')}`);

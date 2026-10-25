@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { explore, minimize, parseRunArtifact, replay, writeRunArtifact } from '@pavangupta352/interleave';
 
-assert(['v22.18.0', 'v24.7.0'].includes(process.version), 'Prisma qualification requires Node.js 22.18.0 or 24.7.0');
+assert(['v22.18.0', 'v24.7.0', 'v26.12.1'].includes(process.version), 'Prisma qualification requires Node.js 22.18.0, 24.7.0 or 26.12.1');
 const app = fileURLToPath(new URL('.', import.meta.url));
 const evidence = process.env.INTERLEAVE_PRISMA_EVIDENCE, databaseUrl = process.env.TEST_DATABASE_URL;
 const prismaCli = process.env.INTERLEAVE_PRISMA_CLI, runtimeArchive = process.env.INTERLEAVE_PRISMA_RUNTIME_ARCHIVE;

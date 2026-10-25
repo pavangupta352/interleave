@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, join, relative, resolve, sep } from 'node
 
 // Deliberately separate from the root dependency graph and default test suite.
 // An unqualified runtime is an explicit failure, never a skipped test row.
-assert(['v22.18.0', 'v24.7.0'].includes(process.version), 'Prisma qualification requires Node.js 22.18.0 or 24.7.0');
+assert(['v22.18.0', 'v24.7.0', 'v26.12.1'].includes(process.version), 'Prisma qualification requires Node.js 22.18.0, 24.7.0 or 26.12.1');
 assert(process.env.TEST_DATABASE_URL, 'Set TEST_DATABASE_URL to a dedicated PostgreSQL administrator database');
 assert(process.env.INTERLEAVE_PRISMA_RUNTIME_ARCHIVE, 'Set INTERLEAVE_PRISMA_RUNTIME_ARCHIVE to the Interleave package archive under test');
 assert(process.env.INTERLEAVE_PRISMA_EVIDENCE, 'Set INTERLEAVE_PRISMA_EVIDENCE to a new evidence directory');
