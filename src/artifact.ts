@@ -80,7 +80,7 @@ export async function writeRunArtifact(
         await link(temporary, path);
       } catch (error) {
         if (isErrorCode(error, 'EEXIST')) {
-          throw new Error(`Run artifact already exists; pass { overwrite: true } to replace it: ${path}`);
+          throw new Error(`Run artifact already exists; pass { overwrite: true } (--force on the CLI) to replace it: ${path}`);
         }
         throw error;
       }

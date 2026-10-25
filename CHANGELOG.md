@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- `interleave init` gives the scaffold's client an `'error'` listener, so a
+  dropped connection no longer ends the worker with an uncaught error.
+- The refusals to replace an existing artifact or report name `--force` as well
+  as `{ overwrite: true }`.
+
 ## 0.3.0 — 25 October 2026
 
 Interleave now forwards cancel requests, streams COPY, schedules cursors one batch

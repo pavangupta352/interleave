@@ -17,6 +17,7 @@ import { defineScenario } from '@pavangupta352/interleave';
 
 async function increment({ connectionString }) {
   const client = new Client({ connectionString });
+  client.on('error', () => {}); // a dropped connection must not end the run
   await client.connect();
   try {
     const { rows } = await client.query('SELECT value FROM counter WHERE id = 1');

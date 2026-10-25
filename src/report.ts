@@ -55,7 +55,7 @@ export async function writeReport(path: string, run: RunResult, options: WriteRe
     else {
       try { await link(temporary, path); }
       catch (error) {
-        if (error instanceof Error && 'code' in error && error.code === 'EEXIST') throw new Error(`Report already exists; pass { overwrite: true } to replace it: ${path}`);
+        if (error instanceof Error && 'code' in error && error.code === 'EEXIST') throw new Error(`Report already exists; pass { overwrite: true } (--force on the CLI) to replace it: ${path}`);
         throw error;
       }
       await unlink(temporary); exists = false;
