@@ -98,6 +98,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     notifyEvent({ type: 'cancel', actor: options.actor, backendPid, connection, forwarded: true, acknowledged });
     const settle = (error?: Error): void => { if (error && !closing) notifyError(error); acknowledge(); finish(); };
     connectPostgresUpstream(transport, { timeoutMs: 5_000 }).then(socket => {
+      if (closing) { socket.destroy(); settle(); return; }
       track(socket);
       // PostgreSQL closes the connection once it has signalled the backend. Like
       // libpq, write the packet and wait for that close before closing this side.
@@ -136,6 +137,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     const end = (): void => settle(undefined);
     const timer = setTimeout(() => settle(undefined), 1_000); timer.unref();
     client.on('data', read); client.once('end', end);
+    client.once('close', () => { settled = true; clearTimeout(timer); });
   }
   const server = net.createServer(client => {
     track(client); client.setNoDelay(true);
@@ -211,9 +213,12 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
       const prefixBytes = prefix && prefix.original !== inFlight?.original ? prefix.original.bytes.length : 0;
       if (retainedBytes + cycles.bufferedBytes + frontend.bufferedBytes + inFlightBytes + prefixBytes > maxBuffered) throw new Error('Protocol queued buffered-byte limit exceeded');
     }
+    // flush-stages-v1: a cycle whose stages all completed may stay open, as a cursor the
+    // application abandons does; PostgreSQL rolls it back when the session ends.
+    const openWork = (): boolean => prefix !== undefined && !(flushStages && prefix.complete && !inFlight);
     function shutdown(): void {
       if (closed) return; closed = true;
-      const outstanding = Boolean(inFlight || prefix || queue.length || cycles.bufferedBytes);
+      const outstanding = Boolean(inFlight || openWork() || queue.length || cycles.bufferedBytes);
       const current = inFlight; inFlight = undefined; current?.reject(new Error('Proxy connection closed before command completion'));
       queue.length = 0; retainedBytes = 0; prefix = undefined;
       // Notify the driver before TCP close, and leave the existing bounded drain
@@ -347,7 +352,10 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
             else { copyIn.counting = false; copyIn.ended = true; }
             write(upstream, frame, client); continue;
           }
-          if (active && (type === 'H' || type === 'S')) {
+          // A Flush stage completes when PostgreSQL answers its Execute, so the Sync after
+          // its CopyDone is the cycle's next release, not part of the stage.
+          const flushStage = active && inFlight!.summary instanceof FlushSummary;
+          if (active && (type === 'H' || type === 'S') && !(flushStage && type === 'S' && copyIn.ended)) {
             // PostgreSQL ignores Flush and Sync during copy-in. After an extended
             // cycle's CopyDone, the client's Sync is what completes the cycle.
             if (type === 'S' && copyIn.ended) copyIn = undefined;
@@ -359,7 +367,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
         if ('dcf'.includes(type)) throw new Error('Unsupported profile: COPY data outside COPY FROM STDIN');
         if (type === 'X') {
           if (frame.length !== 5) throw new Error('Malformed Terminate message');
-          if (queue.length || cycles.bufferedBytes || (prefix && (!inFlight || inFlight.original.stage === 'describe')) || (inFlight && !inFlight.errorSeen)) throw new Error('Actor disconnected with unfinished scheduled work');
+          if (queue.length || cycles.bufferedBytes || (openWork() && (!inFlight || inFlight.original.stage === 'describe')) || (inFlight && !inFlight.errorSeen)) throw new Error('Actor disconnected with unfinished scheduled work');
           terminated = true;
           // Drivers may reject on ErrorResponse and close before ReadyForQuery.
           // Drain that actual completion even after the frontend has gone away.
@@ -446,13 +454,13 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     client.on('end', () => {
       if (closing || failed || closed || cancelling) return;
       if (negotiated && !started) fail(new Error('Unsupported profile: TLS/GSS encryption required; configure this local actor connection with ssl:false'));
-      else if (!terminated && (inFlight || prefix || queue.length || cycles.bufferedBytes || frontend.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
+      else if (!terminated && (inFlight || openWork() || queue.length || cycles.bufferedBytes || frontend.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
       else if (pendingTerminate) return;
       else { frontendEnded = true; upstream.end(); }
     });
     upstream.on('end', () => {
       if (closed || cancelling) return;
-      if (!closing && !failed && (inFlight || prefix || queue.length || (!terminated && ready))) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
+      if (!closing && !failed && (inFlight || openWork() || queue.length || (!terminated && ready))) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
       else client.end();
     });
     function finishClose(): void {
@@ -465,13 +473,13 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
     }
     client.on('close', () => {
       clientClosed = true;
-      if (!closing && !failed && !terminated && !closed && (inFlight || prefix || queue.length || cycles.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
+      if (!closing && !failed && !terminated && !closed && (inFlight || openWork() || queue.length || cycles.bufferedBytes)) fail(new Error('Actor disconnected with unfinished scheduled work'));
       if (!pendingTerminate) upstream.destroy();
       finishClose();
     });
     upstream.on('close', () => {
       upstreamClosed = true;
-      if (!closed && !closing && !failed && (inFlight || prefix)) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
+      if (!closed && !closing && !failed && (inFlight || openWork())) fail(new Error('PostgreSQL upstream disconnected unexpectedly'));
       if (!closed && !client.writableEnded && !failed && !cancelling) client.destroy();
       finishClose();
     });

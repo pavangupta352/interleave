@@ -131,6 +131,24 @@ describe('version 5 flush-stages-v1 artifacts', () => {
     const original = run(); failed(original);
     expect(parseRunArtifact(original)).toBe(original);
   });
+  test('accept a completed run that leaves a cycle open, as an abandoned cursor does', () => {
+    const original = run(); original.trace.pop();
+    expect(parseRunArtifact(original)).toBe(original);
+  });
+  test('incomplete evidence keeps version 5, the only version with this profile', async () => {
+    const { finalizeRunEvidence } = await import('../src/evidence.js');
+    const original = run();
+    const fallback = finalizeRunEvidence(original as never, JSON.stringify(original).length - 1);
+    expect(fallback.outcome).toBe('inconclusive');
+    expect(fallback.schemaVersion).toBe(5);
+    expect(fallback.limits.protocolProfile).toBe('flush-stages-v1');
+    expect(fallback.trace).toEqual([]);
+  });
+  test('reject COPY data on a Sync-only recovery', () => {
+    const original = run(); failed(original);
+    original.trace[4].completion.copy = [{ direction: 'in', bytes: 1, sha256: 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb' }];
+    expect(() => parseRunArtifact(original)).toThrow(/Sync-only recovery cannot complete executed commands or rows/);
+  });
   test.each([
     ['the profile before version 5', (r: any) => { r.schemaVersion = 4; r.limits.overlap = 'pairs'; }, /protocolProfile/],
     ['an execute stage', (r: any) => { r.trace[4].stage = 'execute'; }, /trace\[4\]\.stage/],
@@ -142,7 +160,6 @@ describe('version 5 flush-stages-v1 artifacts', () => {
     ['a Flush stage after an error', (r: any) => { failed(r); r.trace[4].stage = 'flush'; r.trace[4].completion = { kind: 'flush', commandTags: [], rows: 0 }; }, /an error in an open cycle requires Sync-only recovery/],
     ['a recovery that keeps a transaction healthy', (r: any) => { failed(r); r.trace[4].completion.transactionStatus = 'T'; }, /Sync-only error recovery cannot leave a healthy transaction open/],
     ['a recovery with a different error', (r: any) => { failed(r); r.trace[4].completion.error.code = '40001'; }, /retained recovery error must match the failed stage/],
-    ['an open cycle at the end of a completed run', (r: any) => { r.trace.pop(); }, /completed execution cannot leave an open cycle/],
     ['a ready completion for a Flush stage', (r: any) => { r.trace[1].completion = { kind: 'ready', transactionStatus: 'I', commandTags: [], rowCount: 0 }; }, /transactionStatus: unknown field/],
     ['a suspended portal with an error', (r: any) => { r.trace[1].completion.error = { code: '22012', message: 'division by zero' }; }, /an error cannot leave the portal suspended/],
     ['suspended set to false', (r: any) => { r.trace[1].completion.suspended = false; }, /suspended: expected true when present/],

@@ -167,7 +167,8 @@ export interface OwnedDatabase {
   readonly connectionOptions: ClientConfig;
   db: Client;
   serverVersion: string;
-  observeWait(backendPid: number): Promise<WaitObservation | null>;
+  /** A lock wait with its blockers, `client` when PostgreSQL waits on the connection's own client, or null. */
+  observeWait(backendPid: number): Promise<WaitObservation | 'client' | null>;
   close(): Promise<void>;
 }
 

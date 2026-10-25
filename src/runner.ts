@@ -116,7 +116,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
   const settled = new Map<string, ActorResult>();
   // One lane per admitted connection generation. The single-producer proxy lets
   // only one lane of an actor hold commands at a time; multi-producer does not.
-  interface LaneState extends Lane { queue: PendingUnit[]; running?: { step: TraceStep; blocked: boolean }; fingerprint?: string; closed: boolean; activityAt?: number }
+  interface LaneState extends Lane { queue: PendingUnit[]; running?: { step: TraceStep; blocked: boolean; client?: boolean }; fingerprint?: string; closed: boolean; activityAt?: number }
   const lanes = new Map<string, LaneState>();
   const laneState = (actor: string, connection: number): LaneState => {
     const key = laneLabel(actor, connection);
@@ -352,7 +352,8 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
         if (sampledEpoch !== runtimeEpoch) continue executionLoop;
         if (lane.running !== state) continue;
         state.blocked = false;
-        if (observation) {
+        state.client = observation === 'client';
+        if (observation && observation !== 'client') {
           const ownBlockers = observation.blockerPids.every(pid => livePids.has(pid));
           if (!ownBlockers) throw new Interrupted('inconclusive', `${describeLane(lane)} is waiting for a lock outside the scheduled actors`);
           state.blocked = true;
@@ -365,7 +366,11 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       // rather than after waiting for a connection or actor that will never proceed.
       const mismatch = binder?.mismatch(current);
       if (mismatch) throw new Interrupted('incompatible', mismatch);
-      if (pendingCancels || [...lanes.values()].some(lane => lane.running && !lane.running.blocked)) { laneWait = undefined; await pause(); continue; }
+      // A step that PostgreSQL reports waiting on its own client, such as a COPY whose data
+      // depends on another of the actor's connections, yields to that actor's held commands.
+      const yields = (lane: LaneState): boolean => lane.running?.client === true
+        && [...lanes.values()].some(other => other !== lane && other.actor === lane.actor && !other.running && other.queue.length > 0);
+      if (pendingCancels || [...lanes.values()].some(lane => lane.running && !lane.running.blocked && !yields(lane))) { laneWait = undefined; await pause(); continue; }
       const allReady = names.every(actor => settled.has(actor) || active(actor));
       if (!allReady) { laneWait = undefined; await pause(); continue; }
       if (multi) {
@@ -434,7 +439,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
         const position = result.trace.length + index;
         const expected = expectedGroup?.[index];
         if (Buffer.byteLength(unit.sql) > ARTIFACT_LIMITS.maxSqlBytes) throw new Interrupted('inconclusive', 'SQL exceeds the supported evidence byte limit');
-        if (expected && !multi && (expected.actor !== unit.actor || expected.connection !== unit.connection || expected.ordinal !== unit.ordinal || expected.protocol !== unit.protocol || expected.sql !== unit.sql || expected.fingerprint !== unit.fingerprint)) {
+        if (expected && !multi && (expected.actor !== unit.actor || expected.connection !== unit.connection || expected.ordinal !== unit.ordinal || expected.protocol !== unit.protocol || expected.fingerprint !== unit.fingerprint)) {
           throw new Interrupted('incompatible', `Replay query or actor startup identity changed for ${actor} at step ${position}`);
         }
         const stage = unit.stage ?? 'complete';
@@ -477,7 +482,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
             if (completion.kind !== 'metadata' && completion.copy) requireVersion5();
             // Data sent by COPY FROM STDIN is application input, like SQL and parameters.
             const recorded = mode === 'replay' ? options.replay!.trace[step.index] : undefined;
-            if (recorded && copiedIn(recorded) !== copiedIn(step)) stop('incompatible', `Replay COPY data changed for ${describeLane(lane)} at step ${step.index}`);
+            if (recorded && !recorded.completion?.error && !step.completion?.error && copiedIn(recorded) !== copiedIn(step)) {
+              stop('incompatible', `Replay COPY data changed for ${describeLane(lane)} at step ${step.index}`);
+            }
           }
           delete lane.running;
           runtimeEpoch++;

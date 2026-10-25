@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import postgres from 'postgres';
 import { from as copyFrom, to as copyTo } from 'pg-copy-streams';
 import { afterEach, describe, expect, test } from 'vitest';
-import { Client } from 'pg';
+import { Client, Pool } from 'pg';
 import { parseRunArtifact } from '../src/artifact-schema.js';
 import { runOnce } from '../src/runner.js';
 import { replay } from '../src/replay.js';
@@ -72,6 +72,10 @@ describe('streaming COPY through actual drivers and real PostgreSQL', () => {
     expect(first.trace[0]!.completion).toEqual({ transactionStatus: 'I', commandTags: ['COPY 2'], rowCount: 2, copy: [{ direction: 'in', bytes: 15, sha256: sha256(data) }] });
     expect(first.trace[1]!.completion).toEqual({ transactionStatus: 'I', commandTags: ['COPY 2'], rowCount: 2, copy: [{ direction: 'out', bytes: 15, sha256: sha256(data) }] });
     checked(await replay(run, first, { databaseUrl }));
+    // Replay identity is the command fingerprint; the SQL text is only how it is shown.
+    const relabeled = structuredClone(first);
+    relabeled.trace[0]!.sql = 'COPY items (id, name) FROM STDIN -- shown by another version';
+    checked(await replay(run, parseRunArtifact(relabeled), { databaseUrl }));
     rows = ['1\tapple\n', '2\tplum\n'];
     const changed = checked(await replay(run, first, { databaseUrl }), 'incompatible');
     expect(changed.reason).toBe('Replay COPY data changed for alice at step 0');
@@ -120,6 +124,45 @@ describe('streaming COPY through actual drivers and real PostgreSQL', () => {
     expect(copy).toMatchObject({ error: { code: '57014', message: 'COPY from stdin failed: stopped by the application' }, copy: [{ direction: 'in', bytes: 8, sha256: sha256('1\tapple\n') }] });
     checked(await replay(run, first, { databaseUrl }));
   }, 60_000);
+
+  test('a copy PostgreSQL rejects replays even when timing changed how much data was counted', async () => {
+    const run = scenario('rejected copy', {
+      alice: context => withClient(context, async client => copyIn(client, 'COPY items (id, name) FROM STDIN', ['1\tapple\n', 'x\tbad\n', '3\tpear\n']).then(() => 'copied', errorCode)),
+      async bob() {},
+    });
+    const first = checked(await runOnce(run, { databaseUrl }));
+    expect(first.actors.find(actor => actor.actor === 'alice')?.value).toBe('22P02');
+    expect(first.trace[0]!.completion).toMatchObject({ error: { code: '22P02' }, copy: [{ direction: 'in' }] });
+    // Data still in flight when PostgreSQL rejected the copy may or may not be counted.
+    const shifted = structuredClone(first);
+    const completion = shifted.trace[0]!.completion as { copy: { bytes: number; sha256: string }[] };
+    completion.copy[0] = { ...completion.copy[0]!, bytes: 8, sha256: sha256('1\tapple\n') };
+    checked(await replay(run, parseRunArtifact(shifted), { databaseUrl }));
+  }, 60_000);
+
+  test('a COPY fed by another connection of the same actor yields to it in either release order', async () => {
+    const run = scenario('copy pipeline', {
+      alice: async ({ connectionString }) => {
+        const pool = new Pool({ connectionString, max: 2 }); pool.on('error', () => {});
+        const source = await pool.connect(); source.on('error', () => {});
+        const target = await pool.connect(); target.on('error', () => {});
+        try {
+          await pipeline(source.query(copyTo('COPY (SELECT g, g::text FROM generate_series(1, 50000) g) TO STDOUT')), target.query(copyFrom('COPY items (id, name) FROM STDIN')));
+          return (await target.query('SELECT count(*)::int AS rows FROM items')).rows[0].rows;
+        } finally { source.release(); target.release(); await pool.end(); }
+      },
+      async bob() {},
+    });
+    // alice#0 copies out, alice#1 copies in; each order needs the other connection's command.
+    for (const plan of [['alice#1'], ['alice#0']]) {
+      const first = checked(await runOnce(run, { databaseUrl, connectionProfile: 'multi-producer-v1', plan, timeoutMs: 60_000 }));
+      expect(first.actors.find(actor => actor.actor === 'alice')?.value).toBe(50_000);
+      const copied = (prefix: string) => first.trace.filter(step => step.sql.startsWith(prefix)).map(step => step.completion?.kind !== 'metadata' ? step.completion?.copy : undefined)[0];
+      const inbound = copied('COPY items'), outbound = copied('COPY (SELECT');
+      expect(inbound![0]!.sha256).toBe(outbound![0]!.sha256);
+      checked(await replay(run, first, { databaseUrl, timeoutMs: 60_000 }));
+    }
+  }, 180_000);
 
   test('a large copy in and a slowly read copy out keep their exact bytes under backpressure', async () => {
     const lines = 200_000;

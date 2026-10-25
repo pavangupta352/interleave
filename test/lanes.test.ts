@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import {
   fairLane, LaneBinder, multiLaneActors, parseLaneLabel, parsePlanEntry, planChoice, planFromTrace, resolveConnectionProfile,
@@ -7,7 +8,9 @@ import { parseCliArgs } from '../src/cli/options.js';
 import type { RunResult, StepIdentity } from '../src/types.js';
 
 const fingerprint = (character: string): string => character.repeat(64);
-function unit(sql: string, ordinal = 0, print = fingerprint('a')): UnitIdentity {
+// A command's fingerprint covers its SQL, as in real records.
+const commandPrint = (sql: string): string => createHash('sha256').update(`simple\0${sql}`).digest('hex');
+function unit(sql: string, ordinal = 0, print = commandPrint(sql)): UnitIdentity {
   return { ordinal, protocol: 'simple', sql, fingerprint: print };
 }
 function step(actor: string, connection: number, sql: string, ordinal = 0): StepIdentity {

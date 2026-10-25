@@ -15,8 +15,9 @@ export function finalizeRunEvidence(run: RunResult, maxBytes: number): RunResult
     if (Buffer.byteLength(JSON.stringify(validated)) <= maxBytes) return validated;
   } catch { /* Invalid or oversized evidence becomes explicitly incomplete below. */ }
   const { failure: _omittedFailure, cancels: _omittedCancels, ...partial } = run;
-  // Cancel requests reference the omitted trace; without them the record is version 3 or 4.
-  if (run.schemaVersion === 5) {
+  // Cancel requests reference the omitted trace. Without them a record is version 3 or 4,
+  // unless it uses flush-stages-v1, which exists only in version 5.
+  if (run.schemaVersion === 5 && run.limits.protocolProfile !== 'flush-stages-v1') {
     const version4 = run.limits.connectionProfile === 'multi-producer-v1' || run.limits.overlap !== undefined;
     partial.schemaVersion = version4 ? 4 : 3;
     if (!version4) { const { connectionProfile: _omittedProfile, ...limits } = run.limits; partial.limits = limits; }

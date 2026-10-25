@@ -31,7 +31,7 @@ export async function attachOwnedDatabase(connectionString: string, transport?: 
       name: row.name, connectionString: owned.connectionString, transport: owned,
       get connectionOptions() { return postgresClientConfig(owned); },
       db, serverVersion: row.version, close,
-      async observeWait(backendPid: number): Promise<WaitObservation | null> {
+      async observeWait(backendPid: number): Promise<WaitObservation | 'client' | null> {
         if (!Number.isSafeInteger(backendPid) || backendPid <= 0) return null;
         const activity = await observer.query<{
           pid: number; blocker_pids: number[]; wait_event: string | null; wait_event_type: string | null;
@@ -42,6 +42,8 @@ export async function attachOwnedDatabase(connectionString: string, transport?: 
           [backendPid],
         );
         const waiting = activity.rows[0];
+        // A COPY waiting for data from its client, or stalled writing to it.
+        if (waiting?.wait_event_type === 'Client') return 'client';
         if (!waiting || waiting.wait_event_type !== 'Lock' || !waiting.wait_event || !waiting.blocker_pids.length) return null;
         return { pid: Number(waiting.pid), blockerPids: waiting.blocker_pids.map(Number), waitEvent: waiting.wait_event, waitEventType: waiting.wait_event_type };
       },

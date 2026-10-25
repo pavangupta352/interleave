@@ -67,6 +67,8 @@ describe('version 5 cancel request artifacts', () => {
     ['a recorded secret key', (r: any) => { r.cancels[0].secretKey = 7; }, /secretKey/],
     ['a process ID wider than 32 bits', (r: any) => { r.cancels[1].backendPid = 2 ** 31; }, /cancels\[1\]\.backendPid: expected a 32-bit process ID/],
     ['an actor without a result', (r: any) => { r.cancels[1].actor = 'carol'; }, /cancels\[1\]\.actor: actor is absent from recorded actor results/],
+    ['a forwarded request without the step that was running', (r: any) => { delete r.cancels[0].step; }, /cancels\[0\]\.step: a step of that connection was running when the request arrived/],
+    ['a forwarded request for no backend', (r: any) => { r.trace[0].backendPid = 0; r.cancels[0].backendPid = 0; delete r.cancels[0].step; r.cancels[0].at = 0.5; }, /backendPid/],
   ])('reject %s', (_name, mutate, message) => {
     const original = run(); mutate(original);
     expect(() => parseRunArtifact(original)).toThrow(message);

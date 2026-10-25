@@ -189,7 +189,9 @@ describe('cancel requests through actual drivers and real PostgreSQL', () => {
     });
     const first = checked(await runOnce(run, { databaseUrl, protocolProfile: 'describe-flush-v1' }));
     const altered = structuredClone(first);
+    // A request that found its backend idle arrived when none of its steps was running.
     delete altered.cancels![0]!.step;
+    altered.cancels![0]!.at = 0;
     const repeated = checked(await replay(run, parseRunArtifact(altered), { databaseUrl }), 'incompatible');
     expect(repeated.reason).toMatch(/^Replay cancel request 0 from alice hit step \d+; the recorded request from alice found its backend idle; the application's own timers/);
   }, 60_000);

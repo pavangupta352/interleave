@@ -223,7 +223,7 @@ export function resolvePlanEntry(entry: PlanEntry, lanes: readonly LiveLane[], s
 }
 
 function sameUnit(expected: StepIdentity, unit: UnitIdentity): boolean {
-  return expected.ordinal === unit.ordinal && expected.protocol === unit.protocol && expected.sql === unit.sql
+  return expected.ordinal === unit.ordinal && expected.protocol === unit.protocol
     && expected.fingerprint === unit.fingerprint && (expected.stage ?? 'complete') === (unit.stage ?? 'complete')
     && (expected.cycle ?? expected.ordinal) === (unit.cycle ?? unit.ordinal) && expected.prefixOrdinal === unit.prefixOrdinal;
 }

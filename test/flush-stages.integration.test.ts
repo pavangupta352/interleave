@@ -91,6 +91,21 @@ describe('flush-stages-v1 with actual cursor clients and real PostgreSQL', () =>
     checked(await replay(run, first, { databaseUrl }));
   }, 60_000);
 
+  test('a cursor the application abandons leaves its cycle open, with or without ending the client, and replays', async () => {
+    const abandon = (end: boolean) => async ({ connectionString }: ActorContext) => {
+      const client = new Client({ connectionString }); client.on('error', () => {}); await client.connect();
+      const cursor = client.query(new Cursor<{ id: number }>('SELECT id FROM items ORDER BY id'));
+      const first = (await cursor.read(2)).map(row => row.id);
+      if (end) await client.end();
+      return first;
+    };
+    const run = scenario('abandoned cursors', { alice: abandon(true), bob: abandon(false) });
+    const first = checked(await runOnce(run, options));
+    expect(first.actors.map(actor => actor.value)).toEqual([[1, 2], [1, 2]]);
+    expect(shape(first).toSorted()).toEqual(['alice:flush:0', 'alice:flush:2s', 'bob:flush:0', 'bob:flush:2s']);
+    checked(await replay(run, first, { databaseUrl }));
+  }, 60_000);
+
   test('a fetch that waits on another actor\'s row lock is observed as a lock wait inside the open cycle', async () => {
     const run = scenario('cursor lock wait', {
       alice: context => withClient(context, async client => {

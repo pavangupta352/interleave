@@ -197,7 +197,7 @@ export async function createOwnedDatabase(databaseUrl: string, transport?: Resol
       get connectionOptions() { return postgresClientConfig(ownedTransport); },
       db,
       serverVersion,
-      async observeWait(backendPid: number): Promise<WaitObservation | null> {
+      async observeWait(backendPid: number): Promise<WaitObservation | 'client' | null> {
         if (!Number.isSafeInteger(backendPid) || backendPid <= 0) return null;
 
         const activity = await connectedObserver.query<{
@@ -217,6 +217,8 @@ export async function createOwnedDatabase(databaseUrl: string, transport?: Resol
           [backendPid],
         );
         const row = activity.rows[0];
+        // A COPY waiting for data from its client, or stalled writing to it.
+        if (row?.wait_event_type === 'Client') return 'client';
         if (
           row === undefined ||
           row.wait_event_type !== 'Lock' ||

@@ -449,6 +449,7 @@ function validateCancels(value: unknown, trace: TraceStep[], connectionKeys: Set
     if (forwarded !== hasOwn(record, 'connection')) throw new TypeError(`${path}.connection: present exactly when the request was forwarded`);
     if (forwarded) {
       const connection = safeInteger(record.connection, `${path}.connection`, 0);
+      if (backendPid < 1) throw new TypeError(`${path}.backendPid: a forwarded request names a live backend`);
       const key = `${actor}\0${connection}`;
       if (!connectionKeys.has(key)) throw new TypeError(`${path}.connection: references an unrecorded actor startup`);
       const pid = pidByConnection.get(key);
@@ -467,6 +468,9 @@ function validateCancels(value: unknown, trace: TraceStep[], connectionKeys: Set
         throw new TypeError(`${path}.step: the step was not running when the request arrived`);
       }
       cancel.step = stepIndex;
+    } else if (forwarded && trace.some(step => step.actor === actor && step.connection === cancel.connection
+      && step.releasedAt <= at && step.completedAt !== undefined && step.completedAt > at)) {
+      throw new TypeError(`${path}.step: a step of that connection was running when the request arrived`);
     }
     cancels.push(cancel);
   }
@@ -563,7 +567,7 @@ function validateTraceStep(value: unknown, index: number, version: 1 | 2, lanes:
   if (hasCompletion) {
     completion = stage === 'flush' ? validateFlushCompletion(step.completion, `${path}.completion`, copies)
       : validateCompletion(step.completion, `${path}.completion`, version, stage === 'describe', copies);
-    if (stage === 'recover' && completion.kind !== 'metadata' && (completion.commandTags.length !== 0 || completion.rowCount !== 0)) {
+    if (stage === 'recover' && completion.kind !== 'metadata' && (completion.commandTags.length !== 0 || completion.rowCount !== 0 || completion.copy !== undefined)) {
       throw new TypeError(`${path}.completion: Sync-only recovery cannot complete executed commands or rows`);
     }
   }
@@ -705,9 +709,8 @@ function validateFlushStageSequence(trace: TraceStep[], complete: boolean, lanes
     state.previous = step;
     lanesState.set(key, state);
   }
-  if (complete && [...lanesState.values()].some(state => state.open)) {
-    throw new TypeError('$.trace: completed execution cannot leave an open cycle');
-  }
+  // A cycle may still be open at the end, as when an application abandons a cursor:
+  // each of its stages completed, and PostgreSQL rolls it back when the session ends.
 }
 
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';

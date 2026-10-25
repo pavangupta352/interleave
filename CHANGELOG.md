@@ -27,7 +27,9 @@
   command, with backpressure in both directions, and a copy that waits on
   another actor's lock is observed like any other wait. Version 5 completions
   record each COPY's direction, byte count and SHA-256 digest, never the rows;
-  exact replay requires the same COPY FROM STDIN data. COPY BOTH, used only by
+  exact replay requires the same COPY FROM STDIN data. A COPY that waits on its
+  own client lets the actor's other connections run, so a pipeline between two
+  connections' COPY commands works in either order. COPY BOTH, used only by
   replication, is still refused.
 - Schedule cursors and other clients that wait on Flush with the opt-in
   `flush-stages-v1` profile (`--protocol-profile flush-stages-v1`). Every group
@@ -35,6 +37,7 @@
   actor can run between two batches of pg-cursor, pg-query-stream or Postgres.js
   `cursor()`. A Flush release completes once PostgreSQL has answered all of it;
   the cycle stays open until its Sync, and only a lone Sync may follow an error.
+  A cursor the application abandons leaves its cycle open without failing the run.
   Records are schema version 5 and show each stage's rows and whether the portal
   was suspended. The [cursor example](examples/cursor/README.md) is an interest job
   that loses a concurrent deposit between two batches.
@@ -70,7 +73,8 @@
 - A protocol cycle that prepares, describes or closes a statement without
   executing it records that statement's SQL once. pgx's Parse/Describe/Sync
   prepare cycle previously showed the statement twice, as if it had run two
-  commands.
+  commands. Replay now compares commands by fingerprint rather than by this
+  text, so records made before the change still replay.
 - Export accepts `--runtime-archive` and `--dependency-archive` (`runtimeArchive`
   and `dependencyArchives`) for a recording whose application shares no installed
   package with Interleave's runtime, and exports it as an offline installation of

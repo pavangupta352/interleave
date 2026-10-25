@@ -160,7 +160,15 @@ Records that contain COPY use schema version 5. Each COPY in a command's
 completion lists its direction, byte count and the SHA-256 digest of the copied
 data; the rows themselves are not recorded. Data sent with COPY FROM STDIN is
 application input, so exact replay requires the same bytes and reports
-`incompatible` when they change. Copied-out data is a result, like rows, and is
+`incompatible` when they change. When PostgreSQL rejects a copy partway, the
+count is what the client had sent before Interleave saw the error, which depends
+on timing, so replay does not compare it.
+
+A COPY that PostgreSQL reports waiting on its own client, for data the
+application has not produced yet or for a client that has stopped reading, lets
+the scheduler release the actor's other connections. A pipeline from one
+connection's COPY TO STDOUT into another's COPY FROM STDIN therefore runs in
+either release order. Copied-out data is a result, like rows, and is
 not compared. Replication's COPY BOTH is refused.
 
 Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
@@ -181,6 +189,9 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 - psycopg 3.3.6 `copy()` in both directions, and an extended-protocol COPY
   through libpq 18.0's `PQsendQueryParams`, from a Python process actor, with
   exact replay.
+- A pg-copy-streams pipeline from one pool connection's COPY TO STDOUT into
+  another's COPY FROM STDIN moved 50,000 rows in both release orders, in
+  `multi-producer-v1`, with exact replay.
 - node-postgres without a copy stream: copied-out data was measured and
   discarded by the driver, and a copy in failed with the driver's own CopyFail.
 - The report listed each transfer's direction, byte count and digest in
@@ -258,7 +269,9 @@ the application's COMMIT/ROLLBACK order is correctly reported as incompatible.
 The opt-in `flush-stages-v1` profile releases each group of extended-protocol
 messages that ends in Flush, and keeps the cycle open until its Sync. That is how
 cursor clients read a large result in batches: Execute with a row limit, Flush,
-and PortalSuspended until the last batch. Another actor's commands can run
+and PortalSuspended until the last batch. An application may also abandon a
+cursor: its cycle stays open, every stage it released is recorded as completed,
+and PostgreSQL rolls the cycle back when the session ends. Another actor's commands can run
 between two batches, which is where a cursor's snapshot and locks meet other
 writers. Each Flush release completes once PostgreSQL has answered every message
 in it.
