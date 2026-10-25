@@ -1,6 +1,6 @@
 # Interleave — project status and roadmap
 
-**Checkpoint: 25 October 2026 · 0.1.0 released · 0.2.0 in release qualification · 0.3.0 on `feature/0.3.0` · Active development**
+**Checkpoint: 25 October 2026 · 0.1.0 released · 0.2.1 in release qualification · 0.3.0 on `feature/0.3.0` · Active development**
 
 This page is the starting point for anyone picking the project up. It explains
 what Interleave is, what works and how that was verified, what is in progress,
@@ -17,9 +17,9 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Owner | Pavan Gupta, GitHub `pavangupta352`; commits use `pavan.gupta.352@gmail.com`. |
 | Repository | [pavangupta352/interleave](https://github.com/pavangupta352/interleave) |
 | Package / executable | `@pavangupta352/interleave` / `interleave` |
-| Version | `0.1.0` released; `0.2.0` on `main` |
+| Version | `0.1.0` released; `0.2.1` on `main` |
 | Qualified source | `2e0aeed`, tag `v0.1.0`; [tag CI run 36329864744](https://github.com/pavangupta352/interleave/actions/runs/36329864744) passed all 25 jobs, and the exact archive passed consumer acceptance on Node.js 22.18.0 and 24.7.0 ([validation](docs/validation.md)) |
-| Release state | [v0.1.0 on GitHub](https://github.com/pavangupta352/interleave/releases/tag/v0.1.0) with the npm archive, source archive, manifest and `SHA256SUMS` (27 September 2026). npm publication of the same archive is pending the owner's `npm login`. 0.2.0: every test job passed on its first tag run, but release preparation failed because npm never packs a nested `.gitignore`; the fix is on `main`, and the tag is to be re-created there before release acceptance. |
+| Release state | [v0.1.0 on GitHub](https://github.com/pavangupta352/interleave/releases/tag/v0.1.0) with the npm archive, source archive, manifest and `SHA256SUMS` (27 September 2026). npm publication of the same archive is pending the owner's `npm login`. 0.2.0: every test job passed on its tag run, but release preparation failed because npm never packs a nested `.gitignore`, so that tag stays unreleased. 0.2.1 carries the fix on `main` and is in tag CI and release acceptance. |
 
 ## What works
 
@@ -36,9 +36,9 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | TypeORM 1.1.1 and 0.3.31 | Integrated | Functional (11 cases) and lifecycle (14 checks) gates on PostgreSQL 16/17/18 with Node 22.18 |
 | Other languages | Integrated | `processActor`; Python with psycopg 3.3.6 qualified through an installed-package workflow |
 | Historical case studies | Integrated | Knex #4694, node-pg-migrate #830, Sequelize #13482 with ordinary-concurrency, barrier and isolation-tester baselines; [case studies](docs/case-studies.md) |
-| Prisma 7 | 0.2.0 | Prisma ORM 7.10.0 checkout example and installed gate, 13 checks on PostgreSQL 16/17/18 × Node 22.18/24.7 |
-| Multi-connection actors | 0.2.0 | Connection lanes for pools and ORM side queries, lane-binding replay, schema 4 |
-| Statement overlap | 0.2.0 | `--overlap pairs` releases two commands together; finds the Knex 0.95.12 case-study miss |
+| Prisma 7 | 0.2.1 | Prisma ORM 7.10.0 checkout example and installed gate, 13 checks on PostgreSQL 16/17/18 × Node 22.18/24.7 |
+| Multi-connection actors | 0.2.1 | Connection lanes for pools and ORM side queries, lane-binding replay, schema 4 |
+| Statement overlap | 0.2.1 | `--overlap pairs` releases two commands together; finds the Knex 0.95.12 case-study miss |
 | More languages | 0.3.0 | Ruby, PHP, Go and Java through `processActor`, each with an installed-package workflow and CI job |
 | Sequelize, Knex, MikroORM | 0.3.0 | Per-actor helpers and a 14-check installed gate on PostgreSQL 16/17/18 × Node 22.18/24.7 (18 rows checked locally) |
 | Cancel requests | 0.3.0 | Forwarded only to the sending actor's own backend, over plaintext or verified TLS; recorded in schema 5 with the step each request reached |
@@ -58,10 +58,10 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Workstream | Next deliverable |
 | --- | --- |
 | Release 0.1.0 | Released on GitHub with checksums; npm publication of the same archive after the owner's `npm login` |
-| Release 0.2.0 | Re-create the tag on `main`, rerun tag CI and release preparation, consumer acceptance of the exact archive, then the GitHub release |
+| Release 0.2.1 | Tag CI on `v0.2.1`, consumer acceptance of the exact archive, then the GitHub release. The `v0.2.0` tag stays unreleased after its release-asset check failed |
 | Release 0.3.0 | More languages, Sequelize/Knex/MikroORM, cancel requests, streaming COPY and Flush stages; full CI on `feature/0.3.0`, then the same release gate |
 | Prisma export | Portable export for Prisma's generated client |
-| Pool replay | Let exact replay swap the bindings of an actor's connections while their histories are still identical, so a pool that routes later statements differently replays more often instead of reporting `incompatible` |
+| Pool replay | Exact replay of a pool that routes a later statement to a different connection stays `incompatible`. Exchanging two connections' bindings when their recorded commands match was built and rejected in review: matching commands and result summaries do not show that two sessions hold the same state (sequence `currval`, advisory locks, temporary tables), so it could turn a mismatch into a false match. Supporting it needs evidence of session state |
 | Hosted databases | Restricted roles, provider allocation, mutual TLS, channel binding, host-name overrides |
 | Protocol features | Qualify more drivers' cancel, COPY and cursor paths as users report them; replication stays out of scope |
 | Platforms | Windows export (a POSIX-free installer) and Windows interruption cleanup; `--docker` on Windows |

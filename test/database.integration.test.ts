@@ -1,6 +1,7 @@
 import { testDatabaseUrl } from './helpers/postgres.js';
 import { randomBytes } from 'node:crypto';
 import { Client, escapeIdentifier, escapeLiteral } from 'pg';
+import { from as copyFrom } from 'pg-copy-streams';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 
 const cryptoControl = vi.hoisted(() => ({ forcedHex: undefined as string | undefined }));
@@ -230,6 +231,37 @@ describe('createOwnedDatabase integration', () => {
       await slowQuery;
     } finally {
       await slowClient.end().catch(() => undefined);
+      await owned.close();
+    }
+  });
+
+  test('reports a COPY waiting on its client, but not an idle connection that waits on ClientRead too', async () => {
+    const owned = await createOwnedDatabase(ADMIN_DATABASE_URL);
+    const idle = client(owned.connectionString);
+    await idle.connect();
+    const copying = client(owned.connectionString);
+    await copying.connect();
+
+    try {
+      const pid = async (connection: Client) => Number((await connection.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]?.pid);
+      const idlePid = await pid(idle);
+      // An idle backend, like one that has not read a just-released command yet, waits on ClientRead.
+      expect((await owned.db.query('SELECT wait_event, state FROM pg_stat_activity WHERE pid = $1', [idlePid])).rows[0])
+        .toEqual({ wait_event: 'ClientRead', state: 'idle' });
+      expect(await owned.observeWait(idlePid)).toBeNull();
+
+      const copyPid = await pid(copying);
+      await copying.query('CREATE TEMPORARY TABLE copied (n int)');
+      // COPY FROM STDIN before any data arrives: the active backend waits for its client.
+      const stream = copying.query(copyFrom('COPY copied FROM STDIN'));
+      const finished = new Promise((resolve, reject) => { stream.on('finish', resolve); stream.on('error', reject); });
+      expect(await eventually(async () => await owned.observeWait(copyPid) === 'client' ? true : null)).toBe(true);
+      stream.end('1\n');
+      await finished;
+      expect((await copying.query('SELECT n FROM copied')).rows).toEqual([{ n: 1 }]);
+    } finally {
+      await idle.end().catch(() => undefined);
+      await copying.end().catch(() => undefined);
       await owned.close();
     }
   });

@@ -104,7 +104,12 @@
   local archive dependency names `dependencyArchives` (`--dependency-archive`)
   only when supplying it can work.
 
-## 0.2.0 — 25 October 2026
+## 0.2.1 — 25 October 2026
+
+0.2.1 is the first release of the 0.2 line. The `v0.2.0` tag was never released:
+its release-asset check found that npm leaves the Prisma example's nested
+`.gitignore` out of the package. 0.2.1 keeps that ignore rule at the repository
+root; the library and CLI are the same as at the `v0.2.0` tag.
 
 Interleave can now schedule actors that use several connections at once,
 explore races inside a single statement, and record Prisma ORM 7 applications.
