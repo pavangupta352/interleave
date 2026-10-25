@@ -34,16 +34,17 @@ export async function attachOwnedDatabase(connectionString: string, transport?: 
       async observeWait(backendPid: number): Promise<WaitObservation | 'client' | null> {
         if (!Number.isSafeInteger(backendPid) || backendPid <= 0) return null;
         const activity = await observer.query<{
-          pid: number; blocker_pids: number[]; wait_event: string | null; wait_event_type: string | null;
+          pid: number; blocker_pids: number[]; wait_event: string | null; wait_event_type: string | null; state: string | null;
         }>(
-          `SELECT pid, pg_blocking_pids(pid) AS blocker_pids, wait_event, wait_event_type
+          `SELECT pid, pg_blocking_pids(pid) AS blocker_pids, wait_event, wait_event_type, state
              FROM pg_stat_activity
             WHERE pid = $1 AND datname = current_database() AND backend_type = 'client backend'`,
           [backendPid],
         );
         const waiting = activity.rows[0];
-        // A COPY waiting for data from its client, or stalled writing to it.
-        if (waiting?.wait_event_type === 'Client') return 'client';
+        // A COPY waiting for data from its client, or stalled writing to it. A backend
+        // that has not yet read a just-released command also waits on ClientRead, but idle.
+        if (waiting?.wait_event_type === 'Client' && waiting.state === 'active') return 'client';
         if (!waiting || waiting.wait_event_type !== 'Lock' || !waiting.wait_event || !waiting.blocker_pids.length) return null;
         return { pid: Number(waiting.pid), blockerPids: waiting.blocker_pids.map(Number), waitEvent: waiting.wait_event, waitEventType: waiting.wait_event_type };
       },
