@@ -127,6 +127,7 @@ The same workflow is available from JavaScript: `explore`, `runOnce`,
 | | Tested scope |
 | --- | --- |
 | PostgreSQL | 16, 17 and 18, on Node.js 22.18 and 24.7 |
+| Operating systems | Linux, macOS and Windows; portable export needs Linux or macOS ([details](docs/compatibility.md#operating-systems)) |
 | node-postgres 8.23.0 | The primary driver; [counter](examples/application/README.md) and [neveroversell](examples/neveroversell/README.md) examples |
 | Postgres.js 3.4.9 | Parameterized queries and transactions with the [`describe-flush-v1` profile](examples/postgresjs/README.md) |
 | Drizzle 0.45.2, Kysely 0.29.5 | Ordinary query-builder CRUD and transactions over node-postgres, each actor with its own pool |
@@ -170,10 +171,12 @@ isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize
   timers decide when a request arrives, so replaying one can find a different
   command running.
 - Clocks, randomness and external services are not controlled.
+- On Windows, `export` is refused, and a run ended from outside skips cleanup.
 
 ## Install
 
-Interleave needs Node.js 22.18 or later, and Docker if you use `--docker`.
+Interleave needs Node.js 22.18 or later on Linux, macOS or Windows, and Docker if
+you use `--docker`.
 
 ```sh
 npm install --save-dev @pavangupta352/interleave pg

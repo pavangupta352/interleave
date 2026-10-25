@@ -15,14 +15,424 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  postgres:
+    name: PostgreSQL ${{ matrix.postgres }} / Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24.7.0']
+        postgres: ['16', '17', '18']
+    env:
+      INTERLEAVE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck, test real PostgreSQL and build the package
+        run: npm run check
+      - name: Inspect the publishable package
+        run: npm pack --dry-run
+
+  pgvector:
+    name: PostgreSQL 17 + pgvector 0.8.6 / Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24.7.0']
+    env:
+      INTERLEAVE_TEST_POSTGRES_IMAGE: pgvector/pgvector:0.8.6-pg17-bookworm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Qualify the explicit pgvector fixture and application profile
+        run: npm run test:integration -- pgvector
+
+  managed:
+    name: Managed local PostgreSQL CLI / Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24.7.0']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Qualify managed setup, replay, reduction and interruption against real Docker
+        run: npm run test:managed
+
+  tls:
+    name: Verified upstream TLS / PostgreSQL ${{ matrix.postgres }} / Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24.7.0']
+        postgres: ['16', '17', '18']
+    env:
+      INTERLEAVE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Qualify verified TLS across every connection role with owned TLS-only servers
+        run: npm run test:tls
+
+  python:
+    name: Python actors (psycopg) / PostgreSQL 16 / Node 24.7.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - name: Install locked dependencies and the example's pinned Python requirements
+        run: |
+          npm ci
+          python -m venv "$RUNNER_TEMP/python-actors"
+          "$RUNNER_TEMP/python-actors/bin/pip" install -r examples/python/requirements.txt
+      - name: Record, replay and repair the Python psycopg example from an installed package
+        run: INTERLEAVE_TEST_PYTHON="$RUNNER_TEMP/python-actors/bin/python" npm run test:integration -- python
+
+  ruby:
+    name: Ruby actors (pg) / PostgreSQL 16 / Node 24.7.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+          cache: npm
+      - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        with:
+          ruby-version: '4.0.5'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Record, replay and repair the Ruby pg example from an installed package
+        run: INTERLEAVE_TEST_RUBY="$(command -v ruby)" npm run test:integration -- process-actor.ruby
+
+  php:
+    name: PHP actors (PDO pgsql) / PostgreSQL 16 / Node 24.7.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+          cache: npm
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          extensions: pdo_pgsql
+          coverage: none
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Record, replay and repair the PHP PDO example from an installed package
+        run: INTERLEAVE_TEST_PHP="$(command -v php)" npm run test:integration -- process-actor.php
+
+  go:
+    name: Go actors (pgx) / PostgreSQL 16 / Node 24.7.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+          cache: npm
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Record, replay and repair the Go pgx example from an installed package
+        run: INTERLEAVE_TEST_GO="$(command -v go)" npm run test:integration -- process-actor.go
+
+  java:
+    name: Java actors (pgjdbc) / PostgreSQL 16 / Node 24.7.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+          cache: npm
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Record, replay and repair the Java JDBC example from an installed package
+        run: INTERLEAVE_TEST_JAVA="$JAVA_HOME/bin/java" npm run test:integration -- java.integration
+
+  typeorm:
+    name: TypeORM ${{ matrix.example == 'typeorm' && '1.1.1' || '0.3.31' }} / PostgreSQL ${{ matrix.postgres }} / Node 22.18.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ['typeorm', 'typeorm-0.3']
+        postgres: ['16', '17', '18']
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: interleave-test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      INTERLEAVE_TYPEORM_EXAMPLE: ${{ matrix.example }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - name: Install locked dependencies and build
+        run: |
+          npm ci
+          npm run build
+      - name: Pack the runtime under test before installing any example
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime"
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/runtime" > "$RUNNER_TEMP/pack.json"
+          echo "INTERLEAVE_TYPEORM_RUNTIME_ARCHIVE=$RUNNER_TEMP/runtime/$(node -p 'require(process.argv[1])[0].filename' "$RUNNER_TEMP/pack.json")" >> "$GITHUB_ENV"
+      - name: TypeORM functional gate (installed archive, retry, exact and portable replay)
+        env:
+          TEST_DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/postgres', 'postgres', 'interleave-test', job.services.postgres.ports[5432]) }}
+          INTERLEAVE_TYPEORM_EVIDENCE: ${{ runner.temp }}/typeorm-functional
+          INTERLEAVE_TYPEORM_PORTABLE: '1'
+        run: npm run test:typeorm-functional
+      - name: Install the pinned example for the lifecycle job
+        run: npm ci --prefix "examples/$INTERLEAVE_TYPEORM_EXAMPLE" --ignore-scripts
+      - name: TypeORM lifecycle job
+        env:
+          TEST_DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/postgres', 'postgres', 'interleave-test', job.services.postgres.ports[5432]) }}
+          INTERLEAVE_TYPEORM_RUN_DIRECTORY: ${{ runner.temp }}/typeorm-lifecycle
+          INTERLEAVE_TYPEORM_JOURNAL: ${{ runner.temp }}/typeorm-lifecycle.jsonl
+        run: npm run test:typeorm
+      - name: Retain TypeORM evidence
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: typeorm-${{ matrix.example }}-pg${{ matrix.postgres }}
+          path: |
+            ${{ runner.temp }}/typeorm-functional
+            ${{ runner.temp }}/typeorm-lifecycle
+            ${{ runner.temp }}/typeorm-lifecycle.jsonl
+            !${{ runner.temp }}/**/node_modules
+          if-no-files-found: ignore
+          retention-days: 14
+          include-hidden-files: false
+
+  prisma:
+    name: Prisma ORM 7.10.0 / PostgreSQL ${{ matrix.postgres }} / Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24.7.0']
+        postgres: ['16', '17', '18']
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: interleave-test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies and build
+        run: |
+          npm ci
+          npm run build
+      - name: Pack the runtime under test before installing the example
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime"
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/runtime" > "$RUNNER_TEMP/pack.json"
+          echo "INTERLEAVE_PRISMA_RUNTIME_ARCHIVE=$RUNNER_TEMP/runtime/$(node -p 'require(process.argv[1])[0].filename' "$RUNNER_TEMP/pack.json")" >> "$GITHUB_ENV"
+      - name: Prisma gate (installed archive, record, replay, reduction, retry and drift)
+        env:
+          TEST_DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/postgres', 'postgres', 'interleave-test', job.services.postgres.ports[5432]) }}
+          INTERLEAVE_PRISMA_EVIDENCE: ${{ runner.temp }}/prisma-evidence
+        run: npm run test:prisma
+      - name: Retain Prisma evidence
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: prisma-node${{ matrix.node }}-pg${{ matrix.postgres }}
+          path: |
+            ${{ runner.temp }}/prisma-evidence
+            !${{ runner.temp }}/**/node_modules
+            !${{ runner.temp }}/prisma-evidence/prisma-cache
+          if-no-files-found: ignore
+          retention-days: 14
+
+  orms:
+    name: ${{ matrix.label }} / PostgreSQL ${{ matrix.postgres }} / Node ${{ matrix.node }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        orm: [sequelize, knex, mikro-orm]
+        node: ['22.18.0', '24.7.0']
+        postgres: ['16', '17', '18']
+        include:
+          - orm: sequelize
+            label: Sequelize 6.37.8
+          - orm: knex
+            label: Knex 3.3.0
+          - orm: mikro-orm
+            label: MikroORM 6.6.17
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: interleave-test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      INTERLEAVE_ORM: ${{ matrix.orm }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies and build
+        run: |
+          npm ci
+          npm run build
+      - name: Pack the runtime under test before installing the example
+        run: |
+          mkdir -p "$RUNNER_TEMP/runtime"
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/runtime" > "$RUNNER_TEMP/pack.json"
+          echo "INTERLEAVE_ORM_RUNTIME_ARCHIVE=$RUNNER_TEMP/runtime/$(node -p 'require(process.argv[1])[0].filename' "$RUNNER_TEMP/pack.json")" >> "$GITHUB_ENV"
+      - name: ORM gate (installed archive, record, replay, reduction, retry, drift, interruption and portable export)
+        env:
+          TEST_DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:{2}/postgres', 'postgres', 'interleave-test', job.services.postgres.ports[5432]) }}
+          INTERLEAVE_ORM_EVIDENCE: ${{ runner.temp }}/orm-evidence
+        run: npm run test:orms
+      - name: Retain ORM evidence
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: orm-${{ matrix.orm }}-node${{ matrix.node }}-pg${{ matrix.postgres }}
+          path: |
+            ${{ runner.temp }}/orm-evidence
+            !${{ runner.temp }}/**/node_modules
+          if-no-files-found: ignore
+          retention-days: 14
+
+  browser:
+    name: Offline report / Chromium, Firefox and WebKit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+          cache: npm
+      - name: Install locked dependencies and browsers
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium firefox webkit
+      - name: Check desktop and mobile reports using a real PostgreSQL run
+        run: npm run test:browser
+
   windows:
-    name: Windows / Node ${{ matrix.node }}
+    name: Windows / PostgreSQL 17 service / Node ${{ matrix.node }}
     runs-on: windows-2025
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        node: ['24.7.0']
+        node: ['22.18.0', '24.7.0']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -49,3 +459,73 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://postgres:root@localhost:5432/postgres
         run: npm run test:integration
+
+  macos:
+    name: macOS / PostgreSQL 17 / Node ${{ matrix.node }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24.7.0']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck, build and run the unit suite
+        run: |
+          npm run typecheck
+          npm run build
+          npm run test:unit
+      - name: Start PostgreSQL 17 from Homebrew
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          brew install postgresql@17
+          bin="$(brew --prefix postgresql@17)/bin"
+          "$bin/initdb" --pgdata "$RUNNER_TEMP/postgres" --username postgres --auth trust --encoding UTF8 --locale C
+          "$bin/pg_ctl" --pgdata "$RUNNER_TEMP/postgres" --log "$RUNNER_TEMP/postgres.log" --wait start
+          "$bin/psql" --username postgres --no-align --tuples-only --command 'SELECT version()'
+      - name: Run the integration suite against it
+        env:
+          TEST_DATABASE_URL: postgresql://postgres@localhost:5432/postgres
+        run: npm run test:integration
+
+  release-candidate:
+    name: Prepare release assets (no publication)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [postgres, pgvector, managed, tls, python, ruby, php, go, java, typeorm, prisma, orms, browser, windows, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24.7.0'
+      - name: Verify the canonical packaging toolchain
+        run: test "$(npm --version)" = 11.5.1
+      - name: Build twice, inspect original archives and smoke-test the exact package
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          INTERLEAVE_RELEASE_NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/prepare-release.mjs --tag "$RELEASE_TAG" --out release-candidate
+      - name: Upload prepared archives, checksums and manifest
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: release-candidate-${{ github.ref_name }}
+          path: release-candidate/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          include-hidden-files: false
+          overwrite: false

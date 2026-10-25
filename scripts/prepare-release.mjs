@@ -175,7 +175,7 @@ async function acceptInstalled(context, archive, packageHash) {
 
 // Version-tag CI job families that must all succeed before assets are prepared.
 // The workflow's release-candidate job needs exactly these jobs.
-export const requiredJobFamilies = ['postgres', 'pgvector', 'managed', 'tls', 'python', 'ruby', 'php', 'go', 'java', 'typeorm', 'prisma', 'orms', 'browser'];
+export const requiredJobFamilies = ['postgres', 'pgvector', 'managed', 'tls', 'python', 'ruby', 'php', 'go', 'java', 'typeorm', 'prisma', 'orms', 'browser', 'windows', 'macos'];
 
 function qualificationContext(source, env) {
   if (env.GITHUB_ACTIONS !== 'true') return null;
@@ -186,7 +186,7 @@ function qualificationContext(source, env) {
   for (const [job, result] of Object.entries(jobFamilies)) assert(needs?.[job]?.result === result, `Required CI job family did not succeed: ${job}`);
   return { kind: 'github-actions-needs', runUrl: `https://github.com/pavangupta352/interleave/actions/runs/${env.GITHUB_RUN_ID}/attempts/${env.GITHUB_RUN_ATTEMPT}`,
     commit: source.commit, jobFamilies,
-    scope: 'Required PostgreSQL, pgvector, managed CLI, verified TLS, Python, Ruby, PHP, Go and Java actor, TypeORM, Prisma, Sequelize/Knex/MikroORM and browser CI jobs using their own source checkouts and builds. Candidate archive acceptance here is the installed smoke only.' };
+    scope: 'Required PostgreSQL, pgvector, managed CLI, verified TLS, Python, Ruby, PHP, Go and Java actor, TypeORM, Prisma, Sequelize/Knex/MikroORM, browser, Windows and macOS CI jobs using their own source checkouts and builds. Candidate archive acceptance here is the installed smoke only.' };
 }
 
 export async function prepareRelease({ repository = repositoryDefault, ref, tag, out, archive, signal, qualificationEnvironment = {} }) {

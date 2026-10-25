@@ -20,6 +20,39 @@ PostgreSQL 17 renamed the catalog locale fields used by fixture capture from `da
 
 PostgreSQL 18 virtual generated columns are covered by schema and logical row identity. The qualification verifies that otherwise equivalent stored and virtual generated columns have different schema identities while their application-visible values are captured. See the official [PostgreSQL 18 generated-column documentation](https://www.postgresql.org/docs/18/ddl-generated-columns.html).
 
+## Operating systems
+
+The qualification above and every CI job not named here run on Linux (Ubuntu
+24.04). The `macos`
+CI job runs the unit and integration suites with Node.js 22.18.0 and 24.7.0 on
+GitHub's macOS 15 arm64 image against PostgreSQL 17 from Homebrew. The `windows`
+job runs the same suites on GitHub's Windows Server 2025 image against the
+image's PostgreSQL 17 service (17.11 at the time of writing). Version-tag release
+preparation requires both jobs.
+
+Recording, exact and guided replay, exploration, reduction and reports run on
+Windows. `processActor` starts other programs there too; the suites check it with
+Node.js programs, and the Python, Ruby, PHP, Go and Java examples have not been
+run on Windows. What differs from Linux and macOS:
+
+- Portable regression export (`interleave export`, `exportRegression`) and
+  release preparation need a POSIX npm, Git and tar toolchain. Both refuse
+  Windows with an explicit error, and their tests do not run there.
+- Windows has no `O_NOFOLLOW`. Before reading a source file or artifact,
+  Interleave checks with `lstat` that the path is not a symbolic link, then
+  compares the opened file's device and inode with that check, so a link or a
+  file swapped in between is refused as on other platforms.
+- Supervision ends the worker process itself rather than a process group.
+- Windows cannot send SIGINT to another process, so the test that interrupts a
+  run and checks that its database is removed runs only on Linux and macOS.
+  Ending a run's process from outside (`taskkill /F`, closing its window) skips
+  cleanup and leaves its `interleave_` database behind.
+- Source identity hashes file bytes. A checkout with CRLF line endings has a
+  different identity from an LF checkout of the same commit, so a recording made
+  from one does not replay exactly from the other. Keep line endings consistent,
+  for example with `* text=auto eol=lf` in `.gitattributes`.
+- `--docker` has not been checked on Windows.
+
 ## Verified upstream TLS
 
 Pass `upstreamTls: { mode: 'verify-full' }` in the API, `--upstream-tls` on the CLI, or `sslmode=verify-full` in the administrator URL. Every connection Interleave opens to PostgreSQL then verifies the server certificate chain and the URL hostname or IP address, using TLS 1.2 or 1.3 after PostgreSQL's SSLRequest negotiation. That covers database creation, setup and observer clients, fixture capture, the supervised worker's clients, each actor proxy's upstream session and cleanup. Trust is Node.js's bundled root set, or a PEM bundle you supply with `ca` / `--upstream-ca`, which replaces those roots rather than extending them (at most 1 MiB and 256 certificates). The policy and CA are resolved once per command or API call, so a CA file replaced mid-run cannot change cleanup trust.

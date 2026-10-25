@@ -64,7 +64,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Pool replay | Let exact replay swap the bindings of an actor's connections while their histories are still identical, so a pool that routes later statements differently replays more often instead of reporting `incompatible` |
 | Hosted databases | Restricted roles, provider allocation, mutual TLS, channel binding, host-name overrides |
 | Protocol features | Qualify more drivers' cancel, COPY and cursor paths as users report them; replication stays out of scope |
-| Platforms | Native Windows process ownership and interruption; automated macOS CI |
+| Platforms | Windows export (a POSIX-free installer) and Windows interruption cleanup; `--docker` on Windows |
 | Other engines | Select a first non-PostgreSQL engine and design its own protocol, fixture and scheduling contract |
 | Usability | An unaided first-user exercise with real participants |
 
