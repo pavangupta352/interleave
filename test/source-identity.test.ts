@@ -100,7 +100,8 @@ test('keeps package-root managed dependencies separate from nested package-owned
   expect(captured.components.dependencies.packages.find(item => item.name === 'child')!.files.map(file => file.path)).toEqual(['index.js', 'package.json']);
 });
 
-test('retains special-file, symbolic-link, native and byte limits in newly included package-owned directories', async () => {
+// Windows has no FIFOs, and creating symbolic links there needs extra privileges.
+test.skipIf(process.platform === 'win32')('retains special-file, symbolic-link, native and byte limits in newly included package-owned directories', async () => {
   const root = await project(), driver = await dependency(root, 'driver');
   await writeFile(join(root, 'scenario.mjs'), "import 'driver';");
   const nested = join(driver, 'fixtures/node_modules'); await mkdir(nested, { recursive: true });
@@ -324,7 +325,7 @@ test('rejects file changes during capture and closes the opened handle', async (
 
 test('captures the actual installed pure-JavaScript pg graph and detects an edited driver with unchanged lock', async () => {
   const root = await project();
-  const repository = dirname(new URL('../package.json', import.meta.url).pathname);
+  const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
   const packages = ['pg', 'pg-connection-string', 'pg-pool', 'pg-protocol', 'pg-types', 'pgpass', 'pg-cloudflare', 'postgres-array', 'postgres-bytea', 'postgres-date', 'postgres-interval', 'pg-int8', 'xtend', 'split2'];
   await mkdir(join(root, 'node_modules'));
   for (const name of packages) await cp(join(repository, 'node_modules', name), join(root, 'node_modules', name), { recursive: true });
@@ -395,7 +396,7 @@ test('binds built runtime changes, ignores maps and README noise, and compares c
     compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.ESNext },
   }).outputText;
   await writeFile(join(runtime, 'dist/source-identity.js'), compiled);
-  await build({ entryPoints: [new URL('../src/export-source.ts', import.meta.url).pathname], outfile: join(runtime, 'dist/export-source.js'), bundle: true, platform: 'node', format: 'esm', minify: true,
+  await build({ entryPoints: [fileURLToPath(new URL('../src/export-source.ts', import.meta.url))], outfile: join(runtime, 'dist/export-source.js'), bundle: true, platform: 'node', format: 'esm', minify: true,
     banner: { js: "import {createRequire} from 'node:module';import{fileURLToPath}from'node:url';import{dirname}from'node:path';const require=createRequire(import.meta.url);const __filename=fileURLToPath(import.meta.url);const __dirname=dirname(__filename);" } });
   await writeFile(join(runtime, 'dist/runner.js'), 'export const implementation=1;');
   const imported = await import(pathToFileURL(join(runtime, 'dist/source-identity.js')).href) as typeof import('../src/source-identity.js');
@@ -463,17 +464,19 @@ test('binds the actual source-mode TypeScript parser and tsx loader dependency b
   expect(rejected.stderr).toMatch(/nested node_modules.*runtime|runtime.*nested node_modules/i);
 }, 30_000);
 
-test.each(['colon:name.mjs', 'control\nname.mjs'])('rejects a nonportable entry path %j before emitting an identity', async name => {
+// Windows cannot create a file name that contains a newline.
+const newlineNames = process.platform === 'win32' ? [] : ['control\nname.mjs'];
+test.each(['colon:name.mjs', ...newlineNames])('rejects a nonportable entry path %j before emitting an identity', async name => {
   const root = await project(); await writeFile(join(root, name), 'export default 42;');
   await expect(captureSourceIdentity(join(root, name))).rejects.toMatchObject({ kind: 'unsupported' });
 });
 
-test.each(['colon:data.json', 'control\ninput.json'])('rejects nonportable explicit data path %j', async name => {
+test.each(['colon:data.json', ...newlineNames.map(name => name.replace('name.mjs', 'input.json'))])('rejects nonportable explicit data path %j', async name => {
   const root = await project(); await writeFile(join(root, name), '{}');
   await expect(captureSourceIdentity(join(root, 'scenario.mjs'), { include: [name] })).rejects.toMatchObject({ kind: 'unsupported' });
 });
 
-test('rejects nonportable files discovered inside a declared dependency package', async () => {
+test.skipIf(process.platform === 'win32')('rejects nonportable files discovered inside a declared dependency package', async () => {
   const root = await project(); await writeFile(join(root, 'scenario.mjs'), "import 'driver';");
   const driver = await dependency(root, 'driver'); await writeFile(join(driver, 'colon:data.json'), '{}');
   await expect(captureSourceIdentity(join(root, 'scenario.mjs'))).rejects.toMatchObject({ kind: 'unsupported' });

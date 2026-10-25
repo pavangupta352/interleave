@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
@@ -98,8 +99,8 @@ test('preserves a replacement directory on failure and names the incomplete outp
 test('human replay commands preserve literal shell metacharacters in entry paths', async () => {
   const f = await fixture(); const scenario = join(f.projectRoot, "scenario'$(printf changed).mjs");
   await fs.rename(f.scenarioFile, scenario);
-  await json(join(f.root, 'run.json'), await bindExportFixture(run, { ...f, scenarioFile: scenario, runtimeRoot: new URL('../', import.meta.url).pathname }));
-  const command = spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), new URL('../src/cli.ts', import.meta.url).pathname, 'export', scenario, join(f.root, 'run.json'), '--project-root', f.projectRoot, '--out', f.destination], { encoding: 'utf8', timeout: 60_000 });
+  await json(join(f.root, 'run.json'), await bindExportFixture(run, { ...f, scenarioFile: scenario, runtimeRoot: fileURLToPath(new URL('../', import.meta.url)) }));
+  const command = spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), fileURLToPath(new URL('../src/cli.ts', import.meta.url)), 'export', scenario, join(f.root, 'run.json'), '--project-root', f.projectRoot, '--out', f.destination], { encoding: 'utf8', timeout: 60_000 });
   expect(command.status, command.stderr).toBe(0);
   const printed = command.stdout.trim().split('\n').at(-1)!;
   // Replace the executable only, then ask a real shell to report its arguments.

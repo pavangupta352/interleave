@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { RunResult } from './types.js';
 import { ARTIFACT_LIMITS, parseRunArtifact, validateArtifactWriteOptions } from './artifact-schema.js';
 import type { WriteRunArtifactOptions } from './artifact-schema.js';
+import { openNoFollow } from './source-identity.js';
 export { ARTIFACT_LIMITS, parseRunArtifact, validateJsonValue } from './artifact-schema.js';
 export type { WriteRunArtifactOptions, JsonValueValidationOptions } from './artifact-schema.js';
 const MAX_ARTIFACT_BYTES = ARTIFACT_LIMITS.maxBytes;
@@ -16,7 +17,7 @@ export async function readRunArtifact(path: string): Promise<RunResult> {
 
   let handle;
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    handle = await openNoFollow(path);
   } catch (error) {
     if (isErrorCode(error, 'ELOOP') || isErrorCode(error, 'EMULTIHOP')) {
       throw new Error(`Refusing to read symbolic link run artifact: ${path}`);
@@ -96,6 +97,8 @@ export async function writeRunArtifact(
 }
 
 async function syncDirectory(path: string): Promise<void> {
+  // Windows cannot flush a directory handle; its file system commits the rename itself.
+  if (process.platform === 'win32') return;
   const directory = await open(path, constants.O_RDONLY);
   try {
     await directory.sync();

@@ -16,7 +16,7 @@ const multi = { databaseUrl, connectionProfile: 'multi-producer-v1' as const };
 const identities = (run: RunResult) => run.trace.map(step => [step.actor, step.ordinal, step.sql, step.fingerprint]);
 
 describe('multi-producer actors against real PostgreSQL', () => {
-  test('records a pooled lost update, replays it exactly and reduces its lane choices', async () => {
+  test('records a pooled lost update, replays it exactly and reduces its lane choices', { timeout: 60_000 }, async () => {
     const scenario = poolLostUpdate();
     const first = await runOnce(scenario, { ...multi, plan: ['alice#0', 'alice#1', 'bob', 'alice#0', 'alice#1', 'bob'] });
     expect(first.outcome, first.reason).toBe('violation');

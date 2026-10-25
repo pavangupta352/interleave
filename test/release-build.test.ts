@@ -134,7 +134,7 @@ test('records all required CI job families in the verified tagged release manife
   const f = await fixture(); const tag = `v${f.version}`;
   await execFile('git', ['-C', f.repository, 'tag', tag]);
   const out = join(f.root, 'qualified candidate');
-  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', tls: 'success', python: 'success', ruby: 'success', php: 'success', go: 'success', java: 'success', typeorm: 'success', prisma: 'success', orms: 'success', browser: 'success' };
+  const jobFamilies = { postgres: 'success', pgvector: 'success', managed: 'success', tls: 'success', python: 'success', ruby: 'success', php: 'success', go: 'success', java: 'success', typeorm: 'success', prisma: 'success', orms: 'success', browser: 'success', windows: 'success', macos: 'success' };
   const qualificationEnvironment = {
     GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'pavangupta352/interleave', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '2',
     GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: f.ref,

@@ -64,7 +64,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Pool replay | Exact replay of a pool that routes a later statement to a different connection stays `incompatible`. Exchanging two connections' bindings when their recorded commands match was built and rejected in review: matching commands and result summaries do not show that two sessions hold the same state (sequence `currval`, advisory locks, temporary tables), so it could turn a mismatch into a false match. Supporting it needs evidence of session state |
 | Hosted databases | Restricted roles, provider allocation, mutual TLS, channel binding, host-name overrides |
 | Protocol features | Qualify more drivers' cancel, COPY and cursor paths as users report them; replication stays out of scope |
-| Platforms | Native Windows process ownership and interruption; automated macOS CI |
+| Platforms | Windows export (a POSIX-free installer) and Windows interruption cleanup; `--docker` on Windows |
 | Other engines | Select a first non-PostgreSQL engine and design its own protocol, fixture and scheduling contract |
 | Usability | An unaided first-user exercise with real participants |
 

@@ -176,7 +176,8 @@ describe('CLI real PostgreSQL integration', () => {
     expect(JSON.parse(safe.stdout).environment.source).toBeDefined();
     expect(JSON.parse(safe.stdout).actors.map((actor: { value: string }) => actor.value).sort()).toEqual(['held', 'insufficient']);
   });
-  test('SIGINT returns 130 after removing the exact owned database', async () => {
+  // Windows cannot deliver these signals to a child process: kill() ends it without running handlers.
+  test.skipIf(process.platform === 'win32').each([['SIGINT', 130], ['SIGHUP', 129]] as const)('%s returns %i after removing the exact owned database', async (stop, expected) => {
     const marker = join(await directory(), 'owned-db');
     const running = start(['run', fixture('hung')], { INTERLEAVE_CLI_TEST_MARKER: marker });
     let name = '';
@@ -184,8 +185,8 @@ describe('CLI real PostgreSQL integration', () => {
       const deadline = Date.now() + 5_000;
       while (!name && Date.now() < deadline) { name = await readFile(marker, 'utf8').catch(() => ''); if (!name) await new Promise(resolve => setTimeout(resolve, 10)); }
       expect(name).toMatch(/^interleave_[a-f0-9]+$/);
-      running.child.kill('SIGINT');
-      const result = await running.result; expect(result.code).toBe(130); expect(JSON.parse(result.stdout).stopReason).toBe('aborted');
+      running.child.kill(stop);
+      const result = await running.result; expect(result.code).toBe(expected); expect(JSON.parse(result.stdout).stopReason).toBe('aborted');
       const admin = new Client({ connectionString: databaseUrl }); await admin.connect();
       try { expect((await admin.query('SELECT datname FROM pg_database WHERE datname = $1', [name])).rows).toEqual([]); }
       finally { await admin.end(); }

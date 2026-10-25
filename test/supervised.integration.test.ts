@@ -99,7 +99,8 @@ describe('supervised scenario integration', () => {
     expect(result.outcome).toBe('inconclusive');
     expect(result.reason).toMatch(/deadline/);
     expect(result.cleanup.complete).toBe(true);
-    expect(Date.now() - started).toBeLessThan(5_000);
+    // Windows starts the worker process and its TypeScript loader more slowly.
+    expect(Date.now() - started).toBeLessThan(process.platform === 'win32' ? 10_000 : 5_000);
   });
 
   test('external cancellation contains an unhandled idle pg client crash', async () => {

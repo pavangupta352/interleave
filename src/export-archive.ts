@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { gunzipSync } from 'node:zlib';
+import { openNoFollow } from './source-identity.js';
 
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
@@ -97,7 +98,7 @@ export async function readOrdinaryFile(path: string, maximum = MAX_FILE_BYTES, r
     await assertNoSymlinkComponents(root, path);
   }
   let handle;
-  try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+  try { handle = await openNoFollow(path); }
   catch (error) {
     if (hasCode(error, 'ELOOP') || hasCode(error, 'EMULTIHOP')) throw new Error(`Refusing symbolic link file: ${path}`);
     if (hasCode(error, 'ENOENT')) throw new Error(`Required file does not exist: ${path}`);

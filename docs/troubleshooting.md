@@ -54,6 +54,8 @@ an arbitrary driver, application schema or external service.
 | Reduction reaches zero choices | Inspect its retained trace and failure fingerprint | Zero explicit choices uses fair fallback. It does not remove all queries or prove a globally shortest failure. |
 | Export fails with `Archive download exceeds 16 MiB` or `File exceeds the 16777216 byte limit` | Find the locked package whose original archive is larger than 16 MiB, such as `@prisma/client` 7.10.0 (26,828,688 bytes) | Shared export does not support that dependency graph. Keep the original application checkout, lock and recording for replay; do not repack or edit the archive. |
 | `Source identity byte limit exceeded` or `file limit exceeded` | List the installed packages the scenario's imports reach, including installed optional peer dependencies and packages resolved from a parent directory's `node_modules` | Keep build and generation tools out of the application's resolution path, for example the Prisma CLI (see the [Prisma example](../examples/prisma/README.md#why-the-prisma-cli-is-in-a-separate-directory)). The defaults are 128 MiB, 10,000 files and 16 MiB per file. |
+| Export fails with `Portable regression exports currently require Linux or macOS` | Are you exporting on Windows? | Record, replay and reports work on Windows. To export a regression, record it on Linux or macOS and export it there. See [operating systems](compatibility.md#operating-systems). |
+| A Windows recording does not replay exactly from another checkout | Compare line endings: source identity hashes file bytes, so CRLF and LF checkouts differ | Use the same line endings in both checkouts, for example `* text=auto eol=lf` in `.gitattributes`. |
 
 ## Inspect incomplete cleanup
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import { parseRunArtifact } from '../src/artifact.js';
 import { testDatabaseUrl } from './helpers/postgres.js';
+import { npm } from './helpers/npm.js';
 
 const repository = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const databaseUrl = testDatabaseUrl();
@@ -23,10 +24,10 @@ test('the pool and overlap examples behave as their READMEs state', { timeout: 9
     return result.stdout;
   }
   try {
-    const packed = JSON.parse(execute(['npm', 'pack', '--ignore-scripts', '--json', '--pack-destination', root], repository, 0))[0];
+    const packed = JSON.parse(execute(npm('pack', '--ignore-scripts', '--json', '--pack-destination', root), repository, 0))[0];
     const app = join(root, 'shop'); await mkdir(app);
     await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'examples-shop', private: true, type: 'module' }, null, 2) + '\n');
-    execute(['npm', 'install', '--save-dev', '--save-exact', join(root, packed.filename), 'pg@8.23.0', '--ignore-scripts'], app, 0);
+    execute(npm('install', '--save-dev', '--save-exact', join(root, packed.filename), 'pg@8.23.0', '--ignore-scripts'), app, 0);
     for (const name of ['pool', 'overlap']) await cp(join(repository, 'examples', name), join(app, name), { recursive: true, filter: source => !source.endsWith('README.md') });
     const cli = join(app, 'node_modules/@pavangupta352/interleave/dist/cli.js');
     const multi = ['--connection-profile', 'multi-producer-v1'];

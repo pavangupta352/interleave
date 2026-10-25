@@ -42,6 +42,15 @@
   was suspended. The [cursor example](examples/cursor/README.md) is an interest job
   that loses a concurrent deposit between two batches.
 
+- Run on Windows: recording, exact and guided replay, exploration, reduction
+  and reports. New `windows` and `macos` CI jobs run the unit and integration
+  suites with Node.js 22.18.0 and 24.7.0 on Windows Server 2025 and macOS 15
+  against PostgreSQL 17, and version-tag release preparation requires them.
+  Portable export still needs Linux or macOS and refuses Windows with an
+  explicit error. Without `O_NOFOLLOW` on Windows, Interleave refuses a symbolic
+  link by checking the opened file against an `lstat` of its path. See
+  [operating systems](docs/compatibility.md#operating-systems).
+
 ### Qualified profiles
 
 - Ruby 4.0.5, PHP 8.5.0, Go 1.27.1 and Java 21 programs through `processActor`
@@ -69,6 +78,10 @@
 
 ### Fixes
 
+- The CLI stops and cleans up on SIGHUP (exit 129) as it does on SIGINT and
+  SIGTERM. A terminal that closed during a run used to end it without removing
+  its database. On Windows, Node.js raises SIGHUP when the console window closes,
+  and Ctrl+Break's SIGBREAK now stops a run too (exit 149).
 - When an uncaught exception or unhandled promise rejection ends the scenario
   worker, the run's reason says which, and names a client or pool without an
   `'error'` listener as the usual cause. It used to say only that the worker

@@ -425,10 +425,86 @@ jobs:
       - name: Check desktop and mobile reports using a real PostgreSQL run
         run: npm run test:browser
 
+  windows:
+    name: Windows / PostgreSQL 17 service / Node ${{ matrix.node }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24.7.0']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck, build and run the unit suite
+        run: |
+          npm run typecheck
+          npm run build
+          npm run test:unit
+      - name: Start the runner's PostgreSQL service
+        shell: pwsh
+        run: |
+          $service = Get-Service -Name postgresql*
+          Set-Service -InputObject $service -Status Running -StartupType Automatic
+          & "$env:PGBIN\pg_isready.exe" --timeout=60
+          & "$env:PGBIN\psql.exe" -At -c 'SELECT version()'
+      - name: Run the integration suite against it
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:root@localhost:5432/postgres
+        run: npm run test:integration
+
+  macos:
+    name: macOS / PostgreSQL 17 / Node ${{ matrix.node }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24.7.0']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck, build and run the unit suite
+        run: |
+          npm run typecheck
+          npm run build
+          npm run test:unit
+      - name: Start PostgreSQL 17 from Homebrew
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          brew install postgresql@17
+          bin="$(brew --prefix postgresql@17)/bin"
+          # Password authentication over TCP, as on the Linux and Windows servers; tests check rejected passwords.
+          printf 'postgres\n' > "$RUNNER_TEMP/postgres-password"
+          "$bin/initdb" --pgdata "$RUNNER_TEMP/postgres" --username postgres --pwfile "$RUNNER_TEMP/postgres-password" \
+            --auth-host scram-sha-256 --auth-local trust --encoding UTF8 --locale C
+          "$bin/pg_ctl" --pgdata "$RUNNER_TEMP/postgres" --log "$RUNNER_TEMP/postgres.log" --wait start
+          PGPASSWORD=postgres "$bin/psql" --host localhost --username postgres --no-align --tuples-only --command 'SELECT version()'
+      - name: Run the integration suite against it
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: npm run test:integration
+
   release-candidate:
     name: Prepare release assets (no publication)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [postgres, pgvector, managed, tls, python, ruby, php, go, java, typeorm, prisma, orms, browser]
+    needs: [postgres, pgvector, managed, tls, python, ruby, php, go, java, typeorm, prisma, orms, browser, windows, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
