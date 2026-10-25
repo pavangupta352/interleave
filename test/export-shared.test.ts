@@ -73,11 +73,28 @@ test('supplied archives export an app-installed runtime through the original app
   expect(manifest).toMatchObject({ installation: { layout: 'shared-app', profile: 'npm-offline-v1' }, replay: { install: [['node', 'install.mjs']] } });
   expect(manifest.installation?.packages.map(item => item.lockPath)).toEqual(['node_modules/@pavangupta352/interleave', 'node_modules/solo']);
   expect(JSON.parse(await readFile(join(result.destination, 'run.json'), 'utf8')).environment.source).toEqual(run.environment.source);
-  // Without archives the separate installation is chosen, and it cannot install
-  // the app lock's local runtime archive.
+  // The app installed this runtime from an archive in the project, so export finds it
+  // without being told and uses the original app installation.
   const { runtimeArchive: _explicit, ...discovered } = options;
-  await expect(exportRegression(run, { ...discovered, destination: join(root, 'separate export') })).rejects.toThrow(
-    /portable locks: node_modules\/@pavangupta352\/interleave; supply the original archive with --runtime-archive/);
+  const found = await exportRegression(run, { ...discovered, destination: join(root, 'discovered export') });
+  expect((await verifyRegressionExport(found.destination)).installation?.layout).toBe('shared-app');
+});
+
+test('an empty archive list selects nothing, and a runtime outside the app gets no archive hint', async () => {
+  const { run, options, build } = await fixture('solo', false);
+  const { runtimeArchive: _explicit, ...rest } = options;
+  await expect(exportRegression(run, { ...rest, runtimeRoot: build, dependencyArchives: [] })).rejects.toThrow(
+    /^Only integrity-pinned registry\/tarball dependencies are supported in portable locks: node_modules\/@pavangupta352\/interleave$/);
+});
+
+test('a registry-installed app runtime with a local dependency archive is told to supply that archive', async () => {
+  const { run, options } = await fixture('solo', false);
+  const path = join(options.projectRoot, 'package-lock.json'); const lock = JSON.parse(await readFile(path, 'utf8'));
+  lock.packages['node_modules/@pavangupta352/interleave'].resolved = 'https://registry.npmjs.org/@pavangupta352/interleave/-/interleave-0.1.0-test.tgz';
+  await json(path, lock);
+  const { runtimeArchive: _explicit, ...rest } = options;
+  await expect(exportRegression(run, rest)).rejects.toThrow(
+    /portable locks: node_modules\/solo; supply the original archives with dependencyArchives \(--dependency-archive\) to export the original app installation$/);
 });
 
 test('still rejects changed runtime implementation bytes without an application runtime API import', async () => {

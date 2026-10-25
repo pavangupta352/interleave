@@ -4,9 +4,12 @@ An Interleave regression export keeps one observed invariant violation together
 with the trusted local scenario source needed to replay it. The export is a new
 directory containing the exact run artifact, selected application files, npm
 package metadata and lockfile, archives matching the recorded built Interleave
-runtime, and a versioned integrity manifest. Recordings with a shared app/runtime
-installation use the original app lock and one offline installation. Other
-recordings retain separate app and runtime installations.
+runtime, and a versioned integrity manifest. Some exports restore the original
+app lock as one offline installation: when the recording shares package
+instances between the app and the runtime, when the app installed this runtime
+from a local archive and export runs from that installation, or when original
+archives are supplied. Other recordings keep separate app and runtime
+installations.
 
 Exports preserve application SQL and recorded observations verbatim. Those files
 can contain credentials, personal data, or other private values. Review the
@@ -179,8 +182,10 @@ built runtime. Packaging checks the actual tarball contents, including every
 recorded runtime implementation file; an npm `files` rule that omits executing
 code causes export to fail.
 
-`runtimeArchive` and `dependencyArchives` apply to the shared installation
-profile. Their bytes must match the unchanged original lock. Unmatched explicit
+`runtimeArchive` and `dependencyArchives` supply original archives for the
+shared installation profile, and supplying one selects that profile. An empty
+`dependencyArchives` list selects nothing. Their bytes must match the unchanged
+original lock. Unmatched explicit
 archives are rejected. `artifactFile` is optional: its parsed content must equal
 the supplied run, and the file must remain unchanged while exporting. The CLI
 sets it automatically to preserve original run JSON bytes. Without that option,
