@@ -63,6 +63,9 @@
   [compatibility](docs/compatibility.md#sequelize-knex-and-mikroorm).
 - The new `orms` CI job family runs that gate for every row, and release
   candidates require it.
+- pgjdbc 42.7.13 fetch-size cursors, `Statement.setQueryTimeout` and
+  `CopyManager` through a Java process actor, with exact replay. The fetch-size
+  cursor runs under the default profile because pgjdbc ends each batch with Sync.
 
 ### Fixes
 

@@ -131,6 +131,9 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 - psycopg 3.3.6 (binary, libpq 18.0) `cancel_safe()` from a Python process actor,
   with exact replay.
 - Forwarding over verified TLS to a TLS-only server, with exact replay.
+- pgjdbc 42.7.13 on Java 21.0.11, from a Java process actor:
+  `Statement.setQueryTimeout(1)` sent its cancel request from the driver's timer
+  thread and stopped `SELECT pg_sleep(30)` with 57014, with exact replay.
 - A libpq-style request for backend 1, with and without an SSLRequest first, was
   recorded and not forwarded. A request for another actor's backend was not
   forwarded and the run ended `inconclusive`.
@@ -142,8 +145,8 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 CI run 40146537748 repeated these checks: the integration and verified-TLS
 suites on PostgreSQL 16, 17 and 18 with Node.js 22.18.0 and 24.7.0, the psycopg
 case on PostgreSQL 16 with Node.js 24.7.0, and the report in Chromium, Firefox
-and WebKit. Not yet checked: libpq `PQcancel` called directly and pgjdbc
-`Statement.setQueryTimeout`.
+and WebKit. The CI `java` job repeats the pgjdbc case on PostgreSQL 16 with
+Node.js 24.7.0. Not yet checked: libpq `PQcancel` called directly.
 
 ## Streaming COPY
 
@@ -192,6 +195,8 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 - A pg-copy-streams pipeline from one pool connection's COPY TO STDOUT into
   another's COPY FROM STDIN moved 50,000 rows in both release orders, in
   `multi-producer-v1`, with exact replay.
+- pgjdbc 42.7.13 `CopyManager` `copyIn` and `copyOut` from a Java process actor,
+  with exact replay.
 - node-postgres without a copy stream: copied-out data was measured and
   discarded by the driver, and a copy in failed with the driver's own CopyFail.
 - The report listed each transfer's direction, byte count and digest in
@@ -199,8 +204,8 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 
 CI run 40146537748 repeated these checks on PostgreSQL 16, 17 and 18 with
 Node.js 22.18.0 and 24.7.0, the psycopg and libpq case on PostgreSQL 16 with
-Node.js 24.7.0, and the report in Chromium, Firefox and WebKit. Not yet checked:
-pgjdbc `CopyManager` and binary-format COPY.
+Node.js 24.7.0, and the report in Chromium, Firefox and WebKit. The CI `java` job
+repeats the pgjdbc case. Not yet checked: binary-format COPY.
 
 ## PostgreSQL 17 with pgvector 0.8.6
 
@@ -309,7 +314,12 @@ Checked on 25 October 2026 against PostgreSQL 16.15 with Node.js 24.7.0:
 CI run 40146537748 repeated these checks, including the installed cursor
 example, on PostgreSQL 16, 17 and 18 with Node.js 22.18.0 and 24.7.0, the libpq
 pipeline case on PostgreSQL 16 with Node.js 24.7.0, and the report in Chromium,
-Firefox and WebKit. Not yet checked: pgjdbc.
+Firefox and WebKit.
+
+pgjdbc 42.7.13 reads with a fetch size only inside a transaction, and fetches
+each batch with its own Execute and Sync, so it runs under the default profile
+without Flush stages. A `setFetchSize(2)` query over five rows became three
+cycles on the same portal, checked from a Java process actor with exact replay.
 
 ## External programs as actors
 

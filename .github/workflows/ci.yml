@@ -214,7 +214,7 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Record, replay and repair the Java JDBC example from an installed package
-        run: INTERLEAVE_TEST_JAVA="$JAVA_HOME/bin/java" npm run test:integration -- process-actor.java
+        run: INTERLEAVE_TEST_JAVA="$JAVA_HOME/bin/java" npm run test:integration -- java.integration
 
   typeorm:
     name: TypeORM ${{ matrix.example == 'typeorm' && '1.1.1' || '0.3.31' }} / PostgreSQL ${{ matrix.postgres }} / Node 22.18.0
