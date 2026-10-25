@@ -68,6 +68,19 @@ describe('supervised scenario integration', () => {
     expect(lifecycle.names).toHaveLength(1);
   });
 
+  test.each([
+    ['uncaught-exception', "An uncaught exception ended the scenario worker. A database client or pool without an 'error' listener is the usual cause."],
+    ['unhandled-rejection', 'An unhandled promise rejection ended the scenario worker.'],
+  ])('names a worker-ending %s without forwarding its text', async (name, reason) => {
+    const result = await runScenarioFile(fixture(name), { databaseUrl });
+    expect(result.outcome).toBe('harness-error');
+    expect(result.reason).toBe(reason);
+    expect(JSON.stringify(result)).not.toContain('example.invalid');
+    expect(result.cleanup.complete).toBe(true);
+    expect(parseRunArtifact(result)).toEqual(result);
+    expect(lifecycle.names).toHaveLength(1);
+  });
+
   test('rejects a schema-valid result sent by application code over the worker IPC channel', async () => {
     const result = await runScenarioFile(fixture('forged-result'), { databaseUrl });
     expect(result.outcome).toBe('harness-error');

@@ -231,7 +231,11 @@ export async function runScenarioFile(scenarioFile: string, options: RunOptions)
             runningAt ??= performance.now();
             if (!interruption) armDeadline(timeoutMs + WORKER_DEADLINE_GRACE_MS);
           } else if (message.type === 'error') {
-            result.reason = 'Scenario loading or worker execution failed';
+            const kind = 'kind' in message ? message.kind : undefined;
+            result.reason = kind === 'uncaught-exception'
+              ? "An uncaught exception ended the scenario worker. A database client or pool without an 'error' listener is the usual cause."
+              : kind === 'unhandled-rejection' ? 'An unhandled promise rejection ended the scenario worker.'
+                : 'Scenario loading or worker execution failed';
           } else { protocolFailure = true; terminateGroup(workerChild); }
         });
         const done = (code: number | null, signal: NodeJS.Signals | null): void => {

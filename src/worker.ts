@@ -22,6 +22,16 @@ const controller = new AbortController();
 let started = false;
 let protocolToken: string | undefined;
 process.on('disconnect', () => process.exit(1));
+// A failure outside the actor promises ends the worker. Report only its kind: its
+// text may contain credentials, and the parent maps each kind to fixed wording.
+function crash(kind: 'uncaught-exception' | 'unhandled-rejection'): void {
+  try {
+    if (protocolToken && process.connected) { process.send?.({ type: 'error', token: protocolToken, kind }, () => process.exit(1)); return; }
+  } catch { /* The channel is gone; exit below. */ }
+  process.exit(1);
+}
+process.on('uncaughtException', () => crash('uncaught-exception'));
+process.on('unhandledRejection', () => crash('unhandled-rejection'));
 process.on('message', (message: unknown) => {
   if (typeof message !== 'object' || message === null || !('type' in message)) return;
   if (message.type === 'abort') {

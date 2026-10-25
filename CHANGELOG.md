@@ -63,6 +63,10 @@
 
 ### Fixes
 
+- When an uncaught exception or unhandled promise rejection ends the scenario
+  worker, the run's reason says which, and names a client or pool without an
+  `'error'` listener as the usual cause. It used to say only that the worker
+  exited before completing. The error's own text is still never recorded.
 - A protocol cycle that prepares, describes or closes a statement without
   executing it records that statement's SQL once. pgx's Parse/Describe/Sync
   prepare cycle previously showed the statement twice, as if it had run two
