@@ -425,6 +425,30 @@ jobs:
       - name: Check desktop and mobile reports using a real PostgreSQL run
         run: npm run test:browser
 
+  windows:
+    name: Windows / Node ${{ matrix.node }}
+    runs-on: windows-2025
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['24.7.0']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck, build and run the unit suite
+        run: |
+          npm run typecheck
+          npm run build
+          npm run test:unit
+
   release-candidate:
     name: Prepare release assets (no publication)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
