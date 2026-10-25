@@ -17,14 +17,22 @@ export interface LanguageExample {
   env: Record<string, string>;
   /** The README's preparation commands, run in order from the application root. */
   prepare: string[][];
-  unsafe: { scenario: string; include: string; edit: { file: string; text: string } };
+  /** Paths for `--include`: the program, and any modules or settings it reads. */
+  unsafe: { scenario: string; include: string | string[]; edit: { file: string; text: string } };
   /**
    * Startup parameters are part of exact replay identity. `moved` states whether a copy
    * of the application in another directory replays the recording; `changedStartup`
    * optionally names variables that change what the driver sends at startup.
    */
   replayElsewhere: { moved: 'same failure' | 'startup changed'; changedStartup?: Record<string, string> };
-  safe: { scenario: string; include: string; budget: string[]; schedules: number; timeoutMs: number };
+  /**
+   * The repaired program's search: by default it must exhaust the frontier (exit 0). A
+   * `max-runs` search covers that many orders without a violation and exits 4 because
+   * its run budget, not the frontier, ended it.
+   */
+  safe: { scenario: string; include: string | string[]; budget: string[]; schedules: number; timeoutMs: number; stop?: 'frontier-exhausted' | 'max-runs' };
+  /** Options the README gives every `run`, such as a protocol profile; replay inherits them. */
+  runOptions?: string[];
 }
 
 /**
@@ -37,6 +45,8 @@ export interface LanguageExample {
  * INTERLEAVE_TEST_EVIDENCE to a directory to keep each command's status and output.
  */
 export async function qualifyLanguageExample(example: LanguageExample): Promise<void> {
+  const paths = (value: string | string[]): string[] => Array.isArray(value) ? value : [value];
+  const includes = (value: string | string[]): string[] => paths(value).flatMap(path => ['--include', path]);
   const databaseUrl = testDatabaseUrl();
   const root = await mkdtemp(join(await realpath(tmpdir()), `interleave ${example.folder} actors `));
   const evidence = process.env.INTERLEAVE_TEST_EVIDENCE ? join(process.env.INTERLEAVE_TEST_EVIDENCE, example.folder) : undefined;
@@ -67,13 +77,13 @@ export async function qualifyLanguageExample(example: LanguageExample): Promise<
     const cli = join(installed, 'dist/cli.js');
     const artifact = join(root, 'oversell.json');
 
-    const found = JSON.parse(execute([process.execPath, cli, 'run', example.unsafe.scenario, '--include', example.unsafe.include, '--out', artifact, '--json'], app, 1));
+    const found = JSON.parse(execute([process.execPath, cli, 'run', example.unsafe.scenario, ...includes(example.unsafe.include), ...example.runOptions ?? [], '--out', artifact, '--json'], app, 1));
     expect(found.violationCount).toBeGreaterThan(0);
     if (evidence) await cp(artifact, join(evidence, 'oversell.json'));
     const recorded = parseRunArtifact(JSON.parse(await readFile(artifact, 'utf8')));
     expect(recorded.outcome).toBe('violation');
     expect(recorded.failure?.message).toMatch(/one unit of stock was sold 2 times/);
-    expect(recorded.environment.source?.includes).toContain(example.unsafe.include);
+    for (const path of paths(example.unsafe.include)) expect(recorded.environment.source?.includes).toContain(path);
     expect(recorded.actors.map(actor => actor.value)).toEqual([{ saw_stock: 1, bought: true }, { saw_stock: 1, bought: true }]);
     expect(new Set(recorded.trace.map(step => step.actor))).toEqual(new Set(['alice', 'bob']));
 
@@ -99,8 +109,10 @@ export async function qualifyLanguageExample(example: LanguageExample): Promise<
     expect(drift.reason).toMatch(/source/i);
 
     // The README's command prints the search summary rather than every retained run.
-    const summary = execute([process.execPath, cli, 'run', example.safe.scenario, '--include', example.safe.include, ...example.safe.budget], app, 0, { timeout: example.safe.timeoutMs });
+    const stop = example.safe.stop ?? 'frontier-exhausted';
+    const summary = execute([process.execPath, cli, 'run', example.safe.scenario, ...includes(example.safe.include), ...example.runOptions ?? [], ...example.safe.budget], app,
+      stop === 'frontier-exhausted' ? 0 : 4, { timeout: example.safe.timeoutMs });
     const counts = /: (\d+) attempted, (\d+) completed; violations: (\d+); ([a-z-]+)\./.exec(summary)?.slice(1);
-    expect(counts, summary).toEqual([String(example.safe.schedules), String(example.safe.schedules), '0', 'frontier-exhausted']);
+    expect(counts, summary).toEqual([String(example.safe.schedules), String(example.safe.schedules), '0', stop]);
   } finally { await rm(root, { recursive: true, force: true }); }
 }

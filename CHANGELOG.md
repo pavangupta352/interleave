@@ -67,6 +67,21 @@
   `CopyManager` through a Java process actor, with exact replay. The fetch-size
   cursor runs under the default profile because pgjdbc ends each batch with Sync.
 
+- asyncpg 0.32.0 and the SQLAlchemy 2.1.4 and Django 6.1.2 ORMs (over psycopg
+  3.3.6) as Python process actors on PostgreSQL 16, in
+  [asyncpg](examples/asyncpg/README.md), [SQLAlchemy](examples/sqlalchemy/README.md)
+  and [Django](examples/django/README.md) examples that the `python` CI job runs.
+  asyncpg needs `--protocol-profile flush-stages-v1`, because it prepares each
+  statement with a Flush. SQLAlchemy sends nine setup commands per connection, so
+  its repair is checked by a seeded search of 200 orders rather than a complete
+  frontier.
+- Active Record 8.1.4 (Ruby, over the pg gem 1.6.3) and GORM 1.31.2 (Go, with its
+  PostgreSQL driver 1.6.3) as process actors on PostgreSQL 16, in
+  [Active Record](examples/activerecord/README.md) and [GORM](examples/gorm/README.md)
+  examples that the `ruby` and `go` CI jobs run. Both send many setup and
+  transaction commands per connection, so their repairs are also checked by
+  seeded searches of 200 orders.
+
 ### Fixes
 
 - When an uncaught exception or unhandled promise rejection ends the scenario

@@ -330,14 +330,15 @@ cycles on the same portal, checked from a Java process actor with exact replay.
 ## External programs as actors
 
 `processActor` runs a separate program per actor and gives it only that actor's
-loopback endpoint. Five language examples are qualified against PostgreSQL 16
-through the same installed-package workflow: the packed Interleave is installed
-in a new application, the example folder is copied in, and its README commands
-run from the application root. In each, the unsafe program oversold (two orders
-for one unit), exact replay reproduced the same invariant failure, editing the
-included program made exact replay incompatible, and the repaired program passed
-a fully explored frontier with no violation. Every driver ran with its default
-statement handling.
+loopback endpoint. Ten examples in five languages are qualified against
+PostgreSQL 16 through the same installed-package workflow: the packed Interleave
+is installed in a new application, the example folder is copied in, and its
+README commands run from the application root. In each, the unsafe program
+oversold (two orders for one unit), exact replay reproduced the same invariant
+failure, editing the included program made exact replay incompatible, and the
+repaired program's search found no violation: a fully explored frontier, except
+for the bounded searches of the ORMs whose setup commands make the frontier too
+large. Every driver ran with its default statement handling.
 
 | Example | Driver and runtime | Repaired frontier |
 | --- | --- | ---: |
@@ -346,9 +347,15 @@ statement handling.
 | [PHP](../examples/php/README.md) | PDO `pdo_pgsql` on PHP 8.5.0 (libpq 18.1) | 619 schedules |
 | [Go](../examples/go/README.md) | pgx 5.11.0 on Go 1.27.1 | 295 schedules |
 | [Java](../examples/java/README.md) | pgjdbc 42.7.13 on OpenJDK 21.0.11, single-file source launcher | 183 schedules |
+| [asyncpg](../examples/asyncpg/README.md) | asyncpg 0.32.0 on Python 3.14, with `--protocol-profile flush-stages-v1` | 295 schedules |
+| [SQLAlchemy](../examples/sqlalchemy/README.md) | SQLAlchemy 2.1.4 ORM over psycopg 3.3.6 on Python 3.14 | 200 seeded orders, run budget (exit 4) |
+| [Django](../examples/django/README.md) | Django 6.1.2 ORM over psycopg 3.3.6 on Python 3.14 | 295 schedules |
+| [Active Record](../examples/activerecord/README.md) | Active Record 8.1.4 over the pg gem 1.6.3 on Ruby 4.0.5 | 200 seeded orders, run budget (exit 4) |
+| [GORM](../examples/gorm/README.md) | GORM 1.31.2 with its PostgreSQL driver 1.6.3 (pgx 5.10.0) on Go 1.27.1 | 200 seeded orders, run budget (exit 4) |
 
 The Ruby, PHP, Go and Java rows ran on macOS (arm64) with Node.js 24.7.0 and
-22.18.0. The
+22.18.0, and the asyncpg, SQLAlchemy, Django, Active Record and GORM rows with
+Node.js 24.7.0. The
 `python`, `ruby`, `php`, `go` and `java` CI jobs repeat the workflow on Ubuntu
 24.04 with Node.js 24.7.0 and PostgreSQL 16, using the runtimes their setup
 actions install (Python 3.13, Ruby 4.0.5, PHP 8.5, Go 1.27.1 and Temurin Java
@@ -365,6 +372,25 @@ statement handling decides how many steps an actor takes:
   closes it in a third when the PHP statement object is released.
 - pgjdbc sets `application_name` with a simple query after connecting and, with
   autocommit off, sends `BEGIN` as its own simple query.
+- asyncpg prepares each statement with Parse, Describe and Flush, waits for the
+  answer, and then executes it with Bind, Execute and Sync, with a row limit for
+  `fetchval`. The default profile refuses the Flush and `describe-flush-v1`
+  refuses the row limit, so it needs `flush-stages-v1`, which records the
+  prepare and the execution as two steps.
+- SQLAlchemy sends nine setup commands on each new connection (server version,
+  schema, isolation level, `standard_conforming_strings`, a type lookup inside a
+  savepoint, and the surrounding `BEGIN` and `ROLLBACK`), so two actors have far
+  more orders than a search can finish; its repair is checked with a seeded
+  search of 200 orders.
+- Django sets the connection's time zone with `set_config` before the first
+  query and, in autocommit mode, sends each ORM call as one statement.
+- Active Record sends twelve setup commands on each new connection (session
+  settings, type lookups, `SHOW search_path` and the table's schema), three more
+  the first time it touches another table, and prepares each model query before
+  executing it; its repair is checked with a seeded search of 200 orders.
+- GORM's PostgreSQL driver sends `-- ping` twice when it opens, prepares each
+  statement in its own cycle as pgx does, and wraps each write in `begin` and
+  `commit`; its repair is checked with a seeded search of 200 orders.
 
 A cycle that only prepares or closes a statement executes nothing: it completes
 without a command tag and is recorded with that statement's text. Each extra
@@ -388,7 +414,7 @@ Not qualified: these examples on PostgreSQL 17 and 18,
 Windows, other driver modes (pgx's other query execution modes and pools,
 pgjdbc after `prepareThreshold` switches to server-prepared statements, PDO
 emulated prepares, `pdo_pgsql` built against libpq older than 17), ORMs on these
-drivers, programs that open more than one command-producing connection per
+drivers other than SQLAlchemy, Django, Active Record and GORM, programs that open more than one command-producing connection per
 actor, and regression exports of language actors. Other clients, such as Npgsql,
 are expected to work when they read `DATABASE_URL` or the libpq `PG*` variables
 and stay within the qualified protocol subset, which includes pipelined cycles

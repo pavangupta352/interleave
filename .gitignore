@@ -19,5 +19,9 @@ test-results/
 .playwright-mcp/
 # Language example build outputs and downloads
 examples/ruby/vendor/
+examples/activerecord/vendor/
+__pycache__/
+.venv/
 examples/go/bin/
+examples/gorm/bin/
 examples/java/lib/
