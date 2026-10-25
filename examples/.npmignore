@@ -3,3 +3,7 @@ node_modules/
 ruby/vendor/
 go/bin/
 java/lib/
+activerecord/vendor/
+gorm/bin/
+.venv/
+__pycache__/

@@ -143,7 +143,7 @@ export class FrontendAssembler {
     if (bind.cstring().toString('hex') !== prefix.statementName) throw new Error('Unsupported profile: continuation Bind must reference the prefix statement');
     const execute = new Reader(frames[1]!);
     if (execute.cstring().toString('hex') !== portal) throw new Error('Unsupported profile: continuation Execute must reference the bound portal');
-    if (execute.i32() !== 0) throw new Error('Unsupported profile: staged Execute requires an unlimited row count');
+    if (execute.i32() !== 0) throw new Error('Unsupported profile: describe-flush-v1 requires an unlimited row count on the staged Execute; select protocol profile flush-stages-v1 (protocolProfile, or --protocol-profile on the CLI) for limited Executes');
     execute.done();
     let unit: FrontendUnit | undefined;
     for (const frame of frames) unit = this.accept(frame);
@@ -286,7 +286,7 @@ export class FrontendCycleBuffer {
       if (!this.frames.length || frame.length !== 5) throw new Error('Unsupported profile: Flush without pending extended messages');
     } else if (type === 'H') {
       if (!this.staged) throw new Error('Unsupported profile: early Flush-dependent extended query; use complete cycles ending in Sync, or select protocol profile flush-stages-v1 (protocolProfile, or --protocol-profile on the CLI)');
-      if (this.hasPrefix || this.frames.length !== 2 || this.frames[0]![0] !== 80 || this.frames[1]![0] !== 68 || frame.length !== 5) throw new Error('Unsupported profile: early Flush requires one Parse/Describe prefix; select flush-stages-v1 for other Flush stages');
+      if (this.hasPrefix || this.frames.length !== 2 || this.frames[0]![0] !== 80 || this.frames[1]![0] !== 68 || frame.length !== 5) throw new Error('Unsupported profile: describe-flush-v1 accepts only one Parse/Describe prefix before Flush; select protocol profile flush-stages-v1 (protocolProfile, or --protocol-profile on the CLI) for other Flush stages');
     }
     if ('dcf'.includes(type)) throw new Error('Unsupported profile: COPY data outside COPY FROM STDIN');
     if (type === 'Q') {

@@ -373,6 +373,9 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
       const yields = (lane: LaneState): boolean => lane.running?.client === true
         && [...lanes.values()].some(other => other !== lane && other.actor === lane.actor && !other.running && other.queue.length > 0);
       if (pendingCancels || [...lanes.values()].some(lane => lane.running && !lane.running.blocked && !yields(lane))) { laneWait = undefined; await pause(); continue; }
+      // While such a COPY runs, only its own actor's other connections may start a command.
+      const yielding = new Set([...lanes.values()].filter(lane => lane.running && !lane.running.blocked && yields(lane)).map(lane => lane.actor));
+      const admitted = (lane: Lane): boolean => yielding.size === 0 || yielding.has(lane.actor);
       const allReady = names.every(actor => settled.has(actor) || active(actor));
       if (!allReady) { laneWait = undefined; await pause(); continue; }
       if (multi) {
@@ -383,7 +386,7 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
           && !lane.queue.length && !lane.running && !lane.closed && !settled.has(lane.actor));
         if (settling.length) { await pause(Math.max(1, Math.ceil(LANE_SETTLE_MS - (now - Math.min(...settling.map(lane => lane.activityAt!)))))); continue; }
       }
-      const availableLanes = current.filter(lane => lane.head !== undefined && !lane.running);
+      const availableLanes = current.filter(lane => lane.head !== undefined && !lane.running && admitted(lane));
       if (!availableLanes.length) { await pause(); continue; }
       if (result.trace.length >= maxSteps) throw new Interrupted('inconclusive', `Execution reached its ${maxSteps}-step limit`);
       const first = mode === 'replay' ? options.replay!.trace[result.trace.length] : undefined;
@@ -408,7 +411,11 @@ async function execute(input: Scenario, options: RunOptions, providedDatabase?: 
         const members = expectedGroup ?? choice;
         if (!members) chosen.push(fairLane(names, availableLanes, lastActor, lastConnection));
         // Resolve members in order; a later member cannot take a lane chosen earlier.
-        const view = current.map(lane => ({ ...lane }));
+        const view = current.map(lane => {
+          if (admitted(lane)) return { ...lane };
+          const { head: _held, ...rest } = lane;
+          return rest;
+        });
         // Replay stops preferring the recorded generation once waiting has made no progress.
         const patient = !(laneWait !== undefined && laneWaitEpoch === runtimeEpoch && performance.now() - laneWaitSince >= laneWaitLimit);
         for (const [index, member] of (members ?? []).entries()) {

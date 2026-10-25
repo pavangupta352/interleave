@@ -384,7 +384,7 @@ export async function createProxy(options: ProxyOptions): Promise<ActorProxy> {
         // cycle. Buffered commands before ReadyForQuery reserve ownership too,
         // but authentication and Terminate never turn an auxiliary into an owner.
         if (!multiProducer) {
-          if (commandOwner && commandOwner !== session) throw new Error('Unsupported profile: only one live command-producing connection per actor is supported; close the previous command connection before another sends commands, or select the multi-producer-v1 connection profile');
+          if (commandOwner && commandOwner !== session) throw new Error('Unsupported profile: only one live command-producing connection per actor is supported; close the previous command connection before another sends commands, or select the multi-producer-v1 connection profile (connectionProfile, or --connection-profile on the CLI)');
           commandOwner = session;
         }
         const unit = cycles.accept(frame);

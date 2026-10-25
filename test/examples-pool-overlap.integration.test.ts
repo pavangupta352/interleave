@@ -45,8 +45,17 @@ test('the pool and overlap examples behave as their READMEs state', { timeout: 9
     expect(recorded.limits.connectionProfile).toBe('multi-producer-v1');
     expect(recorded.failure?.message).toMatch(/Every pooled increment must be retained/);
     expect(new Set(recorded.trace.map(step => `${step.actor}#${step.connection}`)).size).toBe(4);
-    const replayed = parseRunArtifact(JSON.parse(execute([process.execPath, cli, 'replay', 'pool/scenario.mjs', poolArtifact, '--json'], app, 1)));
-    expect(replayed.failure?.fingerprint).toBe(recorded.failure?.fingerprint);
+    // As the README says, a pool can route a later query differently; replay then
+    // reports incompatible (exit 3) for that reason, and a rerun repeats the failure.
+    let replayed: ReturnType<typeof parseRunArtifact> | undefined;
+    for (let attempt = 0; attempt < 3 && replayed?.outcome !== 'violation'; attempt++) {
+      const result = spawnSync(process.execPath, [cli, 'replay', 'pool/scenario.mjs', poolArtifact, '--json'],
+        { cwd: app, encoding: 'utf8', env: { ...process.env, NODE_OPTIONS: '', TEST_DATABASE_URL: databaseUrl } });
+      expect([1, 3]).toContain(result.status);
+      replayed = parseRunArtifact(JSON.parse(result.stdout));
+      if (result.status === 3) expect(replayed.reason).toMatch(/identity changed/);
+    }
+    expect(replayed!.failure?.fingerprint).toBe(recorded.failure?.fingerprint);
     const reduced = JSON.parse(execute([process.execPath, cli, 'minimize', 'pool/scenario.mjs', poolArtifact, '--json'], app, 1));
     expect(reduced.stopReason).toBe('locally-minimal');
     execute([process.execPath, cli, 'report', poolArtifact, '--out', join(root, 'pool.html')], app, 0);
