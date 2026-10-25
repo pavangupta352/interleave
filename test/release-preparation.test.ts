@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 import { expect, test } from 'vitest';
 // @ts-expect-error Release tooling is a native Node ESM script.
@@ -104,5 +105,15 @@ test('rejects unsafe, special or private source tree entries while allowing work
   for (const entry of [{ path: '../outside', mode: '100644' }, { path: '.local/log', mode: '100644' },
     { path: 'link', mode: '120000' }, { path: 'submodule', mode: '160000' }, { path: 'node_modules/pg/index.js', mode: '100644' }]) {
     expect(() => validateSourcePaths([entry])).toThrow(/unsafe|private|ordinary|managed/);
+  }
+});
+
+// Vitest resolves `.js` imports to TypeScript sources, but the release job runs these
+// scripts with plain Node, which loads the TypeScript modules they import by stripping
+// types and resolves their imports exactly as written.
+test('the release scripts load under plain Node', () => {
+  for (const script of ['scripts/prepare-release.mjs', 'scripts/release-archive.mjs']) {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(`./${script}`)})`], { encoding: 'utf8', cwd: new URL('..', import.meta.url) });
+    expect(result.status, result.stderr).toBe(0);
   }
 });

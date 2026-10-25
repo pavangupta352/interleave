@@ -1,8 +1,26 @@
 import { constants } from 'node:fs';
-import { lstat, open } from 'node:fs/promises';
+import { lstat, open, type FileHandle } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { gunzipSync } from 'node:zlib';
-import { openNoFollow } from './source-identity.js';
+
+// The release script loads this module on its own, so it keeps its own copy of
+// source identity's no-follow open. Windows has no O_NOFOLLOW: there the opened
+// file is checked against an lstat of its path.
+async function openNoFollow(path: string): Promise<FileHandle> {
+  if (constants.O_NOFOLLOW !== undefined) return open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const loop = (reason: string) => Object.assign(new Error(`ELOOP: ${reason}, open '${path}'`), { code: 'ELOOP' });
+  const checked = await lstat(path);
+  if (checked.isSymbolicLink()) throw loop('symbolic link');
+  const handle = await open(path, constants.O_RDONLY);
+  try {
+    const opened = await handle.stat();
+    if (opened.dev !== checked.dev || opened.ino !== checked.ino) throw loop('path changed while opening');
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
 
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
