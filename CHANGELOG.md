@@ -4,6 +4,9 @@
 
 ### Documentation
 
+- `@pavangupta352/interleave` is on npm from 0.3.1, so the README and getting
+  started install from the registry first, with the release archive as the
+  alternative, and the CI guide's export example uses the registry route.
 - The API reference's scenario and the application example give their clients an
   `'error'` listener, as the README and the `init` scaffold do, so a replay that
   stops mid-run reports its outcome instead of a harness error.

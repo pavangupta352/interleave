@@ -19,7 +19,7 @@ releases as each coherent set of work lands, starting with 0.1.0.
 | Package / executable | `@pavangupta352/interleave` / `interleave` |
 | Version | `0.3.1` |
 | Qualified source | `6bb23b1`, tag `v0.3.1`; [tag CI run 40177590284](https://github.com/pavangupta352/interleave/actions/runs/40177590284) passed all 82 jobs, and the exact archive passed consumer acceptance on Node.js 22.18.0, 24.7.0 and 26.12.1 ([validation](docs/validation.md)) |
-| Release state | [v0.3.1 on GitHub](https://github.com/pavangupta352/interleave/releases/tag/v0.3.1) with the npm archive, source archive, manifest and `SHA256SUMS` (25 October 2026), after [v0.3.0](https://github.com/pavangupta352/interleave/releases/tag/v0.3.0), [v0.2.1](https://github.com/pavangupta352/interleave/releases/tag/v0.2.1) and [v0.1.0](https://github.com/pavangupta352/interleave/releases/tag/v0.1.0). The `v0.2.0` tag was never released. npm publication is pending the owner's `npm login` for the first version; after that, the publish workflow sends each release's verified archive to npm. |
+| Release state | [v0.3.1 on GitHub](https://github.com/pavangupta352/interleave/releases/tag/v0.3.1) with the npm archive, source archive, manifest and `SHA256SUMS` (25 October 2026), after [v0.3.0](https://github.com/pavangupta352/interleave/releases/tag/v0.3.0), [v0.2.1](https://github.com/pavangupta352/interleave/releases/tag/v0.2.1) and [v0.1.0](https://github.com/pavangupta352/interleave/releases/tag/v0.1.0); the same 0.3.1 archive is [`@pavangupta352/interleave` on npm](https://www.npmjs.com/package/@pavangupta352/interleave). The `v0.2.0` tag was never released, and earlier versions are not on npm. |
 
 ## What works
 
@@ -59,11 +59,11 @@ releases as each coherent set of work lands, starting with 0.1.0.
 
 | Workstream | Next deliverable |
 | --- | --- |
-| Release 0.1.0 | Released on GitHub with checksums; npm publication of the same archive after the owner's `npm login` |
-| Release 0.2.1 | Released on GitHub with checksums after tag CI and consumer acceptance of the exact archive; npm publication after the owner's `npm login` |
-| Release 0.3.0 | Released on GitHub with checksums after tag CI and consumer acceptance of the exact archive; npm publication after the owner's `npm login` |
+| Release 0.1.0 | Released on GitHub with checksums |
+| Release 0.2.1 | Released on GitHub with checksums after tag CI and consumer acceptance of the exact archive |
+| Release 0.3.0 | Released on GitHub with checksums after tag CI and consumer acceptance of the exact archive |
 | Release 0.3.1 | Released on GitHub with checksums after tag CI and consumer acceptance of the exact archive on Node.js 22.18, 24.7 and 26.12 (npm 12) |
-| npm publication | The owner publishes the first version after `npm login` and adds the trusted publisher; the publish workflow then publishes each release's verified archive |
+| npm publication | 0.3.1 is on npm, published by hand from the accepted archive. Next: the owner adds the trusted publisher, after which the publish workflow publishes each release's verified archive |
 | Prisma export | Portable export for Prisma's generated client |
 | Pool replay | Exact replay of a pool that routes a later statement to a different connection stays `incompatible`. Exchanging two connections' bindings when their recorded commands match was built and rejected in review: matching commands and result summaries do not show that two sessions hold the same state (sequence `currval`, advisory locks, temporary tables), so it could turn a mismatch into a false match. Supporting it needs evidence of session state |
 | Hosted databases | Restricted roles, provider allocation, mutual TLS, channel binding, host-name overrides |

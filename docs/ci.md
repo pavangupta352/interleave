@@ -18,15 +18,15 @@ export bundles them:
 
 ```sh
 npx --no-install interleave export application/scenario.mjs application-reduced.json \
-  --project-root . --runtime-archive "$interleave_archive" --out counter-regression
+  --project-root . --out counter-regression
 ```
 
-`interleave_archive` is the absolute path of the archive you installed: the
-[release file](getting-started.md#install-a-release) or the
-[source build](getting-started.md#install-a-source-build-into-an-application).
-If you opened a new shell, set it to that same retained file. When Interleave was
-installed from the npm registry, omit `--runtime-archive`; export downloads the
-exact locked archive from `registry.npmjs.org` and checks its integrity. Export
+With Interleave installed from the npm registry, export downloads the exact locked
+archive from `registry.npmjs.org` and checks its integrity. If you installed from an
+archive file instead, the [release file](getting-started.md#install-the-release-archive-instead)
+or a [source build](getting-started.md#install-a-source-build-into-an-application),
+add `--runtime-archive "$interleave_archive"` with the absolute path of that retained
+file; if you opened a new shell, set `interleave_archive` to it again. Export
 verifies the archive's bytes against the recorded lock and runtime; a newly packed
 archive is not an interchangeable replacement. Export requires a completed invariant violation
 and does not need PostgreSQL or execute the application.

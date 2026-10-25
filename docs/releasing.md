@@ -80,5 +80,8 @@ maintainer therefore publishes the first version by hand (`npm login`, then
 `npm publish <archive> --access public` with the accepted archive) and then adds the
 trusted publisher in the package settings on npmjs.com: GitHub Actions, user
 `pavangupta352`, repository `interleave`, workflow `publish.yml`, environment `npm`,
-with direct publishing (`npm publish`) allowed. Until the package exists, the
-workflow checks the archive and skips the publish.
+with direct publishing (`npm publish`) allowed. npm 12 can make the same setting
+from the command line, with a security-key approval:
+`npm trust github @pavangupta352/interleave --file publish.yml --repo pavangupta352/interleave --env npm --allow-publish`.
+Until the package exists, the workflow checks the archive and skips the publish.
+Version 0.3.1 was the first one published by hand.

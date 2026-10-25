@@ -80,8 +80,24 @@ Node.js 26.12.1 and npm 12.2.1. Publishing the release started
 [publish run 40183139172](https://github.com/pavangupta352/interleave/actions/runs/40183139172):
 it found the tag's successful CI run, rebuilt the tagged source on GitHub's runner,
 matched the release archive's package contents and skipped the npm publish because
-the package is not on npm yet. npm publication of this archive is pending the
-owner's registry login.
+the package was not on npm yet.
+
+### npm publication
+
+The owner published this archive to npm by hand on 25 October 2026, approving the
+login and the publish with a security key. The registry's `dist.integrity` for
+`@pavangupta352/interleave@0.3.1` equals the archive's integrity above, and the
+version carries the `latest` dist-tag with 501 files. Installed from the registry
+on macOS arm64, with npm's integrity recorded in each lock:
+
+- Node.js 26.12.1 with npm 12.2.1 and 24.7.0 with npm 11.5.1: `init` and install
+  from npm, `doctor --docker`, the scaffold race (exit 1) and its report, then an
+  export without `--runtime-archive`, which downloaded the archive from the
+  registry, installed offline and repeated the failure on replay (exit 1).
+- Node.js 22.18.0 with npm 10.9.3: the same install, `doctor`, race and report.
+
+The trusted publisher for the publish workflow is not configured yet, so later
+versions still need the owner's setup described in [preparing a release](releasing.md).
 
 ## 0.3.0 release qualification (25 October 2026)
 

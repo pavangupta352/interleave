@@ -72,9 +72,9 @@ language, TypeORM and browser jobs each use a single Node.js version.
 
 npm 12 changed two things Interleave relies on:
 
-- It refuses to install a package from a URL (`EALLOWREMOTE`). Install a release
-  archive from a downloaded file, as the README and
-  [getting started](getting-started.md#install-a-release) do.
+- It refuses to install a package from a URL (`EALLOWREMOTE`). Install from the
+  npm registry, or download a release archive and install the file, as
+  [getting started](getting-started.md#install-the-release-archive-instead) shows.
 - `npm pack --json` prints an object keyed by package name instead of an array.
   Export reads both forms from 0.3.1 on. In 0.3.0, an export that packs the
   installed runtime itself, rather than bundling the archive given with
