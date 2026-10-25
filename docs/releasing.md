@@ -35,7 +35,12 @@ records that later installed database workflow for one exact archive on Node.js
 does not establish acceptance for a future candidate.
 
 To check a supplied archive against a fresh pair of builds, use its path with
-`--archive` and choose another new output directory. To prepare an existing version
+`--archive` and choose another new output directory. The comparison is of compressed
+bytes, which depend on the machine: Node.js's bundled zlib picks CPU-specific code,
+so the v0.3.0 archive built on GitHub's Linux x64 runner and a rebuild on Apple
+silicon hold byte-identical tar streams but differ once compressed. Run `--archive`
+on the platform that built the archive, or compare the output of `gzip -dc` for
+both archives. To prepare an existing version
 tag, replace `--ref` with `--tag vX.Y.Z`; the tag must match both package and lockfile
 versions. The tool does not create tags or publish packages.
 
@@ -57,9 +62,10 @@ does not replace execution or source review.
 Publishing the GitHub release starts the [publish workflow](../.github/workflows/publish.yml).
 It downloads the release's npm archive and `SHA256SUMS`, checks the hash, the
 package name and that the version matches the tag, and then runs the release script
-with `--tag` and `--archive`: the archive must be byte-identical to two fresh builds
-of the tagged source, because a checksum file from the same release cannot vouch for
-it. A separate job, the only one with npm's OIDC permission, downloads the archive
+with `--tag`: the archive must hold exactly the package that two fresh builds of the
+tagged source produce, because a checksum file from the same release cannot vouch
+for it. The comparison uses the uncompressed tar streams, since compressed bytes
+depend on the machine (see below). A separate job, the only one with npm's OIDC permission, downloads the archive
 again, checks it against the verified hash and publishes it with npm trusted
 publishing, so no npm token is stored. It then checks that the registry's integrity
 hash matches the archive. To publish an existing release, run

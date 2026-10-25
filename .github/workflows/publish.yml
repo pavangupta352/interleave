@@ -80,15 +80,19 @@ jobs:
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
       # SHA256SUMS comes from the same release as the archive, so it cannot vouch for it.
-      # The release script builds the tagged source twice and requires the supplied
-      # archive to match those bytes. GITHUB_ACTIONS is cleared because this run does not
-      # carry the tag CI's job conclusions that the script records when preparing assets.
-      - name: Rebuild the tagged source and compare the archive bytes
+      # The release script builds the tagged source twice and checks that both builds
+      # agree; the release archive must then hold the same package. Compressed bytes
+      # depend on the machine's zlib, so the uncompressed tar streams are compared.
+      # GITHUB_ACTIONS is cleared because this run does not carry the tag CI's job
+      # conclusions that the script records when preparing release assets.
+      - name: Rebuild the tagged source and compare the package contents
         env:
           ARCHIVE: ${{ steps.archive.outputs.archive }}
         run: |
-          GITHUB_ACTIONS=false node scripts/prepare-release.mjs --tag "$RELEASE_TAG" \
-            --archive "$RUNNER_TEMP/release/$ARCHIVE" --out "$RUNNER_TEMP/rebuild"
+          GITHUB_ACTIONS=false node scripts/prepare-release.mjs --tag "$RELEASE_TAG" --out "$RUNNER_TEMP/rebuild"
+          gzip -dc "$RUNNER_TEMP/rebuild/$ARCHIVE" > "$RUNNER_TEMP/rebuilt.tar"
+          gzip -dc "$RUNNER_TEMP/release/$ARCHIVE" > "$RUNNER_TEMP/released.tar"
+          cmp "$RUNNER_TEMP/rebuilt.tar" "$RUNNER_TEMP/released.tar"
 
   publish:
     name: Publish the verified archive to npm

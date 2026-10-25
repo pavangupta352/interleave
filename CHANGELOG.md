@@ -15,8 +15,9 @@
   Node.js 26 jobs use npm 12.2.1, so the installed-package workflows run with the
   current npm.
 - A publish workflow sends a GitHub release's npm archive to npm with trusted
-  publishing once the archive is byte-identical to two fresh builds of the tagged
-  source, and then checks the registry's integrity hash against it.
+  publishing once the archive holds exactly the package that two fresh builds of
+  the tagged source produce, and then checks the registry's integrity hash against
+  it.
 
 ### Documentation
 
