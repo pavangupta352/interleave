@@ -1,25 +1,26 @@
 name: Publish to npm
 
-# Publishes the npm archive attached to a GitHub release once it is byte-identical to
-# fresh builds of the tagged source. npm trusted publishing (OIDC) authenticates the
-# publish job, so no npm token is stored anywhere. The verify job, which installs and
-# runs the build's dev dependencies, gets no OIDC permission.
+# Publishes the npm archive attached to a GitHub release once the tag's CI run has
+# passed and the archive holds exactly the package that fresh builds of the tagged
+# source produce. npm trusted publishing (OIDC) authenticates the publish job, so no
+# npm token is stored anywhere. The verify job, which installs and runs the build's
+# dev dependencies, gets no OIDC permission.
 #
 # One-time owner setup: publish the first version by hand (npm login, then
 # npm publish <archive> --access public), then add a trusted publisher in the
-# package's settings on npmjs.com with user pavangupta352, repository interleave,
-# workflow publish.yml and environment npm. Until the package exists on npm, this
-# workflow verifies the archive and skips the publish.
+# package's settings on npmjs.com: GitHub Actions, user pavangupta352, repository
+# interleave, workflow publish.yml, environment npm, with direct publishing
+# (npm publish) allowed. Until the package exists on npm, this workflow verifies the
+# archive and skips the publish.
+#
+# Publishing a GitHub release runs this workflow on the release's tag. To run it for
+# an existing release, start it on the tag so that the provenance names the tagged
+# commit: gh workflow run publish.yml --ref vX.Y.Z
 
 on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag whose archive to publish, such as v0.3.1
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -29,24 +30,26 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  RELEASE_TAG: ${{ github.ref_name }}
   PACKAGE: '@pavangupta352/interleave'
 
 jobs:
   verify:
-    name: Rebuild the tag and compare with the release archive
+    name: Check the tag's CI and rebuild the release archive
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
       archive: ${{ steps.archive.outputs.archive }}
       sha256: ${{ steps.archive.outputs.sha256 }}
       version: ${{ steps.archive.outputs.version }}
+      dist_tag: ${{ steps.version.outputs.dist_tag }}
     steps:
-      - name: Check the tag name
-        run: '[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::not a version tag"; exit 1; }'
+      - name: Check that the workflow runs on a version tag
+        run: |
+          [ "$GITHUB_REF_TYPE" = tag ] && [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
+            || { echo "::error::run this workflow on a version tag: gh workflow run publish.yml --ref vX.Y.Z"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -54,6 +57,29 @@ jobs:
           node-version: '24.7.0'
       - name: Verify the canonical packaging toolchain
         run: test "$(npm --version)" = 11.5.1
+      - name: Check that the tag's CI run passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(git rev-parse "$RELEASE_TAG^{commit}")
+          passed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch "$RELEASE_TAG" --event push \
+            --json conclusion,headSha --jq "[.[] | select(.headSha == \"$commit\" and .conclusion == \"success\")] | length")
+          [ "$passed" -gt 0 ] || { echo "::error::no successful CI run for $RELEASE_TAG at $commit"; exit 1; }
+      - name: Choose the dist-tag and refuse a version older than npm's latest
+        id: version
+        run: |
+          version="${RELEASE_TAG#v}"
+          if [[ "$version" == *-* ]]; then
+            echo "dist_tag=next" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
+          latest=$(npm view "$PACKAGE" dist-tags.latest 2>/dev/null || true)
+          if [ -n "$latest" ] && [ "$latest" != "$version" ] \
+            && [ "$(printf '%s\n%s\n' "$latest" "$version" | sort -V | tail -n 1)" != "$version" ]; then
+            echo "::error::$version is older than $latest, the latest version on npm; publish it by hand with an explicit --tag"
+            exit 1
+          fi
       - name: Download the release's npm archive and SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,6 +133,7 @@ jobs:
       ARCHIVE: ${{ needs.verify.outputs.archive }}
       VERIFIED_SHA256: ${{ needs.verify.outputs.sha256 }}
       VERSION: ${{ needs.verify.outputs.version }}
+      DIST_TAG: ${{ needs.verify.outputs.dist_tag }}
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -133,13 +160,13 @@ jobs:
           if [ "$(npm view "$PACKAGE@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
             echo "::notice::$PACKAGE@$VERSION is already on npm"
           else
-            npm publish "$RUNNER_TEMP/release/$ARCHIVE" --access public --provenance
+            npm publish "$RUNNER_TEMP/release/$ARCHIVE" --access public --provenance --tag "$DIST_TAG"
           fi
       - name: Check that the registry serves the same bytes
         if: env.SKIPPED != '1'
         run: |
           want="sha512-$(openssl dgst -sha512 -binary "$RUNNER_TEMP/release/$ARCHIVE" | base64 --wrap=0)"
-          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
             got=$(npm view "$PACKAGE@$VERSION" dist.integrity 2>/dev/null || true)
             [ -n "$got" ] && break
             sleep 10

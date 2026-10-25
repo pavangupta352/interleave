@@ -38,7 +38,7 @@ jobs:
         run: npm ci
       - name: Use npm 12 with Node.js 26
         if: matrix.node == '26.12.1'
-        run: npm install --global npm@12.2.1 && npm --version
+        run: npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
       - name: Typecheck, test real PostgreSQL and build the package
         run: npm run check
       - name: Inspect the publishable package
@@ -66,7 +66,7 @@ jobs:
         run: npm ci
       - name: Use npm 12 with Node.js 26
         if: matrix.node == '26.12.1'
-        run: npm install --global npm@12.2.1 && npm --version
+        run: npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
       - name: Qualify the explicit pgvector fixture and application profile
         run: npm run test:integration -- pgvector
 
@@ -90,7 +90,7 @@ jobs:
         run: npm ci
       - name: Use npm 12 with Node.js 26
         if: matrix.node == '26.12.1'
-        run: npm install --global npm@12.2.1 && npm --version
+        run: npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
       - name: Qualify managed setup, replay, reduction and interruption against real Docker
         run: npm run test:managed
 
@@ -117,7 +117,7 @@ jobs:
         run: npm ci
       - name: Use npm 12 with Node.js 26
         if: matrix.node == '26.12.1'
-        run: npm install --global npm@12.2.1 && npm --version
+        run: npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
       - name: Qualify verified TLS across every connection role with owned TLS-only servers
         run: npm run test:tls
 
@@ -347,7 +347,7 @@ jobs:
           npm run build
       - name: Use npm 12 with Node.js 26
         if: matrix.node == '26.12.1'
-        run: npm install --global npm@12.2.1 && npm --version
+        run: npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
       - name: Pack the runtime under test before installing the example
         run: |
           mkdir -p "$RUNNER_TEMP/runtime"
@@ -416,7 +416,7 @@ jobs:
           npm run build
       - name: Use npm 12 with Node.js 26
         if: matrix.node == '26.12.1'
-        run: npm install --global npm@12.2.1 && npm --version
+        run: npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
       - name: Pack the runtime under test before installing the example
         run: |
           mkdir -p "$RUNNER_TEMP/runtime"
@@ -477,7 +477,9 @@ jobs:
         run: npm ci
       - name: Use npm 12 with Node.js 26
         if: matrix.node == '26.12.1'
-        run: npm install --global npm@12.2.1 && npm --version
+        run: |
+          npm install --global npm@12.2.1
+          if ((npm --version) -ne '12.2.1') { throw "npm $(npm --version) is active, not 12.2.1" }
       - name: Typecheck, build and run the unit suite
         run: |
           npm run typecheck
@@ -515,7 +517,7 @@ jobs:
         run: npm ci
       - name: Use npm 12 with Node.js 26
         if: matrix.node == '26.12.1'
-        run: npm install --global npm@12.2.1 && npm --version
+        run: npm install --global npm@12.2.1 && test "$(npm --version)" = 12.2.1
       - name: Typecheck, build and run the unit suite
         run: |
           npm run typecheck

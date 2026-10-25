@@ -59,21 +59,26 @@ does not replace execution or source review.
 
 ## Publishing to npm
 
-Publishing the GitHub release starts the [publish workflow](../.github/workflows/publish.yml).
-It downloads the release's npm archive and `SHA256SUMS`, checks the hash, the
-package name and that the version matches the tag, and then runs the release script
-with `--tag`: the archive must hold exactly the package that two fresh builds of the
-tagged source produce, because a checksum file from the same release cannot vouch
-for it. The comparison uses the uncompressed tar streams, since compressed bytes
-depend on the machine (see below). A separate job, the only one with npm's OIDC permission, downloads the archive
-again, checks it against the verified hash and publishes it with npm trusted
-publishing, so no npm token is stored. It then checks that the registry's integrity
-hash matches the archive. To publish an existing release, run
-`gh workflow run publish.yml -f tag=vX.Y.Z`.
+Publishing the GitHub release starts the [publish workflow](../.github/workflows/publish.yml)
+on the release's tag. It requires a successful CI run of the tagged commit, downloads
+the release's npm archive and `SHA256SUMS`, checks the hash, the package name and
+that the version matches the tag, and then runs the release script with `--tag`: the
+archive must hold exactly the package that two fresh builds of the tagged source
+produce, because a checksum file from the same release cannot vouch for it. The
+comparison uses the uncompressed tar streams, since compressed bytes depend on the
+machine, as described above for `--archive`. A separate job, the only one with npm's
+OIDC permission, downloads the archive again, checks it against the verified hash
+and publishes it with npm trusted publishing, so no npm token is stored. It then
+checks that the registry's integrity hash matches the archive. A prerelease version
+goes to the `next` dist-tag; a version older than npm's `latest` is refused, to be
+published by hand with an explicit tag. To publish an existing release, start the
+workflow on its tag, so that the provenance names the tagged commit:
+`gh workflow run publish.yml --ref vX.Y.Z`.
 
 npm accepts a trusted publisher only for a package that already exists. A
 maintainer therefore publishes the first version by hand (`npm login`, then
 `npm publish <archive> --access public` with the accepted archive) and then adds the
-trusted publisher in the package settings on npmjs.com: user `pavangupta352`,
-repository `interleave`, workflow `publish.yml`, environment `npm`. Until the
-package exists, the workflow checks the archive and skips the publish.
+trusted publisher in the package settings on npmjs.com: GitHub Actions, user
+`pavangupta352`, repository `interleave`, workflow `publish.yml`, environment `npm`,
+with direct publishing (`npm publish`) allowed. Until the package exists, the
+workflow checks the archive and skips the publish.
