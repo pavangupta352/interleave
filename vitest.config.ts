@@ -22,8 +22,9 @@ export default defineConfig({
       // both refuse Windows with an explicit error. The packaged ORM test ends in an export.
       ...(process.platform === 'win32' ? ['test/**/*export*.test.ts', 'test/**/release-*.test.ts', 'test/ordinary-orm-packaged.integration.test.ts'] : []),
     ],
-    testTimeout: 20_000,
-    hookTimeout: 20_000,
+    // Starting a CLI or supervised worker process takes about three seconds on Windows runners.
+    testTimeout: process.platform === 'win32' ? 60_000 : 20_000,
+    hookTimeout: process.platform === 'win32' ? 60_000 : 20_000,
     maxWorkers: 2,
     fileParallelism: true,
   },
