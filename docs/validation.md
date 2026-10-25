@@ -87,7 +87,9 @@ the package was not on npm yet.
 The owner published this archive to npm by hand on 25 October 2026, approving the
 login and the publish with a security key. The registry's `dist.integrity` for
 `@pavangupta352/interleave@0.3.1` equals the archive's integrity above, and the
-version carries the `latest` dist-tag with 501 files. Installed from the registry
+version carries the `latest` dist-tag with 501 files. npm also lists `0.0.0-stage`,
+its own 347-byte "temporary package placeholder for staged publishing", created at
+the first publish attempt, which stopped for two-factor approval. Installed from the registry
 on macOS arm64, with npm's integrity recorded in each lock:
 
 - Node.js 26.12.1 with npm 12.2.1 and 24.7.0 with npm 11.5.1: `init` and install
