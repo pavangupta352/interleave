@@ -182,17 +182,20 @@ isolation tester on three historical bugs in Knex, node-pg-migrate and Sequelize
 Interleave needs Node.js 22.18 or later on Linux, macOS or Windows, and Docker if
 you use `--docker`.
 
-The package is not on npm yet. Install the archive attached to the
-[latest GitHub release](https://github.com/pavangupta352/interleave/releases/latest):
+The package is not on npm yet. Download the archive attached to the
+[latest GitHub release](https://github.com/pavangupta352/interleave/releases/latest)
+and install the file:
 
 ```sh
-npm install --save-dev https://github.com/pavangupta352/interleave/releases/download/v0.3.0/pavangupta352-interleave-0.3.0.tgz pg
+curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.3.0/pavangupta352-interleave-0.3.0.tgz
+npm install --save-dev "$PWD/pavangupta352-interleave-0.3.0.tgz" pg
 npx --no-install interleave doctor --docker
 ```
 
-`--no-install` runs the copy you just installed. [Getting started](docs/getting-started.md)
-checks the archive against the release's `SHA256SUMS` first and covers the source
-checkout. On npm the package will be `@pavangupta352/interleave`; the unscoped
+npm 12 refuses to install a package straight from a URL, so download the archive
+first and keep it next to `package.json`, which refers to it. `--no-install` runs
+the copy you just installed. [Getting started](docs/getting-started.md) checks the
+archive against the release's `SHA256SUMS` first and covers the source checkout. On npm the package will be `@pavangupta352/interleave`; the unscoped
 `interleave` package there is unrelated.
 
 ## Documentation

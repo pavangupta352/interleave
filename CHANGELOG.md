@@ -9,6 +9,12 @@
 - The refusals to replace an existing artifact or report name `--force` as well
   as `{ overwrite: true }`.
 
+### Documentation
+
+- The README installs the release archive from a downloaded file. npm 12 refuses
+  a package URL with `EALLOWREMOTE`, so the former one-line URL install failed
+  there; the file install works with npm 10, 11 and 12.
+
 ## 0.3.0 — 25 October 2026
 
 Interleave now forwards cancel requests, streams COPY, schedules cursors one batch
