@@ -5,6 +5,7 @@ import { incrementCounter } from './counter.mjs';
 
 async function increment({ connectionString }) {
   const client = new Client({ connectionString });
+  client.on('error', () => {}); // a dropped connection must not end the run
   await client.connect();
   try {
     return { value: await incrementCounter(client, 1) };

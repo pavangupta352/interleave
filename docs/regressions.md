@@ -144,7 +144,7 @@ missing optional package is rejected if the original lock would install it.
 Its fixed installation uses npm's hoisted layout, includes development/optional/
 peer dependencies, and disables lifecycle scripts. A lock requiring different
 installation flags needs another qualified profile. The current qualification
-uses npm 11.5.1 on POSIX Node installations. Export refuses to run on Windows.
+uses npm 10.9.3, 11.5.1 and 12.2.1 on POSIX Node installations. Export refuses to run on Windows.
 
 `--json` returns the destination, manifest fingerprint, selected files, and
 replay commands as argument arrays. Human output prints the same paths and

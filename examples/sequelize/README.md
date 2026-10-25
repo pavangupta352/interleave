@@ -1,6 +1,6 @@
 # Sequelize example
 
-This isolated example pins Sequelize 6.37.8 and node-postgres 8.23.0 with its own `package-lock.json`, separate from the root development dependencies. Each actor gets its own Sequelize instance whose pool holds one connection. Sequelize 6.37.8 declares Node.js `>=10`; the example was qualified on Node.js 22.18.0 and 24.7.0. The [Sequelize `findCreateFind` case study](../historical/sequelize-find-create-find/README.md), about `findCreateFind` inside PostgreSQL transactions in Sequelize 6.7.0, is separate from this example.
+This isolated example pins Sequelize 6.37.8 and node-postgres 8.23.0 with its own `package-lock.json`, separate from the root development dependencies. Each actor gets its own Sequelize instance whose pool holds one connection. Sequelize 6.37.8 declares Node.js `>=10`; the example was qualified on Node.js 22.18.0, 24.7.0 and 26.12.1. The [Sequelize `findCreateFind` case study](../historical/sequelize-find-create-find/README.md), about `findCreateFind` inside PostgreSQL transactions in Sequelize 6.7.0, is separate from this example.
 
 ## Use the actor helper
 
@@ -67,7 +67,7 @@ The commands Sequelize sends after startup:
 
 ## Qualification gate
 
-Run the gate from the repository root on Node.js 22.18.0, 24.7.0 or 26.12.1. It installs this example's lock and the Interleave archive under test into a new application under the evidence directory; the example's own `node_modules` is not used. The install needs npm registry access or a warm npm cache, and the export check downloads the locked archives from `registry.npmjs.org`.
+Run the gate from the repository root on Node.js 22.18.0, 24.7.0 or 26.12.1. The gate uses the npm inside the selected Node.js installation, which can differ from the `npm` on your PATH; to check npm 12, install it there with `npm install --global npm@12.2.1`. It installs this example's lock and the Interleave archive under test into a new application under the evidence directory; the example's own `node_modules` is not used. The install needs npm registry access or a warm npm cache, and the export check downloads the locked archives from `registry.npmjs.org`.
 
 ```sh
 npm ci --ignore-scripts

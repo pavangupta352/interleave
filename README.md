@@ -188,7 +188,7 @@ and install the file:
 
 ```sh
 curl -fLO https://github.com/pavangupta352/interleave/releases/download/v0.3.1/pavangupta352-interleave-0.3.1.tgz
-npm install --save-dev "$PWD/pavangupta352-interleave-0.3.1.tgz" pg
+npm install --save-dev "$PWD/pavangupta352-interleave-0.3.1.tgz" pg@8.23.0
 npx --no-install interleave doctor --docker
 ```
 

@@ -28,6 +28,7 @@ export default defineScenario({
 
 async function increment({ connectionString }) {
   const db = new Client({ connectionString });
+  db.on('error', () => {}); // a dropped connection must not end the run
   await db.connect();
   try {
     const { rows } = await db.query('SELECT n FROM counter');

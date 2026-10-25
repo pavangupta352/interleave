@@ -1,6 +1,6 @@
 # MikroORM example
 
-This isolated example pins MikroORM 6.6.17 (`@mikro-orm/core` and `@mikro-orm/postgresql`) and node-postgres 8.23.0 with its own `package-lock.json`, separate from the root development dependencies. Each actor gets its own MikroORM instance whose pool holds one connection. MikroORM 6.6.17 declares Node.js `>=18.12.0`; the example was qualified on Node.js 22.18.0 and 24.7.0.
+This isolated example pins MikroORM 6.6.17 (`@mikro-orm/core` and `@mikro-orm/postgresql`) and node-postgres 8.23.0 with its own `package-lock.json`, separate from the root development dependencies. Each actor gets its own MikroORM instance whose pool holds one connection. MikroORM 6.6.17 declares Node.js `>=18.12.0`; the example was qualified on Node.js 22.18.0, 24.7.0 and 26.12.1.
 
 `@mikro-orm/postgresql` 6.6.17 depends on exactly pg 8.20.0, which npm installs under `node_modules/@mikro-orm/postgresql/node_modules/pg`. MikroORM uses that copy only for `pg.TypeOverrides` and `escapeLiteral`. Connections are opened by Knex 3.2.10, an exact dependency of `@mikro-orm/knex` 6.6.17, which loads the application's pg 8.23.0. The gate checks that resolution.
 
@@ -55,7 +55,7 @@ MikroORM writes parameter values into the SQL before Knex runs it, so every appl
 
 ## Qualification gate
 
-Run the gate from the repository root on Node.js 22.18.0, 24.7.0 or 26.12.1. It installs this example's lock and the Interleave archive under test into a new application under the evidence directory; the example's own `node_modules` is not used. The install needs npm registry access or a warm npm cache, and the export check downloads the locked archives from `registry.npmjs.org`.
+Run the gate from the repository root on Node.js 22.18.0, 24.7.0 or 26.12.1. The gate uses the npm inside the selected Node.js installation, which can differ from the `npm` on your PATH; to check npm 12, install it there with `npm install --global npm@12.2.1`. It installs this example's lock and the Interleave archive under test into a new application under the evidence directory; the example's own `node_modules` is not used. The install needs npm registry access or a warm npm cache, and the export check downloads the locked archives from `registry.npmjs.org`.
 
 ```sh
 npm ci --ignore-scripts

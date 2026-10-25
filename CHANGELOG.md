@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- The API reference's scenario and the application example give their clients an
+  `'error'` listener, as the README and the `init` scaffold do, so a replay that
+  stops mid-run reports its outcome instead of a harness error.
+- The README installs node-postgres 8.23.0, the qualified version, next to the
+  release archive.
+- The export guide and the Sequelize, Knex, MikroORM and Prisma examples name the
+  npm and Node.js versions they were qualified with, and the gate instructions say
+  which npm a gate uses.
+
+### Testing and release
+
+- The publish workflow's verify job requests `actions: read` for listing the tag's
+  CI runs instead of relying on public access.
+
 ## 0.3.1 — 25 October 2026
 
 Interleave runs and is tested on Node.js 26 with npm 12, the current npm. Export

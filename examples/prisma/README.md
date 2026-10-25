@@ -201,7 +201,7 @@ stops at its one-run budget and the CLI exits 4. The gate requires
 An exhausted frontier describes the schedules that Interleave's search modeled,
 not every possible execution.
 
-Run the gate from the repository root with Node.js 22.18.0, 24.7.0 or 26.12.1 selected.
+Run the gate from the repository root with Node.js 22.18.0, 24.7.0 or 26.12.1 selected. The gate uses the npm inside the selected Node.js installation, which can differ from the `npm` on your PATH; to check npm 12, install it there with `npm install --global npm@12.2.1`.
 It needs registry access (or a warm npm cache) and Prisma's binary host for the
 schema engine:
 
